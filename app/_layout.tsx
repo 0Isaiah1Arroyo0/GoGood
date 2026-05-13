@@ -1,24 +1,46 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { useFonts } from 'expo-font';
+import {
+  Fraunces_300Light,
+  Fraunces_400Regular,
+  Fraunces_600SemiBold,
+  Fraunces_300Light_Italic,
+  Fraunces_400Regular_Italic,
+} from '@expo-google-fonts/fraunces';
+import * as SplashScreen from 'expo-splash-screen';
+import { ThemeProvider } from './context/theme';
+import { AuthProvider } from './context/auth';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
-
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const [loaded, error] = useFonts({
+    Fraunces_300Light,
+    Fraunces_400Regular,
+    Fraunces_600SemiBold,
+    Fraunces_300Light_Italic,
+    Fraunces_400Regular_Italic,
+  });
+
+  useEffect(() => {
+    if (loaded || error) SplashScreen.hideAsync();
+  }, [loaded, error]);
+
+  if (!loaded && !error) return null;
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
+    <ThemeProvider>
+      <AuthProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="auth/welcome" />
+          <Stack.Screen name="auth/login" />
+          <Stack.Screen name="auth/signup" />
+          <Stack.Screen name="auth/biometric" />
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

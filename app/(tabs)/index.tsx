@@ -1,17 +1,26 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard, LayoutAnimation, UIManager } from 'react-native';
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { StatusBar } from 'expo-status-bar';
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAuth } from '../context/auth';
+import { requestNotificationPermission, rescheduleExpiryNotifications } from '../lib/notifications';
+import { pushItems, pullItems } from '../lib/sync';
+import { useAppDrawer } from '../components/AppDrawer';
 
 type Badge = 'red' | 'amber' | 'green' | 'blue' | 'black';
 type Category = 'fridge' | 'freezer' | 'pantry';
-type SortBy = 'expiry' | 'expiryAsc' | 'alpha' | 'alphaDesc' | 'protein' | 'proteinAsc' | 'cal' | 'calAsc' | 'recent' | 'oldest' | 'category';
+type TabView  = 'fridge' | 'freezer' | 'pantry' | 'all';
+type SortBy   = 'expiry' | 'expiryAsc' | 'alpha' | 'alphaDesc' | 'protein' | 'proteinAsc' | 'cal' | 'calAsc' | 'qty' | 'qtyAsc' | 'recent' | 'oldest' | 'category';
 
 interface Item {
   id: number; icon: string; name: string; baseName: string; batch: number;
@@ -95,25 +104,30 @@ const FOOD_ICONS: Record<string, string> = {
   'walnut': '🥜', 'nut': '🥜',
   'honey': '🍯', 'syrup': '🍯', 'jam': '🫙', 'jelly': '🫙',
   'salt': '🧂',
-  'default': '🥗',
+  'default': '🥘',
 };
 
 const FOOD_CATEGORIES: Record<string, string> = {
-  // Meat — multi-word first so longest-match wins
+  // Meat — longest-match first
   'ground beef': 'Meat', 'corned beef': 'Meat', 'short rib': 'Meat', 'rib eye': 'Meat',
   'hot dog': 'Meat', 'ribeye': 'Meat', 'steak': 'Meat', 'beef': 'Meat', 'brisket': 'Meat',
-  'lamb': 'Meat', 'bison': 'Meat', 'veal': 'Meat', 'meatball': 'Meat', 'meatloaf': 'Meat',
+  'lamb chop': 'Meat', 'lamb': 'Meat', 'bison': 'Meat', 'veal': 'Meat',
+  'meatball': 'Meat', 'meatloaf': 'Meat', 'pork chop': 'Meat', 'pork loin': 'Meat',
   'pork': 'Meat', 'bacon': 'Meat', 'ham': 'Meat', 'sausage': 'Meat',
   'prosciutto': 'Meat', 'chorizo': 'Meat', 'salami': 'Meat', 'pepperoni': 'Meat',
   'bratwurst': 'Meat', 'liverwurst': 'Meat', 'mortadella': 'Meat',
   'pastrami': 'Meat', 'bologna': 'Meat', 'venison': 'Meat', 'ribs': 'Meat',
   'tenderloin': 'Meat', 'sirloin': 'Meat', 'chuck': 'Meat', 'flank': 'Meat',
-  'burger': 'Meat', 'hamburger': 'Meat',
+  'burger': 'Meat', 'hamburger': 'Meat', 'deli meat': 'Meat', 'lunch meat': 'Meat',
+  'pancetta': 'Meat', 'guanciale': 'Meat', 'oxtail': 'Meat', 'bone broth': 'Meat',
   // Poultry
   'chicken breast': 'Poultry', 'chicken thigh': 'Poultry', 'chicken wing': 'Poultry',
+  'chicken drumstick': 'Poultry', 'chicken tender': 'Poultry',
   'ground turkey': 'Poultry', 'turkey breast': 'Poultry', 'cornish hen': 'Poultry',
-  'chicken': 'Poultry', 'turkey': 'Poultry', 'duck': 'Poultry', 'quail': 'Poultry', 'goose': 'Poultry',
+  'chicken': 'Poultry', 'turkey': 'Poultry', 'duck': 'Poultry',
+  'quail': 'Poultry', 'goose': 'Poultry', 'pheasant': 'Poultry',
   // Fish & Seafood
+  'smoked salmon': 'Fish & Seafood', 'canned tuna': 'Fish & Seafood', 'canned salmon': 'Fish & Seafood',
   'salmon': 'Fish & Seafood', 'tuna': 'Fish & Seafood', 'tilapia': 'Fish & Seafood',
   'cod': 'Fish & Seafood', 'halibut': 'Fish & Seafood', 'trout': 'Fish & Seafood',
   'snapper': 'Fish & Seafood', 'swordfish': 'Fish & Seafood', 'catfish': 'Fish & Seafood',
@@ -122,31 +136,34 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'shrimp': 'Fish & Seafood', 'prawn': 'Fish & Seafood', 'lobster': 'Fish & Seafood',
   'crab': 'Fish & Seafood', 'scallop': 'Fish & Seafood', 'oyster': 'Fish & Seafood',
   'clam': 'Fish & Seafood', 'mussel': 'Fish & Seafood', 'squid': 'Fish & Seafood',
-  'octopus': 'Fish & Seafood', 'crawfish': 'Fish & Seafood',
+  'octopus': 'Fish & Seafood', 'crawfish': 'Fish & Seafood', 'pollock': 'Fish & Seafood',
+  'mackerel': 'Fish & Seafood', 'flounder': 'Fish & Seafood',
   // Dairy & Eggs
-  'cottage cheese': 'Dairy & Eggs', 'cream cheese': 'Dairy & Eggs',
+  'cottage cheese': 'Dairy & Eggs', 'cream cheese': 'Dairy & Eggs', 'string cheese': 'Dairy & Eggs',
   'greek yogurt': 'Dairy & Eggs', 'oat milk': 'Dairy & Eggs', 'almond milk': 'Dairy & Eggs',
   'soy milk': 'Dairy & Eggs', 'coconut milk': 'Dairy & Eggs', 'half and half': 'Dairy & Eggs',
   'heavy cream': 'Dairy & Eggs', 'sour cream': 'Dairy & Eggs', 'whipping cream': 'Dairy & Eggs',
+  'whipped cream': 'Dairy & Eggs', 'lactose free milk': 'Dairy & Eggs',
   'egg': 'Dairy & Eggs', 'milk': 'Dairy & Eggs', 'cheese': 'Dairy & Eggs',
   'butter': 'Dairy & Eggs', 'yogurt': 'Dairy & Eggs', 'cream': 'Dairy & Eggs',
   'cheddar': 'Dairy & Eggs', 'mozzarella': 'Dairy & Eggs', 'brie': 'Dairy & Eggs',
   'gouda': 'Dairy & Eggs', 'feta': 'Dairy & Eggs', 'ricotta': 'Dairy & Eggs',
   'provolone': 'Dairy & Eggs', 'gruyere': 'Dairy & Eggs', 'parmesan': 'Dairy & Eggs',
+  'swiss cheese': 'Dairy & Eggs', 'american cheese': 'Dairy & Eggs',
   'bocconcini': 'Dairy & Eggs', 'quark': 'Dairy & Eggs', 'buttermilk': 'Dairy & Eggs',
-  'kefir': 'Dairy & Eggs', 'ghee': 'Dairy & Eggs',
+  'kefir': 'Dairy & Eggs', 'ghee': 'Dairy & Eggs', 'margarine': 'Dairy & Eggs',
   // Vegetables
   'cherry tomato': 'Vegetables', 'sweet potato': 'Vegetables', 'sweet corn': 'Vegetables',
   'bell pepper': 'Vegetables', 'green bean': 'Vegetables', 'snap pea': 'Vegetables',
-  'bok choy': 'Vegetables', 'brussels': 'Vegetables',
+  'bok choy': 'Vegetables', 'brussels sprout': 'Vegetables', 'brussels': 'Vegetables',
   'broccoli': 'Vegetables', 'spinach': 'Vegetables', 'lettuce': 'Vegetables',
   'carrot': 'Vegetables', 'tomato': 'Vegetables', 'onion': 'Vegetables',
   'garlic': 'Vegetables', 'potato': 'Vegetables', 'corn': 'Vegetables',
   'cucumber': 'Vegetables', 'mushroom': 'Vegetables', 'avocado': 'Vegetables',
   'kale': 'Vegetables', 'zucchini': 'Vegetables', 'cauliflower': 'Vegetables',
   'cabbage': 'Vegetables', 'chard': 'Vegetables', 'collard': 'Vegetables',
-  'arugula': 'Vegetables', 'edamame': 'Vegetables', 'celery': 'Vegetables',
-  'fennel': 'Vegetables', 'artichoke': 'Vegetables', 'beet': 'Vegetables',
+  'arugula': 'Vegetables', 'celery': 'Vegetables',
+  'artichoke': 'Vegetables', 'beet': 'Vegetables',
   'radish': 'Vegetables', 'turnip': 'Vegetables', 'parsnip': 'Vegetables',
   'leek': 'Vegetables', 'watercress': 'Vegetables', 'endive': 'Vegetables',
   'radicchio': 'Vegetables', 'jicama': 'Vegetables', 'kohlrabi': 'Vegetables',
@@ -154,74 +171,138 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'yam': 'Vegetables', 'butternut': 'Vegetables', 'pumpkin': 'Vegetables',
   'jalapeño': 'Vegetables', 'jalapeno': 'Vegetables', 'poblano': 'Vegetables',
   'habanero': 'Vegetables', 'serrano': 'Vegetables', 'shallot': 'Vegetables',
-  'pepper': 'Vegetables', 'pea': 'Vegetables',
+  'pepper': 'Vegetables', 'okra': 'Vegetables', 'fennel': 'Vegetables',
+  'microgreens': 'Vegetables', 'sprout': 'Vegetables',
   // Fruit
-  'passion fruit': 'Fruit', 'dragon fruit': 'Fruit',
-  'apple': 'Fruit', 'banana': 'Fruit', 'orange': 'Fruit', 'strawberry': 'Fruit',
-  'blueberry': 'Fruit', 'grape': 'Fruit', 'mango': 'Fruit', 'peach': 'Fruit',
+  'passion fruit': 'Fruit', 'dragon fruit': 'Fruit', 'star fruit': 'Fruit',
+  'apple': 'Fruit', 'banana': 'Fruit', 'orange': 'Fruit', 'strawberry': 'Fruit', 'strawberries': 'Fruit',
+  'blueberry': 'Fruit', 'blueberries': 'Fruit', 'grape': 'Fruit', 'mango': 'Fruit', 'peach': 'Fruit', 'peaches': 'Fruit',
   'watermelon': 'Fruit', 'cantaloupe': 'Fruit', 'honeydew': 'Fruit',
-  'pear': 'Fruit', 'cherry': 'Fruit', 'kiwi': 'Fruit', 'pomegranate': 'Fruit',
-  'fig': 'Fruit', 'apricot': 'Fruit', 'nectarine': 'Fruit', 'plum': 'Fruit',
+  'pear': 'Fruit', 'cherry': 'Fruit', 'cherries': 'Fruit', 'kiwi': 'Fruit', 'pomegranate': 'Fruit',
+  'fig': 'Fruit', 'apricot': 'Fruit', 'apricots': 'Fruit', 'nectarine': 'Fruit', 'nectarines': 'Fruit', 'plum': 'Fruit', 'plums': 'Fruit',
   'guava': 'Fruit', 'papaya': 'Fruit', 'lychee': 'Fruit', 'coconut': 'Fruit',
-  'lime': 'Fruit', 'lemon': 'Fruit', 'grapefruit': 'Fruit', 'clementine': 'Fruit',
-  'mandarin': 'Fruit', 'tangerine': 'Fruit', 'cranberry': 'Fruit', 'blackberry': 'Fruit',
-  'raspberry': 'Fruit', 'pineapple': 'Fruit', 'date': 'Fruit',
+  'lime': 'Fruit', 'lemon': 'Fruit', 'lemons': 'Fruit', 'limes': 'Fruit', 'grapefruit': 'Fruit', 'clementine': 'Fruit',
+  'mandarin': 'Fruit', 'tangerine': 'Fruit', 'cranberry': 'Fruit', 'cranberries': 'Fruit',
+  'blackberry': 'Fruit', 'blackberries': 'Fruit', 'raspberry': 'Fruit', 'raspberries': 'Fruit',
+  'pineapple': 'Fruit', 'date': 'Fruit', 'raisin': 'Fruit', 'raisins': 'Fruit',
+  'dried mango': 'Fruit', 'dried apricot': 'Fruit', 'dried cranberry': 'Fruit',
+  // Legumes & Beans
+  'black bean': 'Legumes & Beans', 'kidney bean': 'Legumes & Beans',
+  'pinto bean': 'Legumes & Beans', 'navy bean': 'Legumes & Beans',
+  'cannellini bean': 'Legumes & Beans', 'great northern bean': 'Legumes & Beans',
+  'green lentil': 'Legumes & Beans', 'red lentil': 'Legumes & Beans',
+  'chickpea': 'Legumes & Beans', 'garbanzo': 'Legumes & Beans',
+  'bean': 'Legumes & Beans', 'lentil': 'Legumes & Beans',
+  'edamame': 'Legumes & Beans', 'pea': 'Legumes & Beans',
+  'tofu': 'Legumes & Beans', 'tempeh': 'Legumes & Beans', 'miso': 'Legumes & Beans',
+  'hummus': 'Legumes & Beans', 'falafel': 'Legumes & Beans',
+  'split pea': 'Legumes & Beans', 'black-eyed pea': 'Legumes & Beans',
+  'soybean': 'Legumes & Beans', 'refried beans': 'Legumes & Beans',
+  // Nuts & Seeds
+  'almond butter': 'Nuts & Seeds', 'cashew butter': 'Nuts & Seeds',
+  'sunflower seed': 'Nuts & Seeds', 'pumpkin seed': 'Nuts & Seeds',
+  'chia seed': 'Nuts & Seeds', 'flax seed': 'Nuts & Seeds', 'hemp seed': 'Nuts & Seeds',
+  'sesame seed': 'Nuts & Seeds', 'poppy seed': 'Nuts & Seeds',
+  'peanut butter': 'Nuts & Seeds', 'almond': 'Nuts & Seeds', 'cashew': 'Nuts & Seeds',
+  'walnut': 'Nuts & Seeds', 'pecan': 'Nuts & Seeds', 'pistachio': 'Nuts & Seeds',
+  'macadamia': 'Nuts & Seeds', 'hazelnut': 'Nuts & Seeds', 'pine nut': 'Nuts & Seeds',
+  'brazil nut': 'Nuts & Seeds', 'peanut': 'Nuts & Seeds', 'nut': 'Nuts & Seeds',
+  'tahini': 'Nuts & Seeds', 'seed': 'Nuts & Seeds',
   // Bread & Grains
-  'english muffin': 'Bread & Grains', 'whole wheat': 'Bread & Grains',
+  'english muffin': 'Bread & Grains', 'whole wheat bread': 'Bread & Grains',
   'white bread': 'Bread & Grains', 'brown rice': 'Bread & Grains',
+  'wild rice': 'Bread & Grains', 'jasmine rice': 'Bread & Grains',
   'bread': 'Bread & Grains', 'pasta': 'Bread & Grains', 'rice': 'Bread & Grains',
-  'oat': 'Bread & Grains', 'cereal': 'Bread & Grains', 'tortilla': 'Bread & Grains',
-  'sourdough': 'Bread & Grains', 'baguette': 'Bread & Grains', 'bagel': 'Bread & Grains',
-  'pita': 'Bread & Grains', 'naan': 'Bread & Grains', 'flatbread': 'Bread & Grains',
-  'wrap': 'Bread & Grains', 'brioche': 'Bread & Grains', 'rye': 'Bread & Grains',
-  'pumpernickel': 'Bread & Grains', 'spaghetti': 'Bread & Grains',
-  'fettuccine': 'Bread & Grains', 'penne': 'Bread & Grains', 'rigatoni': 'Bread & Grains',
-  'linguine': 'Bread & Grains', 'orzo': 'Bread & Grains', 'couscous': 'Bread & Grains',
-  'quinoa': 'Bread & Grains', 'barley': 'Bread & Grains', 'farro': 'Bread & Grains',
-  'bulgur': 'Bread & Grains', 'granola': 'Bread & Grains', 'noodle': 'Bread & Grains',
-  'ramen': 'Bread & Grains', 'udon': 'Bread & Grains', 'cornmeal': 'Bread & Grains',
-  'flour': 'Bread & Grains', 'muffin': 'Bread & Grains', 'roll': 'Bread & Grains',
-  'bun': 'Bread & Grains',
+  'oat': 'Bread & Grains', 'oatmeal': 'Bread & Grains', 'cereal': 'Bread & Grains',
+  'tortilla': 'Bread & Grains', 'sourdough': 'Bread & Grains', 'baguette': 'Bread & Grains',
+  'bagel': 'Bread & Grains', 'pita': 'Bread & Grains', 'naan': 'Bread & Grains',
+  'flatbread': 'Bread & Grains', 'wrap': 'Bread & Grains', 'brioche': 'Bread & Grains',
+  'rye': 'Bread & Grains', 'pumpernickel': 'Bread & Grains',
+  'spaghetti': 'Bread & Grains', 'fettuccine': 'Bread & Grains', 'penne': 'Bread & Grains',
+  'rigatoni': 'Bread & Grains', 'linguine': 'Bread & Grains', 'orzo': 'Bread & Grains',
+  'couscous': 'Bread & Grains', 'quinoa': 'Bread & Grains', 'barley': 'Bread & Grains',
+  'farro': 'Bread & Grains', 'bulgur': 'Bread & Grains', 'granola': 'Bread & Grains',
+  'noodle': 'Bread & Grains', 'ramen': 'Bread & Grains', 'udon': 'Bread & Grains',
+  'soba': 'Bread & Grains', 'muffin': 'Bread & Grains', 'roll': 'Bread & Grains',
+  'bun': 'Bread & Grains', 'croissant': 'Bread & Grains', 'crumpet': 'Bread & Grains',
+  'waffle': 'Bread & Grains', 'pancake': 'Bread & Grains',
+  // Canned & Jarred
+  'canned tomato': 'Canned & Jarred', 'diced tomato': 'Canned & Jarred',
+  'crushed tomato': 'Canned & Jarred', 'tomato paste': 'Canned & Jarred',
+  'tomato sauce': 'Canned & Jarred', 'marinara': 'Canned & Jarred',
+  'pasta sauce': 'Canned & Jarred', 'canned corn': 'Canned & Jarred',
+  'canned pumpkin': 'Canned & Jarred', 'canned fruit': 'Canned & Jarred',
+  'chicken broth': 'Canned & Jarred', 'beef broth': 'Canned & Jarred',
+  'vegetable broth': 'Canned & Jarred', 'chicken stock': 'Canned & Jarred',
+  'beef stock': 'Canned & Jarred', 'broth': 'Canned & Jarred', 'stock': 'Canned & Jarred',
+  'soup': 'Canned & Jarred', 'condensed soup': 'Canned & Jarred',
+  'coconut cream': 'Canned & Jarred',
+  'pickle': 'Canned & Jarred', 'caper': 'Canned & Jarred', 'olive': 'Canned & Jarred',
+  'jarred pepper': 'Canned & Jarred', 'artichoke heart': 'Canned & Jarred',
+  'sun-dried tomato': 'Canned & Jarred', 'roasted red pepper': 'Canned & Jarred',
+  'applesauce': 'Canned & Jarred', 'fruit cup': 'Canned & Jarred',
+  // Baking
+  'all purpose flour': 'Baking', 'bread flour': 'Baking', 'almond flour': 'Baking',
+  'coconut flour': 'Baking', 'whole wheat flour': 'Baking',
+  'brown sugar': 'Baking', 'powdered sugar': 'Baking', 'coconut sugar': 'Baking',
+  'chocolate chip': 'Baking', 'cocoa powder': 'Baking', 'cacao': 'Baking',
+  'baking powder': 'Baking', 'baking soda': 'Baking', 'active dry yeast': 'Baking',
+  'instant yeast': 'Baking', 'yeast': 'Baking', 'cornstarch': 'Baking',
+  'corn starch': 'Baking', 'vanilla extract': 'Baking', 'almond extract': 'Baking',
+  'vanilla': 'Baking', 'cream of tartar': 'Baking', 'gelatin': 'Baking',
+  'flour': 'Baking', 'cornmeal': 'Baking', 'sugar': 'Baking',
+  'shortening': 'Baking', 'lard': 'Baking', 'molasses': 'Baking',
   // Condiments & Sauces
-  'peanut butter': 'Condiments & Sauces', 'soy sauce': 'Condiments & Sauces',
-  'olive oil': 'Condiments & Sauces', 'coconut oil': 'Condiments & Sauces',
-  'avocado oil': 'Condiments & Sauces', 'hot sauce': 'Condiments & Sauces',
+  'soy sauce': 'Condiments & Sauces', 'olive oil': 'Condiments & Sauces',
+  'coconut oil': 'Condiments & Sauces', 'avocado oil': 'Condiments & Sauces',
+  'sesame oil': 'Condiments & Sauces', 'canola oil': 'Condiments & Sauces',
+  'vegetable oil': 'Condiments & Sauces', 'hot sauce': 'Condiments & Sauces',
   'fish sauce': 'Condiments & Sauces', 'oyster sauce': 'Condiments & Sauces',
   'ketchup': 'Condiments & Sauces', 'mustard': 'Condiments & Sauces',
+  'dijon mustard': 'Condiments & Sauces', 'honey mustard': 'Condiments & Sauces',
   'mayo': 'Condiments & Sauces', 'mayonnaise': 'Condiments & Sauces',
   'salsa': 'Condiments & Sauces', 'dressing': 'Condiments & Sauces',
   'relish': 'Condiments & Sauces', 'teriyaki': 'Condiments & Sauces',
   'worcestershire': 'Condiments & Sauces', 'hoisin': 'Condiments & Sauces',
   'pesto': 'Condiments & Sauces', 'aioli': 'Condiments & Sauces',
-  'tahini': 'Condiments & Sauces', 'hummus': 'Condiments & Sauces',
   'guacamole': 'Condiments & Sauces', 'ranch': 'Condiments & Sauces',
-  'caesar': 'Condiments & Sauces', 'balsamic': 'Condiments & Sauces',
-  'vinegar': 'Condiments & Sauces', 'olive': 'Condiments & Sauces',
+  'caesar dressing': 'Condiments & Sauces', 'balsamic': 'Condiments & Sauces',
+  'vinegar': 'Condiments & Sauces', 'sriracha': 'Condiments & Sauces',
+  'buffalo sauce': 'Condiments & Sauces', 'bbq sauce': 'Condiments & Sauces',
+  'chili sauce': 'Condiments & Sauces', 'stir fry sauce': 'Condiments & Sauces',
   'jam': 'Condiments & Sauces', 'jelly': 'Condiments & Sauces',
   'honey': 'Condiments & Sauces', 'syrup': 'Condiments & Sauces',
+  'maple syrup': 'Condiments & Sauces', 'agave': 'Condiments & Sauces',
   // Drinks
   'orange juice': 'Drinks', 'apple juice': 'Drinks', 'grape juice': 'Drinks',
   'cranberry juice': 'Drinks', 'coconut water': 'Drinks', 'sparkling water': 'Drinks',
   'cold brew': 'Drinks', 'green tea': 'Drinks', 'herbal tea': 'Drinks',
+  'black tea': 'Drinks', 'oolong tea': 'Drinks', 'white tea': 'Drinks',
   'protein shake': 'Drinks', 'energy drink': 'Drinks', 'sports drink': 'Drinks',
-  'juice': 'Drinks', 'coffee': 'Drinks', 'tea': 'Drinks', 'wine': 'Drinks', 'beer': 'Drinks',
+  'juice': 'Drinks', 'coffee': 'Drinks', 'espresso': 'Drinks', 'tea': 'Drinks',
+  'wine': 'Drinks', 'beer': 'Drinks', 'cider': 'Drinks', 'hard seltzer': 'Drinks',
   'kombucha': 'Drinks', 'smoothie': 'Drinks', 'lemonade': 'Drinks', 'limeade': 'Drinks',
   'soda': 'Drinks', 'matcha': 'Drinks', 'chai': 'Drinks', 'seltzer': 'Drinks',
+  'tonic water': 'Drinks', 'club soda': 'Drinks', 'water': 'Drinks',
+  'milk alternative': 'Drinks',
   // Snacks & Sweets
   'granola bar': 'Snacks & Sweets', 'protein bar': 'Snacks & Sweets',
-  'trail mix': 'Snacks & Sweets', 'dark chocolate': 'Snacks & Sweets',
+  'energy bar': 'Snacks & Sweets', 'trail mix': 'Snacks & Sweets',
+  'dark chocolate': 'Snacks & Sweets', 'milk chocolate': 'Snacks & Sweets',
   'white chocolate': 'Snacks & Sweets', 'ice cream': 'Snacks & Sweets',
   'frozen yogurt': 'Snacks & Sweets', 'fruit snack': 'Snacks & Sweets',
-  'chocolate': 'Snacks & Sweets', 'cookie': 'Snacks & Sweets',
-  'almond': 'Snacks & Sweets', 'peanut': 'Snacks & Sweets',
-  'nut': 'Snacks & Sweets', 'cake': 'Snacks & Sweets', 'pie': 'Snacks & Sweets',
+  'chocolate bar': 'Snacks & Sweets', 'chocolate': 'Snacks & Sweets',
+  'cookie': 'Snacks & Sweets', 'cake': 'Snacks & Sweets', 'pie': 'Snacks & Sweets',
   'popcorn': 'Snacks & Sweets', 'chips': 'Snacks & Sweets', 'pretzel': 'Snacks & Sweets',
   'cracker': 'Snacks & Sweets', 'jerky': 'Snacks & Sweets', 'gummy': 'Snacks & Sweets',
   'candy': 'Snacks & Sweets', 'brownie': 'Snacks & Sweets', 'donut': 'Snacks & Sweets',
   'cupcake': 'Snacks & Sweets', 'pudding': 'Snacks & Sweets', 'sorbet': 'Snacks & Sweets',
-  'popsicle': 'Snacks & Sweets', 'wafer': 'Snacks & Sweets',
+  'popsicle': 'Snacks & Sweets', 'wafer': 'Snacks & Sweets', 'fruit roll': 'Snacks & Sweets',
+  'rice cake': 'Snacks & Sweets', 'cheese puff': 'Snacks & Sweets', 'pork rind': 'Snacks & Sweets',
+  'nachos': 'Snacks & Sweets', 'tortilla chip': 'Snacks & Sweets',
   // Herbs & Spices
   'fennel seed': 'Herbs & Spices', 'bay leaf': 'Herbs & Spices', 'lemongrass': 'Herbs & Spices',
+  'fresh basil': 'Herbs & Spices', 'fresh cilantro': 'Herbs & Spices',
   'basil': 'Herbs & Spices', 'cilantro': 'Herbs & Spices', 'parsley': 'Herbs & Spices',
   'dill': 'Herbs & Spices', 'mint': 'Herbs & Spices', 'thyme': 'Herbs & Spices',
   'rosemary': 'Herbs & Spices', 'oregano': 'Herbs & Spices', 'sage': 'Herbs & Spices',
@@ -229,7 +310,12 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'cumin': 'Herbs & Spices', 'paprika': 'Herbs & Spices', 'cayenne': 'Herbs & Spices',
   'cinnamon': 'Herbs & Spices', 'nutmeg': 'Herbs & Spices', 'cardamom': 'Herbs & Spices',
   'allspice': 'Herbs & Spices', 'anise': 'Herbs & Spices', 'turmeric': 'Herbs & Spices',
-  'ginger': 'Herbs & Spices', 'salt': 'Herbs & Spices',
+  'ginger': 'Herbs & Spices', 'salt': 'Herbs & Spices', 'pepper flake': 'Herbs & Spices',
+  'chili powder': 'Herbs & Spices', 'garlic powder': 'Herbs & Spices',
+  'onion powder': 'Herbs & Spices', 'smoked paprika': 'Herbs & Spices',
+  'italian seasoning': 'Herbs & Spices', 'seasoning': 'Herbs & Spices',
+  'spice': 'Herbs & Spices', 'herb': 'Herbs & Spices', 'saffron': 'Herbs & Spices',
+  'clove': 'Herbs & Spices', 'star anise': 'Herbs & Spices', 'coriander': 'Herbs & Spices',
 };
 
 function getIcon(name: string): string {
@@ -244,10 +330,246 @@ function getIcon(name: string): string {
 function getFoodCategory(name: string): string {
   const lower = name.toLowerCase();
   const sorted = Object.entries(FOOD_CATEGORIES).sort((a, b) => b[0].length - a[0].length);
+
+  // 1. Direct substring match
   for (const [key, cat] of sorted) {
     if (lower.includes(key)) return cat;
   }
+
+  // 2. Normalise plurals and retry
+  //    "ies" → "y"  e.g. strawberries→strawberry, blueberries→blueberry, cherries→cherry
+  const deIes = lower.replace(/([a-z]+)ies\b/g, (_, s) => s + 'y');
+  if (deIes !== lower) {
+    for (const [key, cat] of sorted) {
+      if (deIes.includes(key)) return cat;
+    }
+  }
+
+  //    "ves" → "f"  e.g. leaves→leaf, loaves→loaf, halves→half
+  const deVes = lower.replace(/([a-z]+)ves\b/g, (_, s) => s + 'f');
+  if (deVes !== lower) {
+    for (const [key, cat] of sorted) {
+      if (deVes.includes(key)) return cat;
+    }
+  }
+
+  //    strip trailing "es"  e.g. tomatoes→tomato, peaches→peach, potatoes→potato
+  const deEs = lower.replace(/([a-z]{3,})es\b/g, (_, s) => s);
+  if (deEs !== lower) {
+    for (const [key, cat] of sorted) {
+      if (deEs.includes(key)) return cat;
+    }
+  }
+
+  //    strip trailing "s"  e.g. carrots→carrot, almonds→almond, prawns→prawn
+  const deS = lower.replace(/([a-z]{3,})s\b/g, (_, s) => s);
+  if (deS !== lower) {
+    for (const [key, cat] of sorted) {
+      if (deS.includes(key)) return cat;
+    }
+  }
+
   return 'Other';
+}
+
+function getStorageWarning(name: string, category: Category): string | null {
+  const n = name.toLowerCase();
+  const preserved = /\b(canned|jarred|dried|dry\b|smoked|cured|pickled|preserved|powdered|dehydrated|freeze.?dried)\b/.test(n);
+
+  // ── Pantry warnings (perishables that must be cold) ───────────────────────
+  if (category === 'pantry' && !preserved) {
+    if (/\b(chicken|turkey|duck|quail|beef|steak|pork|lamb|veal|bison|venison|ribs|brisket|tenderloin|sirloin|ribeye|chuck|flank|burger|meatball|meatloaf|sausage|bacon|bratwurst|chorizo|salami|pepperoni|prosciutto|pancetta|pastrami|bologna|hot dog|deli meat|lunch meat|ground beef|ground pork|ground turkey)\b/.test(n)) {
+      return `Raw meat like ${name} spoils rapidly at room temperature and can grow dangerous bacteria within 2 hours. It must be stored in the Fridge (use within 2–3 days) or Freezer.`;
+    }
+    if (/\b(salmon|tuna|tilapia|cod|halibut|trout|snapper|swordfish|catfish|mahi|bass|flounder|mackerel|herring|sardine|anchovy|pollock|shrimp|prawn|lobster|crab|scallop|oyster|clam|mussel|squid|octopus|crawfish|seafood)\b/.test(n) && !/\b(canned|smoked|dried|pickled)\b/.test(n)) {
+      return `Fresh ${name} is extremely perishable and will spoil within hours at room temperature. It belongs in the Fridge (use within 1–2 days) or Freezer for longer storage.`;
+    }
+    if (/\b(milk\b|oat milk|almond milk|soy milk|skim milk|whole milk|buttermilk|kefir|yogurt|greek yogurt|sour cream|whipping cream|heavy cream|half and half|cream\b|crème)\b/.test(n)) {
+      return `${name} is a perishable dairy item that will sour and become unsafe within hours outside the Fridge. It must stay refrigerated.`;
+    }
+    if (/\b(butter|ghee)\b/.test(n)) {
+      return `${name} will go rancid at room temperature, especially in a warm pantry. Store it in the Fridge to keep it fresh, or the Freezer for long-term storage.`;
+    }
+    if (/\b(egg\b|eggs\b|large egg|free.range egg)\b/.test(n)) {
+      return `${name} need refrigeration once purchased — storing them in the Pantry significantly reduces shelf life and increases the risk of bacterial growth like Salmonella.`;
+    }
+    if (/\b(cheddar|mozzarella|brie|camembert|gouda|feta|ricotta|cottage cheese|cream cheese|string cheese|parmesan|gruyere|provolone|swiss cheese|american cheese|bocconcini|halloumi)\b/.test(n) || (/\bcheese\b/.test(n) && !/\b(rice cake|cheez|cheeto)\b/.test(n))) {
+      return `${name} is a perishable cheese that will spoil and grow mold quickly at room temperature. It needs to stay in the Fridge.`;
+    }
+    if (/\b(tofu|tempeh|seitan)\b/.test(n)) {
+      return `${name} is highly perishable and must be refrigerated. Pantry storage will cause rapid spoilage — it needs to be in the Fridge or Freezer.`;
+    }
+    if (/\b(lettuce|spinach|arugula|kale|chard|collard|watercress|endive|radicchio|microgreen|spring mix|mixed greens|baby spinach|romaine)\b/.test(n)) {
+      return `${name} wilts and deteriorates quickly at room temperature. It needs to stay in the Fridge to remain crisp and safe to eat.`;
+    }
+    if (/\b(broccoli|cauliflower|brussels sprout|asparagus|mushroom|zucchini|cucumber|celery|leek)\b/.test(n)) {
+      return `${name} loses freshness and nutrients quickly outside the Fridge. Store it refrigerated for best quality.`;
+    }
+    if (/\b(strawberr|blueberr|raspberr|blackberr|cranberr|cherr)\b/.test(n)) {
+      return `Fresh ${name} will mold within 1–2 days at room temperature. Refrigerate them immediately to extend shelf life.`;
+    }
+    if (/\b(avocado)\b/.test(n)) {
+      return `Once ripe, ${name} should move to the Fridge to slow browning and spoilage. At room temperature it will over-ripen very quickly.`;
+    }
+    if (/\b(smoked salmon|lox)\b/.test(n)) {
+      return `${name} is cured but still perishable — once opened it must stay refrigerated. The Pantry is not suitable after opening.`;
+    }
+    if (/\b(miso|tahini)\b/.test(n)) {
+      return `${name} should be refrigerated after opening to prevent spoilage and preserve flavor. The Pantry is only suitable for an unopened, sealed container.`;
+    }
+    if (/\b(fresh herb|fresh basil|fresh cilantro|fresh parsley|fresh dill|fresh mint|fresh thyme|fresh rosemary|fresh chive|fresh tarragon|fresh sage)\b/.test(n)) {
+      return `Fresh ${name} wilts and loses potency rapidly at room temperature. Keep it in the Fridge — stand stems in a small glass of water for best results.`;
+    }
+    if (/\b(hummus)\b/.test(n)) {
+      return `${name} must be refrigerated — it contains chickpeas and oil that will spoil quickly at room temperature. Always store it in the Fridge.`;
+    }
+    if (/\b(guacamole)\b/.test(n)) {
+      return `${name} browns and spoils very quickly at room temperature. It needs to stay in the Fridge; press plastic wrap directly onto the surface to slow oxidation.`;
+    }
+    if (/\b(fresh pasta|fresh gnocchi|fresh ravioli|fresh tortellini|fresh lasagna sheet)\b/.test(n)) {
+      return `Fresh ${name} is highly perishable and must be refrigerated. Dry or shelf-stable pasta is fine in the Pantry, but fresh pasta will spoil within hours outside the Fridge.`;
+    }
+    if (/\b(fresh.?squeezed juice|fresh juice|cold.?pressed juice|raw juice)\b/.test(n)) {
+      return `${name} has no preservatives and will ferment and spoil rapidly at room temperature. It must be kept in the Fridge and used within 2–3 days.`;
+    }
+    if (/\b(mayo|mayonnaise|ranch|caesar dressing|aioli|tartar sauce|remoulade)\b/.test(n)) {
+      return `${name} contains eggs and will spoil quickly at room temperature. Once opened it must stay in the Fridge — even commercial varieties.`;
+    }
+    if (/\b(opened nut butter|natural peanut butter|natural almond butter|natural cashew butter)\b/.test(n)) {
+      return `Natural ${name} contains no stabilizers and the oils will go rancid at room temperature. Refrigerate it after opening to keep it fresh.`;
+    }
+    if (/\b(probiotic|live culture|active culture)\b/.test(n)) {
+      return `${name} contains live cultures that will die off and the product will spoil without refrigeration. It must be kept in the Fridge at all times.`;
+    }
+    if (/\b(kombucha)\b/.test(n) && !/\b(bottled|pasteurized)\b/.test(n)) {
+      return `Unpasteurized ${name} is alive and will over-ferment and become unsafe at room temperature. Keep it refrigerated.`;
+    }
+  }
+
+  // ── Fridge/Pantry warnings (frozen items that must stay frozen) ───────────
+  if (category !== 'freezer') {
+    if (/\b(ice cream|gelato|sorbet|sherbet|popsicle|ice pop|frozen yogurt)\b/.test(n)) {
+      return `${name} must be kept frozen — it will melt and become unsafe in the ${category === 'fridge' ? 'Fridge' : 'Pantry'}. Store it in the Freezer.`;
+    }
+    if (/\bfrozen\b/.test(n) && /\b(pizza|meal|burrito|waffle|dumpling|dinner|entree|nugget|fries|tater|pot pie|edamame|corn|pea|broccoli|berry|berries|shrimp|chicken|beef|mango|smoothie|açaí|acai)\b/.test(n)) {
+      return `${name} is a frozen product and must stay in the Freezer. In the ${category === 'fridge' ? 'Fridge' : 'Pantry'} it will thaw and spoil.`;
+    }
+  }
+
+  // ── Fridge warnings (items damaged by refrigeration — better in pantry) ───
+  if (category === 'fridge') {
+    if (/\b(potato\b|potatoes\b|russet|yukon gold|red potato|fingerling)\b/.test(n) && !/\b(sweet potato|mashed|cooked|baked|fried)\b/.test(n)) {
+      return `Whole ${name} should not be refrigerated — the cold converts their starches to sugar, causing a gritty texture and dark color when cooked. Store them in a cool, dark Pantry instead.`;
+    }
+    if (/\b(onion\b|onions\b|yellow onion|red onion|white onion|vidalia)\b/.test(n) && !/\b(green onion|spring onion|scallion|caramelized|cooked|chopped|diced|sliced)\b/.test(n)) {
+      return `Whole ${name} shouldn't be refrigerated — the humidity causes rapid mold and softening. Store them in a cool, dry, ventilated Pantry away from potatoes.`;
+    }
+    if (/\b(garlic\b|head of garlic|garlic bulb|whole garlic)\b/.test(n) && !/\b(minced|chopped|roasted|garlic powder|garlic salt|peeled|clove)\b/.test(n)) {
+      return `Whole ${name} heads do best in a cool, dry Pantry with good airflow. Refrigerating them can cause sprouting and mold — only move peeled cloves to the Fridge.`;
+    }
+    if (/\b(banana\b|bananas\b)\b/.test(n) && !/\b(frozen|overripe|smoothie)\b/.test(n)) {
+      return `${name} don't belong in the Fridge — the cold turns their skin black within hours and damages the fruit's texture and sweetness. Store them at room temperature.`;
+    }
+    if (/\b(whole tomato|tomatoes\b|tomato\b)\b/.test(n) && !/\b(cherry tomato|sun-dried|canned|diced|cooked|paste|sauce|chopped|sliced|cut)\b/.test(n)) {
+      return `Whole ${name} lose their flavor and develop a mealy texture in the Fridge. Store uncut tomatoes at room temperature and only refrigerate once cut.`;
+    }
+    if (/\b(bread\b|sourdough|baguette|loaf|white bread|whole wheat bread|brioche|pita bread)\b/.test(n) && !/\b(crumb|crouton|frozen|dough)\b/.test(n)) {
+      return `${name} goes stale up to 3× faster in the Fridge due to starch retrogradation. Keep it in a bread box or bag at room temperature, or slice and freeze for long-term storage.`;
+    }
+    if (/\b(coffee bean|coffee ground|whole bean|ground coffee|espresso bean)\b/.test(n)) {
+      return `${name} absorbs moisture and odors from the Fridge, which dulls the flavor. Store it in an airtight container in the Pantry away from heat and light.`;
+    }
+    if (/\b(winter squash|butternut squash|acorn squash|spaghetti squash|kabocha|pumpkin\b|whole pumpkin)\b/.test(n) && !/\b(cut|cooked|puree|canned|roasted|peeled)\b/.test(n)) {
+      return `Whole ${name} is shelf-stable and keeps for weeks in a cool, dry Pantry. Refrigeration can cause surface damage — only move it to the Fridge once cut or cooked.`;
+    }
+    if (/\b(watermelon\b|cantaloupe\b|honeydew\b|whole melon)\b/.test(n) && !/\b(cut|sliced|cubed|diced)\b/.test(n)) {
+      return `A whole uncut ${name} is best stored at room temperature — cold halts the antioxidant development inside. Move it to the Fridge only after cutting.`;
+    }
+    if (/\b(mango\b|pineapple\b|papaya\b|peach\b|nectarine\b|plum\b|apricot\b)\b/.test(n) && !/\b(cut|sliced|ripe|overripe|frozen|dried)\b/.test(n)) {
+      return `Unripe ${name} should be left at room temperature to ripen fully — cold air stops the ripening process. Once ripe, it can move to the Fridge to extend freshness.`;
+    }
+    if (/\b(honey\b)\b/.test(n) && !/\b(hot|warm|manuka)\b/.test(n)) {
+      return `${name} doesn't need refrigeration and will crystallize and harden in the Fridge, making it hard to use. Store it sealed in the Pantry — it keeps indefinitely at room temperature.`;
+    }
+    if (/\b(hot sauce|tabasco|sriracha)\b/.test(n)) {
+      return `${name} is shelf-stable thanks to its vinegar and salt content — refrigerating it is optional and may thicken it. The Pantry is perfectly fine for long-term storage.`;
+    }
+  }
+
+  // ── Freezer warnings (items damaged by freezing — shouldn't be frozen) ────
+  if (category === 'freezer') {
+    if (/\b(olive oil|vegetable oil|coconut oil|avocado oil|sesame oil|canola oil|sunflower oil|grapeseed oil|oil\b)\b/.test(n)) {
+      return `${name} doesn't need freezing — most oils will solidify and cloud in the Freezer. Store it in the Pantry at room temperature.`;
+    }
+    if (!preserved && /\b(rice\b|pasta\b|penne|spaghetti|fettuccine|rigatoni|linguine|flour\b|sugar\b|oat\b|oats\b|cereal\b|quinoa|barley|couscous|cornmeal|breadcrumb|panko|cracker\b|crackers\b|chip\b|chips\b|popcorn)\b/.test(n)) {
+      return `${name} is a shelf-stable dry good — the Freezer adds unnecessary moisture and can make it stale or clumpy. The Pantry is the right place for it.`;
+    }
+    if (/\b(can\b|canned|jarred|broth\b|stock\b|soup\b|tomato sauce|tomato paste|marinara|coconut milk|applesauce)\b/.test(n)) {
+      return `${name} is shelf-stable and doesn't need freezing. Freezing canned or jarred goods can cause containers to crack or burst. Store it in the Pantry.`;
+    }
+    if (/\b(vinegar|soy sauce|fish sauce|worcestershire|hot sauce|sriracha|ketchup|mustard\b|bbq sauce|teriyaki|hoisin|relish|pickle)\b/.test(n)) {
+      return `${name} doesn't benefit from freezing — it can separate or change texture. Store it in the Pantry or Fridge after opening.`;
+    }
+    if (/\b(honey\b|maple syrup|agave|molasses|jam\b|jelly\b|preserves)\b/.test(n)) {
+      return `${name} is shelf-stable and doesn't need refrigerating or freezing. It stores perfectly in the Pantry at room temperature.`;
+    }
+    if (/\b(cumin|paprika|cinnamon|nutmeg|turmeric|oregano|thyme|rosemary|sage|curry|cayenne|chili powder|garlic powder|onion powder|allspice|cardamom|coriander|salt\b|pepper\b|seasoning|spice blend)\b/.test(n) && !preserved) {
+      return `${name} is a dry spice — moisture from the Freezer will cause clumping and dull the flavor. Keep it in a cool, dry Pantry instead.`;
+    }
+    if (/\b(lettuce|spinach|arugula|kale|chard|collard|romaine|spring mix|mixed greens|baby spinach|watercress|endive|radicchio)\b/.test(n) && !preserved) {
+      return `${name} is mostly water and will turn into limp, mushy leaves when frozen and thawed. It must be kept in the Fridge — don't freeze it.`;
+    }
+    if (/\b(cucumber\b|cucumbers\b)\b/.test(n) && !preserved) {
+      return `${name} has extremely high water content and will become watery and mushy when frozen. Store it in the Fridge and use within a week.`;
+    }
+    if (/\b(whole potato|raw potato|russet potato|yukon gold potato|red potato)\b/.test(n) && !/\b(mashed|cooked|baked|fries|fried|tater)\b/.test(n)) {
+      return `Raw ${name} should not be frozen — the water inside crystallizes and destroys the cell structure, turning them grainy and inedible when thawed. Store in a cool, dark Pantry.`;
+    }
+    if (/\b(mayo\b|mayonnaise\b|aioli\b|hollandaise)\b/.test(n)) {
+      return `${name} will completely separate and become grainy when frozen — the emulsion breaks and cannot be repaired. Keep it in the Fridge; it doesn't belong in the Freezer.`;
+    }
+    if (/\b(whole egg\b|egg in shell|raw egg)\b/.test(n)) {
+      return `Whole ${name} in their shell should never be frozen — liquid inside expands and cracks the shell, creating a mess and food safety risk. Freeze beaten eggs in a container instead.`;
+    }
+    if (/\b(soda\b|cola\b|sparkling water|carbonated|fizzy drink|sparkling juice|energy drink)\b/.test(n)) {
+      return `${name} will expand when frozen and burst its container — this is dangerous and will make a mess in your Freezer. Store carbonated drinks in the Fridge or Pantry.`;
+    }
+    if (/\b(brie|camembert|ricotta|cottage cheese|cream cheese|mascarpone|soft cheese)\b/.test(n) || (/\b(ricotta|cottage)\b/.test(n))) {
+      return `${name} has a high moisture content that causes it to become grainy and crumbly when frozen. Keep soft cheeses in the Fridge and use within their best-by date.`;
+    }
+    if (/\b(yogurt\b|greek yogurt|plain yogurt)\b/.test(n) && !/\b(frozen yogurt)\b/.test(n)) {
+      return `${name} will separate and become watery and grainy once thawed — the texture is significantly worse after freezing. It belongs in the Fridge, not the Freezer.`;
+    }
+    if (/\b(cream.based sauce|alfredo|béchamel|white sauce|cream sauce|gravy)\b/.test(n)) {
+      return `${name} will separate and curdle when frozen and reheated. Dairy-based sauces are best made fresh or stored in the Fridge for up to 3–4 days.`;
+    }
+    if (/\b(cooked pasta|cooked rice|cooked noodle)\b/.test(n)) {
+      return `${name} tends to become mushy and waterlogged after freezing. It keeps well in the Fridge for 3–5 days — freeze uncooked pasta or rice instead for best results.`;
+    }
+    if (/\b(raw potato|raw celery|raw cucumber|radish|raw turnip|jicama)\b/.test(n)) {
+      return `${name} has high water content and will turn mushy when frozen. These vegetables are best stored in the Fridge and eaten fresh.`;
+    }
+    if (/\b(gelatin|jello|pudding)\b/.test(n) && !/\b(gelatin powder|unflavored gelatin)\b/.test(n)) {
+      return `Set ${name} will weep liquid and lose its texture when frozen. Keep it in the Fridge and consume within a few days.`;
+    }
+    if (/\b(fried food|fried chicken|fried fish|french fry|french fries|tempura|schnitzel)\b/.test(n) && !/\b(frozen)\b/.test(n)) {
+      return `Freshly ${name} will lose its crispy coating and become soggy when frozen and thawed. Store leftovers in the Fridge and reheat in an oven or air fryer within 2 days.`;
+    }
+    if (/\b(wine\b|beer\b|champagne\b|sparkling wine|prosecco|cava)\b/.test(n)) {
+      return `${name} should not be frozen — carbonated varieties will burst, and wine loses its character and structure when frozen. Store in a cool Pantry or wine fridge.`;
+    }
+    if (/\b(coffee\b|cold brew\b|espresso\b|coffee bean|coffee ground)\b/.test(n)) {
+      return `${name} absorbs freezer odors and moisture, which dulls the flavor. Store it in an airtight container in the Pantry — whole beans stay freshest up to a month after opening.`;
+    }
+  }
+
+  return null;
+}
+
+// Always re-derives when stored value is 'Other' or missing
+function resolveCategory(item: { foodCategory?: string; baseName?: string; name?: string }): string {
+  if (item.foodCategory && item.foodCategory !== 'Other') return item.foodCategory;
+  return getFoodCategory(item.baseName || item.name || '');
 }
 
 function categoryFromOffTags(tags: string[]): string {
@@ -256,9 +578,13 @@ function categoryFromOffTags(tags: string[]): string {
   if (/\b(poultry|chicken|turkey|duck)\b/.test(t))                          return 'Poultry';
   if (/\b(fish|seafood|salmon|tuna|shrimps?|shellfishes?)\b/.test(t))       return 'Fish & Seafood';
   if (/\b(dairies|dairy|milks?|cheeses?|yogurts?|eggs?|butters?|creams?)\b/.test(t)) return 'Dairy & Eggs';
-  if (/\b(vegetables?|greens|salads?|legumes?)\b/.test(t))                  return 'Vegetables';
+  if (/\b(legumes?|beans?|lentils?|chickpeas?|tofu|tempeh|soy)\b/.test(t)) return 'Legumes & Beans';
+  if (/\b(nuts?|seeds?|almonds?|cashews?|peanuts?|walnuts?)\b/.test(t))    return 'Nuts & Seeds';
+  if (/\b(vegetables?|greens|salads?)\b/.test(t))                          return 'Vegetables';
   if (/\b(fruits?)\b/.test(t))                                              return 'Fruit';
   if (/\b(breads?|cereals?|pastas?|grains?|noodles?|crackers?|biscuits?)\b/.test(t)) return 'Bread & Grains';
+  if (/\b(canned|jarred|preserved|tinned|conserves?)\b/.test(t))            return 'Canned & Jarred';
+  if (/\b(baking|pastry|confection)\b/.test(t))                             return 'Baking';
   if (/\b(condiments?|sauces?|dressings?|spreads?|oils?|vinegars?)\b/.test(t)) return 'Condiments & Sauces';
   if (/\b(beverages?|drinks?|juices?|sodas?|waters?|coffees?|teas?|smoothies?)\b/.test(t)) return 'Drinks';
   if (/\b(snacks?|sweets?|candies|chocolates?|cookies?|chips|confectionery)\b/.test(t)) return 'Snacks & Sweets';
@@ -267,16 +593,20 @@ function categoryFromOffTags(tags: string[]): string {
 }
 
 const CATEGORY_ORDER = [
-  'Meat', 'Poultry', 'Fish & Seafood', 'Dairy & Eggs', 'Vegetables',
-  'Fruit', 'Bread & Grains', 'Condiments & Sauces', 'Drinks',
-  'Snacks & Sweets', 'Herbs & Spices', 'Other',
+  'Meat', 'Poultry', 'Fish & Seafood', 'Dairy & Eggs',
+  'Vegetables', 'Fruit', 'Legumes & Beans', 'Nuts & Seeds',
+  'Bread & Grains', 'Canned & Jarred', 'Baking',
+  'Condiments & Sauces', 'Drinks', 'Snacks & Sweets',
+  'Herbs & Spices', 'Other',
 ];
 
 const CATEGORY_ICONS: Record<string, string> = {
   'Meat': '🥩', 'Poultry': '🍗', 'Fish & Seafood': '🐟',
-  'Dairy & Eggs': '🥛', 'Vegetables': '🥦', 'Fruit': '🍎',
-  'Bread & Grains': '🍞', 'Condiments & Sauces': '🫙',
-  'Drinks': '🧃', 'Snacks & Sweets': '🍫', 'Herbs & Spices': '🌿', 'Other': '🥗',
+  'Dairy & Eggs': '🧀', 'Vegetables': '🥦', 'Fruit': '🍎',
+  'Legumes & Beans': '🫘', 'Nuts & Seeds': '🥜',
+  'Bread & Grains': '🍞', 'Canned & Jarred': '🥫', 'Baking': '🧁',
+  'Condiments & Sauces': '🫙', 'Drinks': '🧃',
+  'Snacks & Sweets': '🍫', 'Herbs & Spices': '🌿', 'Other': '🥘',
 };
 
 function getDaysLeft(d: string): number {
@@ -304,10 +634,12 @@ const SORT_LABELS: Record<SortBy, string> = {
   expiryAsc:   'Freshest First',
   alpha:       'A → Z',
   alphaDesc:   'Z → A',
-  protein:     'Highest Protein',
-  proteinAsc:  'Lowest Protein',
-  cal:         'Highest Cal',
-  calAsc:      'Lowest Cal',
+  protein:     'Most Protein',
+  proteinAsc:  'Least Protein',
+  cal:         'Most Calories',
+  calAsc:      'Least Calories',
+  qty:         'Most Quantity',
+  qtyAsc:      'Least Quantity',
   recent:      'Recently Added',
   oldest:      'Oldest Added',
   category:    'By Category',
@@ -316,15 +648,24 @@ const SORT_LABELS: Record<SortBy, string> = {
 const SORT_ICONS: Record<SortBy, string> = {
   expiry: '⏰', expiryAsc: '🌿', alpha: '🔤', alphaDesc: '🔡',
   protein: '💪', proteinAsc: '➖', cal: '🔥', calAsc: '🍃',
-  recent: '🕐', oldest: '📅', category: '📦',
+  qty: '📦', qtyAsc: '📉', recent: '🕐', oldest: '📅', category: '🗂️',
 };
+
+const NUTRITION_FILTERS = [
+  { key: 'highProtein', label: 'High Protein', desc: '≥ 15g', emoji: '💪' },
+  { key: 'lowCal',      label: 'Low Cal',      desc: '< 150', emoji: '🍃' },
+  { key: 'lowCarb',     label: 'Low Carb',     desc: '< 15g', emoji: '🥑' },
+  { key: 'highFat',     label: 'High Fat',     desc: '≥ 10g', emoji: '🧈' },
+] as const;
 
 const emptyForm = () => ({
   name: '', qty: '1', unit: '', expiryDate: '', category: 'fridge' as Category,
   protein: '', carbs: '', fat: '', cal: '', foodCategory: '',
 });
 
-const SCREEN_H = Dimensions.get('window').height;
+const SCREEN_H      = Dimensions.get('window').height;
+const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL  ?? '';
+const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: React.ReactNode }) {
   const { colors } = useTheme();
@@ -453,27 +794,117 @@ function ConfettiBlast({ good, onDone }: { good: boolean; onDone: () => void }) 
   );
 }
 
+function makeSeedItems(): Item[] {
+  const s = (icon: string, name: string, qty: string, unit: string, cat: Category, daysOffset: number, protein: number, carbs: number, fat: number, cal: number): Item => {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const exp = new Date(today); exp.setDate(today.getDate() + daysOffset);
+    const expiryDate = exp.toISOString().slice(0,10);
+    const days = daysOffset;
+    return {
+      id: Date.now() + Math.floor(Math.random() * 1e9),
+      icon, name, baseName: name,
+      batch: 1, qty, unit,
+      expiryDate, expires: getExpiryText(days),
+      badge: getBadge(days, cat), days,
+      protein, carbs, fat, cal,
+      qtyNum: parseFloat(qty) || 1,
+      category: cat,
+      addedAt: Date.now(),
+      foodCategory: getFoodCategory(name),
+    };
+  };
+  return [
+    // ── Fridge ────────────────────────────────────────────────────────────────
+    s('🥛', 'Whole Milk 2%',            '1',   'gallon', 'fridge',  6,  8, 12,  5, 120),
+    s('🥚', 'Large Eggs',               '12',  'ct',     'fridge', 18,  6,  1,  5,  70),
+    s('🧀', 'Sharp Cheddar Block',       '8',   'oz',     'fridge', 14, 25,  0, 34, 420),
+    s('🥩', 'Chicken Breast',            '2',   'lbs',    'fridge',  2, 31,  0,  3, 165),
+    s('🥩', 'Ground Beef 80/20',         '1',   'lb',     'fridge',  1, 17,  0, 20, 254),
+    s('🐟', 'Atlantic Salmon Fillet',    '6',   'oz',     'fridge',  3, 34,  0, 12, 233),
+    s('🥦', 'Broccoli Florets',          '12',  'oz',     'fridge',  5,  2,  6,  0,  31),
+    s('🥕', 'Baby Carrots',              '16',  'oz',     'fridge', 12,  1,  7,  0,  35),
+    s('🫑', 'Bell Peppers Mix',           '3',   'ct',     'fridge',  8,  1,  6,  0,  31),
+    s('🥬', 'Baby Spinach',              '5',   'oz',     'fridge',  4,  3,  3,  0,  23),
+    s('🥑', 'Hass Avocados',             '2',   'ct',     'fridge',  3,  2,  9, 15, 160),
+    s('🍓', 'Strawberries',              '1',   'lb',     'fridge',  5,  1, 11,  0,  49),
+    s('🫐', 'Blueberries',               '6',   'oz',     'fridge',  7,  1, 14,  0,  57),
+    s('🍋', 'Lemons',                    '5',   'ct',     'fridge', 14,  0,  7,  0,  29),
+    s('🧈', 'Unsalted Butter',           '1',   'lb',     'fridge', 30,  0,  0, 11, 102),
+    s('🥛', 'Greek Yogurt Plain',        '32',  'oz',     'fridge',  9, 17,  9,  0, 100),
+    s('🫙', 'Cottage Cheese',            '16',  'oz',     'fridge',  6, 14,  4,  2,  90),
+    s('🍳', 'Smoked Salmon',             '4',   'oz',     'fridge',  0, 22,  0,  6, 132),
+    s('🌿', 'Fresh Basil',               '1',   'bunch',  'fridge', -1,  1,  1,  0,   8),
+    s('🌿', 'Cilantro',                  '1',   'bunch',  'fridge',  2,  1,  1,  0,   8),
+    s('🧄', 'Garlic Bulb',               '1',   'head',   'fridge', 21,  0,  4,  0,  18),
+    s('🫚', 'Miso Paste',                '14',  'oz',     'fridge', 45,  3, 10,  1,  56),
+    s('🥞', 'Flour Tortillas',           '10',  'ct',     'fridge', 12,  3, 27,  3, 140),
+    s('🧃', 'Orange Juice',              '52',  'oz',     'fridge',  8,  2, 26,  0, 110),
+    // ── Freezer ───────────────────────────────────────────────────────────────
+    s('🍗', 'Frozen Chicken Thighs',     '4',   'lbs',    'freezer', 90, 27,  0, 13, 209),
+    s('🥩', 'Ribeye Steaks',             '2',   'ct',     'freezer', 60, 28,  0, 34, 410),
+    s('🍤', 'Frozen Shrimp Large',       '2',   'lbs',    'freezer', 75, 20,  0,  2,  99),
+    s('🐟', 'Tilapia Fillets',           '4',   'ct',     'freezer', 120, 23, 0,  2, 110),
+    s('🌽', 'Frozen Sweet Corn',         '12',  'oz',     'freezer', 180,  3, 19,  1,  90),
+    s('🥦', 'Frozen Broccoli',           '12',  'oz',     'freezer', 200,  3,  7,  0,  35),
+    s('🫛', 'Frozen Edamame',            '16',  'oz',     'freezer', 150, 11,  9,  5, 122),
+    s('🍕', 'Frozen Margherita Pizza',   '1',   'ct',     'freezer',  45, 12, 46, 16, 370),
+    s('🥣', 'Açaí Packs',               '4',   'ct',     'freezer',  90,  2, 18,  7, 150),
+    s('🧇', 'Frozen Waffles',            '10',  'ct',     'freezer',  90,  3, 25,  4, 150),
+    s('🍦', 'Vanilla Ice Cream',         '1.5', 'qt',     'freezer',  60,  4, 28, 11, 210),
+    s('🥟', 'Pork Dumplings',            '24',  'ct',     'freezer',  120, 9, 23,  8, 200),
+    s('🌯', 'Frozen Breakfast Burritos', '4',   'ct',     'freezer',  90, 16, 36, 12, 310),
+    s('🥕', 'Frozen Mixed Vegetables',   '16',  'oz',     'freezer', 240,  2, 11,  0,  50),
+    s('🫐', 'Frozen Mixed Berries',      '16',  'oz',     'freezer',  90,  1, 15,  0,  60),
+    // ── Pantry ────────────────────────────────────────────────────────────────
+    s('🍚', 'Jasmine Rice',              '5',   'lbs',    'pantry', 365,  4, 44,  0, 200),
+    s('🍝', 'Penne Pasta',               '16',  'oz',     'pantry', 540,  7, 43,  1, 200),
+    s('🌾', 'Rolled Oats',               '42',  'oz',     'pantry', 365,  5, 27,  3, 150),
+    s('🫘', 'Black Beans Can',           '15',  'oz',     'pantry', 730,  7, 20,  0, 110),
+    s('🫘', 'Chickpeas Can',             '15',  'oz',     'pantry', 730,  7, 27,  2, 170),
+    s('🍅', 'Crushed Tomatoes Can',      '28',  'oz',     'pantry', 540,  2,  6,  0,  35),
+    s('🐟', 'Tuna Can in Water',         '5',   'oz',     'pantry', 365, 22,  0,  1, 100),
+    s('🥜', 'Natural Peanut Butter',     '16',  'oz',     'pantry', 180,  8,  7, 16, 190),
+    s('🍯', 'Raw Honey',                 '12',  'oz',     'pantry', 1825, 0, 17,  0,  60),
+    s('🫒', 'Extra Virgin Olive Oil',    '16.9','oz',     'pantry', 365,  0,  0, 14, 120),
+    s('🌶️','Sriracha Hot Sauce',        '17',  'oz',     'pantry', 365,  0,  1,  0,   5),
+    s('🧂', 'Kosher Salt',               '26',  'oz',     'pantry', 1825, 0,  0,  0,   0),
+    s('🌿', 'Dried Oregano',             '0.75','oz',     'pantry', 365,  0,  2,  0,   8),
+    s('🫙', 'Chicken Broth',             '32',  'oz',     'pantry', 180,  1,  1,  0,  10),
+    s('🍎', 'Apple Cider Vinegar',       '16',  'oz',     'pantry', 365,  0,  0,  0,   3),
+    s('🌰', 'Raw Almonds',               '16',  'oz',     'pantry', 365,  6,  6, 14, 164),
+    s('🍫', 'Dark Chocolate 70%',        '3.5', 'oz',     'pantry',  90,  3, 20, 18, 250),
+    s('🍞', 'Sourdough Bread',           '1',   'loaf',   'pantry',  4,   4, 24,  1, 120),
+    s('🌽', 'Popcorn Kernels',           '32',  'oz',     'pantry', 365,  3, 28,  4, 140),
+    s('🧃', 'Soy Sauce',                 '10',  'oz',     'pantry', 365,  1,  1,  0,  10),
+    s('🍚', 'Panko Breadcrumbs',         '8',   'oz',     'pantry', 365,  4, 22,  1, 110),
+    s('🥫', 'Coconut Milk Can',          '13.5','oz',     'pantry', 365,  1,  2, 14, 138),
+    s('🌾', 'All-Purpose Flour',         '5',   'lbs',    'pantry', 365,  3, 23,  0, 100),
+    s('🍬', 'Granulated Sugar',          '4',   'lbs',    'pantry', 1825, 0, 25,  0, 100),
+  ].map((item, i) => ({ ...item, id: i + 1 }));
+}
+
 export default function FridgeScreen() {
   const router = useRouter();
-  const { colors, isDark, toggleTheme } = useTheme();
-  const { signOut } = useAuth();
-  const [listDensity, setListDensity] = useState<'compact' | 'regular'>('regular');
-  const styles = useMemo(() => createStyles(colors, listDensity === 'compact'), [colors, listDensity]);
+  const { colors, isDark, toggleTheme, listDensity } = useTheme();
+  const { signOut, user } = useAuth();
+  const { menuBtn, drawerEl } = useAppDrawer();
+  const styles = useMemo(() => createStyles(colors, listDensity === 'compact', isDark), [colors, listDensity, isDark]);
   const [items, setItems]               = useState<Item[]>([]);
   const [expanded, setExpanded]         = useState<number | null>(null);
-  const [activeTab, setActiveTab]       = useState<Category>('fridge');
+  const [activeTab, setActiveTab]       = useState<TabView>('fridge');
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['fridge','freezer','pantry']));
   const [showAdd, setShowAdd]           = useState(false);
-  const [showDrawer, setShowDrawer]     = useState(false);
   const [editItem, setEditItem]         = useState<Item | null>(null);
   const [form, setForm]                 = useState(emptyForm());
   const [nextId, setNextId]             = useState(100);
-  const [sortBy, setSortBy]             = useState<SortBy>('expiry');
+  const [sortBy, setSortBy]             = useState<SortBy>('category');
   const [scanning, setScanning]         = useState(false);
   const [searchQuery, setSearchQuery]   = useState('');
   const [showSortFilter, setShowSortFilter]         = useState(false);
   const [showExpiringDetail, setShowExpiringDetail] = useState(false);
   const [filterFoodCats, setFilterFoodCats]         = useState<string[]>([]);
   const [filterExpiry, setFilterExpiry]             = useState<string[]>([]);
+  const [filterNutrition, setFilterNutrition]       = useState<string[]>([]);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [barcodeScanned, setBarcodeScanned]         = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -483,8 +914,6 @@ export default function FridgeScreen() {
   const [scannedEmoji, setScannedEmoji]             = useState('🔍');
   const [scanSuccess, setScanSuccess]               = useState<boolean | null>(null);
 
-  const drawerAnim  = useRef(new Animated.Value(-280)).current;
-  const menuAnim    = useRef(new Animated.Value(0)).current;
   const listFade    = useRef(new Animated.Value(1)).current;
   const listSlide   = useRef(new Animated.Value(0)).current;
   const addBtnScale = useRef(new Animated.Value(1)).current;
@@ -492,8 +921,11 @@ export default function FridgeScreen() {
   const beamAnim    = useRef(new Animated.Value(0)).current;
   const successAnim = useRef(new Animated.Value(0)).current;
   const removeAnims = useRef<Map<number, { x: Animated.Value; op: Animated.Value }>>(new Map());
-  const screenFade  = useRef(new Animated.Value(0)).current;
-  const screenSlide = useRef(new Animated.Value(24)).current;
+  const screenFade     = useRef(new Animated.Value(0)).current;
+  const screenSlide    = useRef(new Animated.Value(24)).current;
+  const heroScale      = useRef(new Animated.Value(0.94)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+  const contentSlide   = useRef(new Animated.Value(15)).current;
   const loadOverlayAnim = useRef(new Animated.Value(0)).current;
   const loadEmojiAnim   = useRef(new Animated.Value(0)).current;
   const loadRingAnim    = useRef(new Animated.Value(0)).current;
@@ -506,26 +938,25 @@ export default function FridgeScreen() {
   const [toastBad, setToastBad]         = useState(false);
   const toastAnim = useRef(new Animated.Value(0)).current;
 
-  const [showProfile, setShowProfile]               = useState(false);
-  const [showNotifications, setShowNotifications]   = useState(false);
-  const [showPro, setShowPro]                       = useState(false);
-  const [showHelp, setShowHelp]                     = useState(false);
-  const [showRate, setShowRate]                     = useState(false);
-  const [profileName, setProfileName]               = useState('');
-  const [profileEmail, setProfileEmail]             = useState('');
-  const [profilePhoto, setProfilePhoto]             = useState<string | null>(null);
-  const [dietaryPrefs, setDietaryPrefs]             = useState<string[]>([]);
-  const [householdSize, setHouseholdSize]           = useState(1);
-  const [stats, setStats]                           = useState({ goneGood: 0, goneBad: 0, totalAdded: 0 });
-  const [notifExpiry, setNotifExpiry]               = useState(true);
-  const [notifDigest, setNotifDigest]               = useState(false);
-  const [notifWeekly, setNotifWeekly]               = useState(false);
-  const [rating, setRating]                         = useState(0);
-  const [review, setReview]                         = useState('');
-  const [openFaq, setOpenFaq]                       = useState<number | null>(null);
+  const [stats, setStats] = useState({ goneGood: 0, goneBad: 0, totalAdded: 0 });
 
   useEffect(() => {
-    AsyncStorage.getItem('gogood_items').then(val => {
+    const loadItems = async () => {
+      // 1. Load from AsyncStorage immediately (fast, offline-safe)
+      const raw = await AsyncStorage.getItem('gogood_items');
+      // Seed demo data once (version flag prevents re-seeding after user clears items)
+      const seeded = await AsyncStorage.getItem('gogood_seed_v2');
+      const val = !seeded
+        ? (() => {
+            const existing = raw ? JSON.parse(raw) : [];
+            const seed = makeSeedItems();
+            const merged = [...existing, ...seed];
+            AsyncStorage.setItem('gogood_items', JSON.stringify(merged));
+            AsyncStorage.setItem('gogood_seed_v2', '1');
+            return JSON.stringify(merged);
+          })()
+        : raw;
+      let localItems: any[] = [];
       if (val) {
         const parsed = JSON.parse(val);
         const migrated = parsed.map((i: any, idx: number) => ({
@@ -536,28 +967,73 @@ export default function FridgeScreen() {
           addedAt: i.addedAt || Date.now(),
         }));
         const seen = new Set();
-        const deduped = migrated.map((i: any, idx: number) => {
+        localItems = migrated.map((i: any, idx: number) => {
           if (seen.has(i.id)) return { ...i, id: 1000 + idx };
           seen.add(i.id);
           return i;
         });
-        setItems(deduped);
-        const maxId = Math.max(...deduped.map((i: any) => i.id), 99);
+        setItems(localItems);
+        const maxId = Math.max(...localItems.map((i: any) => i.id), 99);
         setNextId(maxId + 1);
       }
+
+      // 2. Pull from Supabase and merge (remote wins for newer items)
+      if (user?.id) {
+        const remote = await pullItems(user.id);
+        if (remote && remote.length > 0) {
+          const merged = [...localItems];
+          for (const r of remote) {
+            const idx = merged.findIndex(l => l.id === r.id);
+            if (idx === -1) merged.push(r);
+            else if (r.addedAt > merged[idx].addedAt) merged[idx] = r;
+          }
+          setItems(merged);
+          const maxId = Math.max(...merged.map(i => i.id), 99);
+          setNextId(maxId + 1);
+          AsyncStorage.setItem('gogood_items', JSON.stringify(merged));
+        }
+      }
+    };
+    loadItems();
+    // Restore persisted collapsed state; fall back to all-collapsed default
+    AsyncStorage.getItem('gogood_collapsed_sections').then(sv => {
+      if (sv) {
+        setCollapsedSections(new Set(JSON.parse(sv)));
+      } else {
+        // First launch: derive all possible section keys and collapse them
+        AsyncStorage.getItem('gogood_items').then(iv => {
+          const its: any[] = iv ? JSON.parse(iv) : [];
+          const cats = new Set<string>(['fridge', 'freezer', 'pantry']);
+          its.forEach(i => {
+            const cat = resolveCategory(i);
+            cats.add(cat);
+            cats.add(`fridge::${cat}`);
+            cats.add(`freezer::${cat}`);
+            cats.add(`pantry::${cat}`);
+          });
+          setCollapsedSections(cats);
+        });
+      }
     });
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     AsyncStorage.setItem('gogood_items', JSON.stringify(items));
+    if (user?.id) pushItems(items, user.id);
   }, [items]);
 
   useEffect(() => {
-    AsyncStorage.getItem('gogood_profile').then(v => { if (v) { const p = JSON.parse(v); setProfileName(p.name || ''); setProfileEmail(p.email || ''); setProfilePhoto(p.photo || null); setDietaryPrefs(p.dietary || []); setHouseholdSize(p.household || 1); } });
-    AsyncStorage.getItem('gogood_notifs').then(v => { if (v) { const n = JSON.parse(v); setNotifExpiry(n.expiry ?? true); setNotifDigest(n.digest ?? false); setNotifWeekly(n.weekly ?? false); } });
     AsyncStorage.getItem('gogood_stats').then(v => { if (v) setStats(JSON.parse(v)); });
-    AsyncStorage.getItem('gogood_density').then(v => { if (v === 'compact' || v === 'regular') setListDensity(v); });
   }, []);
+
+  // Keep scheduled notifications in sync with item list
+  useEffect(() => {
+    if (items.length === 0) return;
+    AsyncStorage.getItem('gogood_notifs').then(v => {
+      const enabled = v ? JSON.parse(v).expiry !== false : true;
+      rescheduleExpiryNotifications(items, enabled);
+    });
+  }, [items]);
 
   useEffect(() => {
     if (scanning) {
@@ -588,76 +1064,40 @@ export default function FridgeScreen() {
   }, [showBarcodeScanner]);
 
   useFocusEffect(useCallback(() => {
+    // Re-read storage in case foodreport restored an item while this screen was backgrounded
+    AsyncStorage.getItem('gogood_items').then(val => {
+      if (val) {
+        try {
+          const parsed = JSON.parse(val);
+          setItems(parsed.map((i: any, idx: number) => ({
+            ...i,
+            id: i.id || (200 + idx),
+            baseName: i.baseName || i.name || '',
+            batch: i.batch || 1,
+            addedAt: i.addedAt || Date.now(),
+          })));
+        } catch {}
+      }
+    });
     screenFade.setValue(0);
     screenSlide.setValue(24);
+    heroScale.setValue(0.94);
+    contentOpacity.setValue(0);
+    contentSlide.setValue(15);
     Animated.parallel([
       Animated.timing(screenFade,  { toValue: 1, duration: 280, useNativeDriver: true }),
       Animated.spring(screenSlide, { toValue: 0, damping: 24, stiffness: 200, useNativeDriver: true }),
+      Animated.spring(heroScale,   { toValue: 1, damping: 16, stiffness: 200, useNativeDriver: true }),
     ]).start();
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(contentOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.spring(contentSlide,   { toValue: 0, damping: 22, stiffness: 180, useNativeDriver: true }),
+      ]).start();
+    }, 100);
   }, []));
 
-  const toggleDensity = () => {
-    const next = listDensity === 'compact' ? 'regular' : 'compact';
-    setListDensity(next);
-    AsyncStorage.setItem('gogood_density', next);
-  };
-
-  const openFromDrawer = (setter: (v: boolean) => void) => {
-    Animated.parallel([
-      Animated.timing(drawerAnim, { toValue: -280, duration: 200, useNativeDriver: true }),
-      Animated.timing(menuAnim,   { toValue: 0,    duration: 200, useNativeDriver: true }),
-    ]).start(() => { setShowDrawer(false); setter(true); });
-  };
-
-  const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log out', style: 'destructive', onPress: async () => {
-          closeDrawer();
-          await signOut();
-          router.replace('/auth/welcome' as any);
-        },
-      },
-    ]);
-  };
-
-  const pickProfilePhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { showToast('Gallery permission needed', true); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] as any, allowsEditing: true, aspect: [1, 1], quality: 0.8 });
-    if (!result.canceled && result.assets[0]) setProfilePhoto(result.assets[0].uri);
-  };
-
-  const saveProfile = async () => {
-    await AsyncStorage.setItem('gogood_profile', JSON.stringify({ name: profileName, email: profileEmail, photo: profilePhoto, dietary: dietaryPrefs, household: householdSize }));
-    setShowProfile(false);
-    showToast('Profile saved ✓');
-  };
-
-  const saveNotifications = async () => {
-    await AsyncStorage.setItem('gogood_notifs', JSON.stringify({ expiry: notifExpiry, digest: notifDigest, weekly: notifWeekly }));
-    setShowNotifications(false);
-    showToast('Notifications updated ✓');
-  };
-
-  const openDrawer = () => {
-    setShowDrawer(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Animated.parallel([
-      Animated.spring(drawerAnim, { toValue: 0, damping: 24, stiffness: 200, useNativeDriver: true }),
-      Animated.timing(menuAnim,   { toValue: 1, duration: 260, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const closeDrawer = () => {
-    Animated.parallel([
-      Animated.timing(drawerAnim, { toValue: -280, duration: 230, useNativeDriver: true }),
-      Animated.timing(menuAnim,   { toValue: 0,    duration: 210, useNativeDriver: true }),
-    ]).start(() => setShowDrawer(false));
-  };
-
-  const switchTab = (tab: Category) => {
+  const switchTab = (tab: TabView) => {
     if (tab === activeTab) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Animated.parallel([
@@ -700,13 +1140,13 @@ export default function FridgeScreen() {
   };
 
   const getFiltered = () => {
-    let list = [...items.filter(i => i.category === activeTab)];
+    let list = activeTab === 'all' ? [...items] : [...items.filter(i => i.category === activeTab)];
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter(i => i.baseName.toLowerCase().includes(q));
     }
     if (filterFoodCats.length > 0) {
-      list = list.filter(i => filterFoodCats.includes(i.foodCategory || getFoodCategory(i.baseName)));
+      list = list.filter(i => filterFoodCats.includes(resolveCategory(i)));
     }
     if (filterExpiry.length > 0) {
       list = list.filter(i => {
@@ -718,6 +1158,10 @@ export default function FridgeScreen() {
         return false;
       });
     }
+    if (filterNutrition.includes('highProtein')) list = list.filter(i => i.protein >= 15);
+    if (filterNutrition.includes('lowCal'))      list = list.filter(i => i.cal > 0 && i.cal < 150);
+    if (filterNutrition.includes('lowCarb'))     list = list.filter(i => i.carbs > 0 && i.carbs < 15);
+    if (filterNutrition.includes('highFat'))     list = list.filter(i => i.fat >= 10);
     if (sortBy === 'expiry')      list.sort((a,b) => getDaysLeft(a.expiryDate) - getDaysLeft(b.expiryDate));
     if (sortBy === 'expiryAsc')   list.sort((a,b) => getDaysLeft(b.expiryDate) - getDaysLeft(a.expiryDate));
     if (sortBy === 'alpha')       list.sort((a,b) => (a.baseName||'').localeCompare(b.baseName||''));
@@ -726,6 +1170,8 @@ export default function FridgeScreen() {
     if (sortBy === 'proteinAsc')  list.sort((a,b) => a.protein - b.protein);
     if (sortBy === 'cal')         list.sort((a,b) => b.cal - a.cal);
     if (sortBy === 'calAsc')      list.sort((a,b) => a.cal - b.cal);
+    if (sortBy === 'qty')         list.sort((a,b) => b.qtyNum - a.qtyNum);
+    if (sortBy === 'qtyAsc')      list.sort((a,b) => a.qtyNum - b.qtyNum);
     if (sortBy === 'recent')      list.sort((a,b) => b.addedAt - a.addedAt);
     if (sortBy === 'oldest')      list.sort((a,b) => a.addedAt - b.addedAt);
     if (sortBy === 'category')    list.sort((a,b) => getFoodCategory(a.baseName).localeCompare(getFoodCategory(b.baseName)));
@@ -733,23 +1179,24 @@ export default function FridgeScreen() {
   };
 
   const filtered        = getFiltered();
-  const allInTab        = items.filter(i => i.category === activeTab);
+  const allInTab        = activeTab === 'all' ? [...items] : items.filter(i => i.category === activeTab);
   const allExpiringSoon = items.filter(i => getDaysLeft(i.expiryDate) <= 3);
   const totalProtein    = filtered.reduce((a,i) => a + i.protein * i.qtyNum, 0);
   const totalCarbs      = filtered.reduce((a,i) => a + i.carbs   * i.qtyNum, 0);
   const totalFat        = filtered.reduce((a,i) => a + i.fat     * i.qtyNum, 0);
   const totalCal        = filtered.reduce((a,i) => a + i.cal     * i.qtyNum, 0);
-  const expiringSoon    = allInTab.filter(i => i.days <= 3).length;
+  const expiringSoon    = allInTab.filter(i => getDaysLeft(i.expiryDate) <= 3).length;
 
-  const availableFoodCats = [...new Set(allInTab.map(i => i.foodCategory || getFoodCategory(i.baseName)))].sort();
+  const availableFoodCats = [...new Set(allInTab.map(i => resolveCategory(i)))].sort();
 
   const goodBotMsg = () => {
-    if (allInTab.length === 0) return 'add items to get started';
-    const urgentCount = allInTab.filter(i => i.days < 0).length;
+    if (items.length === 0) return 'add items to get started';
+    const urgentCount = items.filter(i => getDaysLeft(i.expiryDate) < 0).length;
     if (urgentCount > 0) return `${urgentCount} item${urgentCount > 1 ? 's' : ''} already expired — rescue what you can 🥀`;
-    if (expiringSoon >= 3) return `using ${expiringSoon} expiring items`;
-    if (expiringSoon > 0) return `${expiringSoon} item${expiringSoon > 1 ? 's' : ''} expiring — let's use them 🌱`;
-    return `you have ${allInTab.length} items — want a recipe? 🍳`;
+    const allExpiring = items.filter(i => { const d = getDaysLeft(i.expiryDate); return d >= 0 && d <= 3; }).length;
+    if (allExpiring >= 3) return `using ${allExpiring} expiring items`;
+    if (allExpiring > 0) return `${allExpiring} item${allExpiring > 1 ? 's' : ''} expiring — let's use them 🌱`;
+    return `you have ${items.length} item${items.length !== 1 ? 's' : ''} — want a recipe? 🍳`;
   };
 
   const showToast = (msg: string, bad = false) => {
@@ -778,6 +1225,11 @@ export default function FridgeScreen() {
     animateRemove(item.id, 1, () => {
       setItems(prev => prev.filter(i => i.id !== item.id));
       if (expanded === item.id) setExpanded(null);
+      AsyncStorage.getItem('gogood_gone_good').then(val => {
+        const prev = val ? JSON.parse(val) : [];
+        const entry = { id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(), expiryDate: item.expiryDate, category: resolveCategory(item) };
+        AsyncStorage.setItem('gogood_gone_good', JSON.stringify([entry, ...prev]));
+      });
     });
     triggerBlast(false);
     setTimeout(() => showToast(`${item.baseName} gone good! 🌱`), 700);
@@ -805,7 +1257,12 @@ export default function FridgeScreen() {
     if (expanded === id) setExpanded(null);
   };
 
-  const openAdd = () => { setForm(emptyForm()); setEditItem(null); setShowAdd(true); };
+  const openAdd = () => {
+    const defaultCat: Category = activeTab === 'all' ? 'fridge' : activeTab;
+    setForm({ ...emptyForm(), category: defaultCat });
+    setEditItem(null);
+    setShowAdd(true);
+  };
 
   const openEdit = (item: Item) => {
     setForm({
@@ -890,7 +1347,22 @@ export default function FridgeScreen() {
       const json = await res.json();
 
       if (json.status !== 1 || !json.product) {
-        finishScan(false, 'Not in database', '🔍');
+        ringLoopRef.current?.stop(); emojiLoopRef.current?.stop();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Animated.timing(loadOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+          setBarcodeProcessing(false); loadRingAnim.setValue(0); loadEmojiAnim.setValue(0);
+        });
+        setShowBarcodeScanner(false);
+        setTimeout(() => {
+          Alert.alert(
+            'Product not found',
+            'This barcode isn\'t in the Open Food Facts database. Add it manually?',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => setBarcodeScanned(false) },
+              { text: 'Add manually', onPress: () => { setShowAdd(true); } },
+            ]
+          );
+        }, 350);
         return;
       }
 
@@ -914,6 +1386,26 @@ export default function FridgeScreen() {
 
       const productName = p.product_name || name;
       const offCat = categoryFromOffTags(p.categories_tags || []);
+
+      // Extract serving size in grams/ml for fallback calculation
+      const servingMatch = (p.serving_size || '').match(/([\d.]+)\s*(g|ml)/i);
+      const serving_g = servingMatch ? parseFloat(servingMatch[1]) : null;
+
+      // Per-serving value: prefer _serving field, fall back to _100g × serving_g/100
+      const perServing = (key: string): number | null => {
+        const sv = n[`${key}_serving`];
+        if (sv != null && sv > 0) return Math.round(sv);
+        const per100 = n[`${key}_100g`] ?? n[key];
+        if (per100 != null && per100 > 0 && serving_g) return Math.round(per100 * serving_g / 100);
+        if (per100 != null && per100 > 0) return Math.round(per100);
+        return null;
+      };
+
+      const cal_ps     = perServing('energy-kcal');
+      const protein_ps = perServing('proteins');
+      const carbs_ps   = perServing('carbohydrates');
+      const fat_ps     = perServing('fat');
+
       finishScan(true, productName, getIcon(productName), () => {
         setForm(f => ({
           ...f,
@@ -922,14 +1414,29 @@ export default function FridgeScreen() {
           unit:         unit         || f.unit,
           expiryDate:   expiryDate   || f.expiryDate,
           foodCategory: offCat       || f.foodCategory,
-          cal:     n['energy-kcal_serving'] != null ? String(Math.round(n['energy-kcal_serving'])) : f.cal,
-          protein: n['proteins_serving']    != null ? String(Math.round(n['proteins_serving']))    : f.protein,
-          carbs:   n['carbohydrates_serving'] != null ? String(Math.round(n['carbohydrates_serving'])) : f.carbs,
-          fat:     n['fat_serving']          != null ? String(Math.round(n['fat_serving']))          : f.fat,
+          cal:     cal_ps     != null ? String(cal_ps)     : f.cal,
+          protein: protein_ps != null ? String(protein_ps) : f.protein,
+          carbs:   carbs_ps   != null ? String(carbs_ps)   : f.carbs,
+          fat:     fat_ps     != null ? String(fat_ps)     : f.fat,
         }));
       });
     } catch {
-      finishScan(false, 'Lookup failed', '🔍');
+      ringLoopRef.current?.stop(); emojiLoopRef.current?.stop();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Animated.timing(loadOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+        setBarcodeProcessing(false); loadRingAnim.setValue(0); loadEmojiAnim.setValue(0);
+      });
+      setShowBarcodeScanner(false);
+      setTimeout(() => {
+        Alert.alert(
+          'Lookup failed',
+          'Couldn\'t reach the product database. Check your connection, or add the item manually.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => setBarcodeScanned(false) },
+            { text: 'Add manually', onPress: () => setShowAdd(true) },
+          ]
+        );
+      }, 350);
     }
   };
 
@@ -938,40 +1445,33 @@ export default function FridgeScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') { showToast('Camera permission needed', true); setScanning(false); return; }
-      const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.8 });
-      if (result.canceled || !result.assets[0]) { setScanning(false); return; }
-      showToast('Scanning label... 📷');
-      const base64 = result.assets[0].base64;
-      const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
-      if (!apiKey || apiKey === 'your_api_key_here') { showToast('Add your API key to .env', true); setScanning(false); return; }
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
+      if (result.canceled || !result.assets?.[0]?.base64) { setScanning(false); return; }
+      showToast('Scanning for expiry date… 📷');
+      const base64 = result.assets[0].base64!;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/goodbot`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON}` },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6', max_tokens: 400,
-          messages: [{ role: 'user', content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-            { type: 'text', text: 'You are a food label scanner. Look at this image and extract: product name (specific, e.g. "Whole Milk 2%" not just "milk"), quantity as a number, unit (lbs, oz, g, kg, ml, L, or count), best-by/use-by/expiry date as YYYY-MM-DD (if only month/day visible assume current year 2026), calories per serving, protein grams per serving, carbohydrates grams per serving, fat grams per serving. If a field is not visible set it to 0 or empty string. Respond ONLY with raw JSON, no markdown, no explanation: {"name":"","qty":1,"unit":"","expiryDate":"","cal":0,"protein":0,"carbs":0,"fat":0}' }
-          ]}]
-        })
+          systemPrompt: 'You are an expiry date extractor. Respond ONLY with raw JSON — no markdown, no explanation.',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+              { type: 'text', text: 'Find any best-by, use-by, sell-by, or expiry date printed on this label. Convert it to YYYY-MM-DD format. If only month and year are visible (e.g. "MAY 2026" or "05/26"), use the last day of that month. If only month/day with no year, assume the nearest future year. Return ONLY: {"expiryDate":"YYYY-MM-DD"}. If no date is found return {"expiryDate":""}.' },
+            ],
+          }],
+        }),
       });
-      const data = await response.json();
-      if (!data.content?.[0]?.text) throw new Error('No response');
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      if (!data.content?.[0]?.text) throw new Error('Empty response');
       const json = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
-      setForm(f => ({
-        ...f,
-        name:       json.name       || f.name,
-        qty:        json.qty        ? String(json.qty)     : f.qty,
-        unit:       json.unit       || f.unit,
-        expiryDate: json.expiryDate || f.expiryDate,
-        cal:        json.cal        ? String(json.cal)     : f.cal,
-        protein:    json.protein    ? String(json.protein) : f.protein,
-        carbs:      json.carbs      ? String(json.carbs)   : f.carbs,
-        fat:        json.fat        ? String(json.fat)     : f.fat,
-      }));
-      showToast('Label scanned! 🌱');
-    } catch (e) {
-      showToast('Could not read label', true);
+      if (!json.expiryDate) { showToast('No expiry date found on label', true); setScanning(false); return; }
+      setForm(f => ({ ...f, expiryDate: json.expiryDate }));
+      showToast('Expiry date captured! 📅');
+    } catch (e: any) {
+      showToast(`Scan failed: ${e.message || 'unknown error'}`, true);
     }
     setScanning(false);
   };
@@ -1006,41 +1506,172 @@ export default function FridgeScreen() {
       unit:     form.unit,
       category: form.category,
       addedAt:      editItem ? editItem.addedAt : Date.now(),
-      foodCategory: form.foodCategory || (editItem ? editItem.foodCategory : undefined),
+      foodCategory: (() => {
+        const derived = getFoodCategory(safeName);
+        return derived !== 'Other' ? derived : (form.foodCategory || 'Other');
+      })(),
     };
-    if (editItem) {
-      setItems(prev => prev.map(i => i.id === editItem.id ? built : i));
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast(`${safeName} updated ✏️`);
+
+    const doSave = (item: Item) => {
+      if (editItem) {
+        setItems(prev => prev.map(i => i.id === editItem.id ? item : i));
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        showToast(`${safeName} updated ✏️`);
+      } else {
+        setItems(prev => [...prev, item]);
+        setNextId(prev => prev + 1);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        triggerSuccess();
+        showToast(`${safeName} added! 🌱`);
+        updateStats('totalAdded');
+      }
+      setShowAdd(false);
+    };
+
+    const warning = getStorageWarning(safeName, form.category);
+    if (warning) {
+      Alert.alert(
+        'Heads up — storage mismatch',
+        warning,
+        [
+          { text: 'Change location', style: 'cancel' },
+          { text: 'Store here anyway', onPress: () => doSave(built) },
+        ]
+      );
     } else {
-      setItems(prev => [...prev, built]);
-      setNextId(prev => prev + 1);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      triggerSuccess();
-      showToast(`${safeName} added! 🌱`);
-      updateStats('totalAdded');
+      doSave(built);
     }
-    setShowAdd(false);
   };
 
-  const renderItems = () => {
+  const toggleSection = (key: string) => {
+    LayoutAnimation.configureNext({
+      duration: 260,
+      create:  { type: 'easeInEaseOut', property: 'opacity' },
+      update:  { type: 'easeInEaseOut' },
+      delete:  { type: 'easeInEaseOut', property: 'opacity' },
+    });
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      AsyncStorage.setItem('gogood_collapsed_sections', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  // Renders category rows (with collapse) for a given list of items.
+  // locPrefix makes category keys unique per-location in the All view.
+  const renderCategorySection = (sectionItems: Item[], locPrefix = '') => {
     const grouped: Record<string, Item[]> = {};
-    filtered.forEach(item => {
-      const cat = item.foodCategory || getFoodCategory(item.baseName);
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(item);
+    sectionItems.forEach(item => {
+      const cat = resolveCategory(item);
+      (grouped[cat] = grouped[cat] || []).push(item);
     });
     return CATEGORY_ORDER
       .filter(cat => grouped[cat]?.length > 0)
-      .flatMap(cat => [
-        <View key={`hdr-${cat}`} style={styles.categoryHeader}>
-          <Text style={styles.categoryHeaderEmoji}>{CATEGORY_ICONS[cat]}</Text>
-          <Text style={[styles.categoryHeaderText, { color: colors.textSub }]}>{cat}</Text>
-          <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
-          <Text style={[styles.categoryHeaderCount, { color: colors.textMuted }]}>{grouped[cat].length}</Text>
-        </View>,
-        ...grouped[cat].map(item => renderItemCard(item)),
-      ]);
+      .map(cat => {
+        const key      = locPrefix ? `${locPrefix}::${cat}` : cat;
+        const group    = [...grouped[cat]].sort((a, b) => {
+          if (sortBy === 'alpha')       return (a.baseName||'').localeCompare(b.baseName||'');
+          if (sortBy === 'alphaDesc')   return (b.baseName||'').localeCompare(a.baseName||'');
+          if (sortBy === 'protein')     return b.protein - a.protein;
+          if (sortBy === 'proteinAsc')  return a.protein - b.protein;
+          if (sortBy === 'cal')         return b.cal - a.cal;
+          if (sortBy === 'calAsc')      return a.cal - b.cal;
+          if (sortBy === 'qty')         return b.qtyNum - a.qtyNum;
+          if (sortBy === 'qtyAsc')      return a.qtyNum - b.qtyNum;
+          if (sortBy === 'recent')      return b.addedAt - a.addedAt;
+          if (sortBy === 'oldest')      return a.addedAt - b.addedAt;
+          return getDaysLeft(a.expiryDate) - getDaysLeft(b.expiryDate); // default: soonest first
+        });
+        const collapsed = collapsedSections.has(key);
+        return (
+          <View key={key}>
+            <TouchableOpacity
+              style={[styles.categoryHeader, locPrefix ? styles.categoryHeaderNested : undefined]}
+              onPress={() => toggleSection(key)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.categoryHeaderEmoji}>{CATEGORY_ICONS[cat] || '🥘'}</Text>
+              <Text style={[styles.categoryHeaderText, { color: colors.textSub }]}>{cat}</Text>
+              <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
+              <Text style={[styles.categoryHeaderCount, { color: colors.textMuted }]}>{group.length}</Text>
+              <Text style={[styles.categoryChevron, { color: colors.textMuted }]}>
+                {collapsed ? '›' : '⌄'}
+              </Text>
+            </TouchableOpacity>
+            {!collapsed && group.map(item => renderItemCard(item))}
+          </View>
+        );
+      });
+  };
+
+  const renderItems = () => {
+    const isFlat = ['expiry', 'expiryAsc'].includes(sortBy) || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0;
+
+    // ── Flat / sorted mode ─────────────────────────────────────────
+    if (isFlat) {
+      const LOC_ICON: Record<Category, string> = { fridge: '❄️', freezer: '🧊', pantry: '🥫' };
+      return (
+        <>
+          {filtered.map(item => (
+            <View key={item.id}>
+              {activeTab === 'all' && (
+                <View style={styles.locationTag}>
+                  <Text style={{ fontSize: 9 }}>{LOC_ICON[item.category]}</Text>
+                  <Text style={[styles.locationTagText, { color: colors.textMuted }]}>{item.category}</Text>
+                </View>
+              )}
+              {renderItemCard(item)}
+            </View>
+          ))}
+        </>
+      );
+    }
+
+    // ── All tab — two-level tree ────────────────────────────────────
+    if (activeTab === 'all') {
+      const LOC_META: { key: Category; icon: string; label: string; color: string }[] = [
+        { key: 'fridge',  icon: '❄️', label: 'Fridge',  color: colors.teal },
+        { key: 'freezer', icon: '🧊', label: 'Freezer', color: '#4A9EDB'   },
+        { key: 'pantry',  icon: '🥫', label: 'Pantry',  color: '#C47B3A'   },
+      ];
+      return (
+        <>
+          {LOC_META.map(({ key: loc, icon, label, color }) => {
+            const locItems = filtered.filter(i => i.category === loc);
+            if (locItems.length === 0) return null;
+            const locCollapsed = collapsedSections.has(loc);
+            return (
+              <View key={loc} style={styles.locationSection}>
+                <TouchableOpacity
+                  style={[styles.locationHeader, { borderLeftColor: color }]}
+                  onPress={() => toggleSection(loc)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.locationHeaderIcon}>{icon}</Text>
+                  <Text style={[styles.locationHeaderText, { color }]}>{label}</Text>
+                  <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
+                  <Text style={[styles.locationHeaderCount, { color: colors.textMuted }]}>
+                    {locItems.length} item{locItems.length !== 1 ? 's' : ''}
+                  </Text>
+                  <Text style={[styles.categoryChevron, { color }]}>
+                    {locCollapsed ? '›' : '⌄'}
+                  </Text>
+                </TouchableOpacity>
+                {!locCollapsed && (
+                  <View style={styles.locationContent}>
+                    {renderCategorySection(locItems, loc)}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </>
+      );
+    }
+
+    // ── Single-location tab — one-level category tree ──────────────
+    return <>{renderCategorySection(filtered)}</>;
   };
 
   const renderItemCard = (item: Item) => {
@@ -1064,7 +1695,7 @@ export default function FridgeScreen() {
             {item.baseName}
             {item.batch > 1 && <Text style={styles.batchInline}> · batch {item.batch}</Text>}
           </Text>
-          <Text style={styles.itemQty}>{item.qty}</Text>
+          <Text style={styles.itemQty}>{item.unit ? `${item.qtyNum} ${item.unit}` : item.qty || item.qtyNum}</Text>
         </View>
         <View style={styles.itemRight}>
           <View style={[styles.badge, { backgroundColor: ICON_BG[liveBadge] }]}>
@@ -1150,20 +1781,7 @@ export default function FridgeScreen() {
 
         {/* ── Header ── */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.menuBtn} onPress={showDrawer ? closeDrawer : openDrawer}>
-            <Animated.View style={[styles.menuLine, { transform: [
-              { translateY: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 6.5] }) },
-              { rotate:    menuAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }) },
-            ]}]} />
-            <Animated.View style={[styles.menuLine, { width: 14,
-              opacity:   menuAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-              transform: [{ scaleX: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.3] }) }],
-            }]} />
-            <Animated.View style={[styles.menuLine, { transform: [
-              { translateY: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6.5] }) },
-              { rotate:    menuAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-45deg'] }) },
-            ]}]} />
-          </TouchableOpacity>
+          {menuBtn}
           <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
           <Animated.View style={{ transform: [{ scale: addBtnScale }] }}>
             <TouchableOpacity
@@ -1198,18 +1816,19 @@ export default function FridgeScreen() {
 
         {/* ── Tabs ── */}
         <View style={styles.tabs}>
-          {(['fridge', 'freezer', 'pantry'] as const).map(tab => (
+          {(['all', 'fridge', 'freezer', 'pantry'] as const).map(tab => (
             <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]} onPress={() => switchTab(tab)}>
               <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                {tab === 'fridge' ? '🥗' : tab === 'freezer' ? '❄️' : '🥫'} {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'all' ? '🗂️' : tab === 'fridge' ? '❄️' : tab === 'freezer' ? '🧊' : '🥫'} {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {/* ── Macro bar ── */}
+        <Animated.View style={{ transform: [{ scale: heroScale }] }}>
         <View style={styles.macroBar}>
-          <Text style={styles.macroTitle}>{activeTab.toUpperCase()} MACROS</Text>
+          <Text style={styles.macroTitle}>{activeTab === 'all' ? 'ALL' : activeTab.toUpperCase()} MACROS · {filtered.length} ITEMS</Text>
           <View style={styles.macroRow}>
             {[
               { label: 'PROTEIN', val: Math.round(totalProtein) + 'g' },
@@ -1227,7 +1846,9 @@ export default function FridgeScreen() {
             ))}
           </View>
         </View>
+        </Animated.View>
 
+        <Animated.View style={{ flex: 1, opacity: contentOpacity, transform: [{ translateY: contentSlide }] }}>
         {/* ── Sort bar ── */}
         <View style={styles.sortBar}>
           <View style={styles.sortBarLeft}>
@@ -1239,7 +1860,17 @@ export default function FridgeScreen() {
           </View>
           <Text style={styles.sortBarLabel}>{SORT_LABELS[sortBy].toUpperCase()}</Text>
           <View style={styles.sortBarRight}>
-            <TouchableOpacity onPress={() => setShowSortFilter(true)}>
+            <TouchableOpacity
+              style={styles.sortFilterBtn}
+              onPress={() => setShowSortFilter(true)}
+            >
+              {(filterExpiry.length + filterFoodCats.length + filterNutrition.length) > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>
+                    {filterExpiry.length + filterFoodCats.length + filterNutrition.length}
+                  </Text>
+                </View>
+              )}
               <Text style={styles.sortFilterBtnText}>sort & filter ↕</Text>
             </TouchableOpacity>
           </View>
@@ -1250,9 +1881,9 @@ export default function FridgeScreen() {
           <Animated.View style={{ opacity: listFade, transform: [{ translateY: listSlide }] }}>
             {filtered.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>🥗</Text>
-                <Text style={styles.emptyTitle}>{searchQuery || filterFoodCats.length > 0 ? 'No matches' : 'Nothing here yet'}</Text>
-                <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 ? 'Try adjusting your search or filters' : 'Tap + to add your first item'}</Text>
+                <Text style={styles.emptyIcon}>{activeTab === 'all' ? '🗂️' : activeTab === 'freezer' ? '🧊' : activeTab === 'pantry' ? '🥫' : '❄️'}</Text>
+                <Text style={styles.emptyTitle}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'No matches' : 'Nothing here yet'}</Text>
+                <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'Try adjusting your search or filters' : 'Tap + to add your first item'}</Text>
               </View>
             ) : renderItems()}
           </Animated.View>
@@ -1260,7 +1891,7 @@ export default function FridgeScreen() {
 
         {/* ── Good Bot CTA ── */}
         <View style={styles.goodBotWrapper}>
-          <TouchableOpacity style={styles.goodBotBtn} onPress={() => allInTab.length === 0 ? openAdd() : router.navigate('/(tabs)/goodbot' as any)}>
+          <TouchableOpacity style={styles.goodBotBtn} onPress={() => items.length === 0 ? openAdd() : router.navigate('/(tabs)/goodbot' as any)}>
             <View style={styles.goodBotLeft}>
               <View style={styles.goodBotAvatarWrap}>
                 <Text style={{ fontSize: 20 }}>🤖</Text>
@@ -1274,268 +1905,13 @@ export default function FridgeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Drawer ── */}
-        {showDrawer && (
-          <TouchableOpacity style={styles.drawerOverlay} activeOpacity={1} onPress={closeDrawer}>
-            <Animated.View style={[styles.drawer, { transform: [{ translateX: drawerAnim }] }]}>
-              <TouchableOpacity activeOpacity={1}>
-                <View style={styles.drawerHeader}>
-                  <Text style={styles.drawerLogo}>go<Text style={styles.drawerLogoGreen}>good</Text></Text>
-                  <TouchableOpacity onPress={closeDrawer} style={styles.drawerClose}>
-                    <Text style={styles.drawerCloseText}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.drawerSection}>
-                  <Text style={styles.drawerSectionLabel}>account</Text>
-                  <TouchableOpacity style={styles.drawerItem} onPress={() => openFromDrawer(setShowProfile)}>
-                    <Text style={styles.drawerItemIcon}>👤</Text>
-                    <Text style={styles.drawerItemText}>Profile</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.drawerItem} onPress={() => openFromDrawer(setShowNotifications)}>
-                    <Text style={styles.drawerItemIcon}>🔔</Text>
-                    <Text style={styles.drawerItemText}>Notifications</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.drawerItem} onPress={() => openFromDrawer(setShowPro)}>
-                    <Text style={styles.drawerItemIcon}>🌱</Text>
-                    <Text style={styles.drawerItemText}>Go Good Pro</Text>
-                    <View style={styles.proBadge}><Text style={styles.proBadgeText}>soon</Text></View>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.drawerSection}>
-                  <Text style={styles.drawerSectionLabel}>app</Text>
-                  <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); router.navigate('/(tabs)/foodreport' as any); }}>
-                    <Text style={styles.drawerItemIcon}>📊</Text>
-                    <Text style={styles.drawerItemText}>Food Report</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.drawerItem} onPress={toggleTheme}>
-                    <Text style={styles.drawerItemIcon}>{isDark ? '☀️' : '🌙'}</Text>
-                    <Text style={styles.drawerItemText}>{isDark ? 'Light mode' : 'Dark mode'}</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.drawerItem} onPress={toggleDensity}>
-                    <Text style={styles.drawerItemIcon}>{listDensity === 'compact' ? '🔍' : '📋'}</Text>
-                    <Text style={styles.drawerItemText}>{listDensity === 'compact' ? 'Regular view' : 'Compact view'}</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.drawerItem} onPress={() => openFromDrawer(setShowHelp)}>
-                    <Text style={styles.drawerItemIcon}>❓</Text>
-                    <Text style={styles.drawerItemText}>Help & Feedback</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.drawerItem} onPress={() => openFromDrawer(setShowRate)}>
-                    <Text style={styles.drawerItemIcon}>⭐</Text>
-                    <Text style={styles.drawerItemText}>Rate Go Good</Text>
-                    <Text style={styles.drawerItemArrow}>›</Text>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                  <Text style={styles.logoutText}>Log out</Text>
-                </TouchableOpacity>
-                <Text style={styles.drawerVersion}>Go Good v0.1 · made with 🌱 in NC</Text>
-              </TouchableOpacity>
-            </Animated.View>
-          </TouchableOpacity>
-        )}
+        </Animated.View>
 
-        {/* ── Profile ── */}
-        <BottomSheet visible={showProfile} onClose={() => setShowProfile(false)}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text style={styles.modalTitle}>Profile</Text>
-              <TouchableOpacity onPress={() => setShowProfile(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-            </View>
-            <View style={{ alignItems: 'center', marginBottom: 20 }}>
-              <TouchableOpacity onPress={pickProfilePhoto}>
-                <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  {profilePhoto
-                    ? <Image source={{ uri: profilePhoto }} style={{ width: 84, height: 84 }} />
-                    : <Text style={{ fontSize: 36 }}>{profileName ? profileName[0].toUpperCase() : '👤'}</Text>
-                  }
-                </View>
-                <View style={{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 13 }}>📷</Text>
-                </View>
-              </TouchableOpacity>
-              <Text style={{ fontSize: 10, color: '#aaa', marginTop: 6 }}>tap to change photo</Text>
-            </View>
-            <View style={{ flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: 12, padding: 12, marginBottom: 20 }}>
-              {[
-                { val: items.length, label: 'in storage', color: '#085041' },
-                { val: stats.goneGood, label: 'gone good', color: '#1D9E75' },
-                { val: stats.goneBad, label: 'gone bad', color: '#E24B4A' },
-              ].map((s, i) => (
-                <View key={s.label} style={{ flex: 1, alignItems: 'center', borderLeftWidth: i > 0 ? 0.5 : 0, borderLeftColor: colors.border }}>
-                  <Text style={{ fontSize: 22, fontWeight: '700', color: s.color }}>{s.val}</Text>
-                  <Text style={{ fontSize: 9, color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>{s.label}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.fieldLabel}>Name</Text>
-            <TextInput style={styles.input} placeholder="Your name" placeholderTextColor={colors.placeholder} value={profileName} onChangeText={setProfileName} />
-            <Text style={styles.fieldLabel}>Email</Text>
-            <TextInput style={styles.input} placeholder="your@email.com" placeholderTextColor={colors.placeholder} value={profileEmail} onChangeText={setProfileEmail} keyboardType="email-address" autoCapitalize="none" />
-            <Text style={styles.fieldLabel}>Household size</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 10, padding: 11 }}>
-              <Text style={{ fontSize: 14, color: colors.inputText }}>{householdSize} {householdSize === 1 ? 'person' : 'people'}</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity style={[styles.qtyBtn, householdSize <= 1 && { backgroundColor: '#ccc' }]} onPress={() => setHouseholdSize(h => Math.max(1, h - 1))}>
-                  <Text style={styles.qtyBtnText}>−</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.qtyBtn, householdSize >= 10 && { backgroundColor: '#ccc' }]} onPress={() => setHouseholdSize(h => Math.min(10, h + 1))}>
-                  <Text style={styles.qtyBtnText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <Text style={styles.fieldLabel}>Dietary preferences</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-              {['Vegan', 'Vegetarian', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Nut-Free', 'Halal', 'Kosher'].map(pref => {
-                const on = dietaryPrefs.includes(pref);
-                return (
-                  <TouchableOpacity key={pref} onPress={() => setDietaryPrefs(prev => on ? prev.filter(p => p !== pref) : [...prev, pref])}
-                    style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: on ? '#085041' : colors.surface, borderWidth: 1, borderColor: on ? '#085041' : colors.border }}>
-                    <Text style={{ fontSize: 11, fontWeight: '500', color: on ? 'white' : colors.textSub }}>{pref}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 20 }]} onPress={saveProfile}>
-              <Text style={styles.addConfirmText}>Save profile →</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowProfile(false)}>
-              <Text style={styles.cancelText}>cancel</Text>
-            </TouchableOpacity>
-            <View style={{ height: 20 }} />
-          </ScrollView>
-        </BottomSheet>
-
-        {/* ── Notifications ── */}
-        <BottomSheet visible={showNotifications} onClose={() => setShowNotifications(false)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <Text style={styles.modalTitle}>Notifications</Text>
-            <TouchableOpacity onPress={() => setShowNotifications(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-          </View>
-          {[
-            { key: 'expiry', val: notifExpiry, set: setNotifExpiry, title: 'Expiry alerts', sub: 'Get notified 3 days before items expire' },
-            { key: 'digest', val: notifDigest, set: setNotifDigest, title: 'Daily digest', sub: 'Morning summary of what to use today' },
-            { key: 'weekly', val: notifWeekly, set: setNotifWeekly, title: 'Weekly report', sub: 'See your food waste stats every Sunday' },
-          ].map(n => (
-            <View key={n.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '500', color: colors.text }}>{n.title}</Text>
-                <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>{n.sub}</Text>
-              </View>
-              <Switch value={n.val} onValueChange={n.set} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />
-            </View>
-          ))}
-          <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 20 }]} onPress={saveNotifications}>
-            <Text style={styles.addConfirmText}>Save →</Text>
-          </TouchableOpacity>
-        </BottomSheet>
-
-        {/* ── Go Good Pro ── */}
-        <BottomSheet visible={showPro} onClose={() => setShowPro(false)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={styles.modalTitle}>Go Good Pro 🌱</Text>
-            <TouchableOpacity onPress={() => setShowPro(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-          </View>
-          <View style={{ backgroundColor: '#E1F5EE', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginBottom: 16 }}>
-            <Text style={{ fontSize: 10, fontWeight: '600', color: '#085041' }}>COMING SOON</Text>
-          </View>
-          {[
-            { icon: '📷', title: 'Unlimited label scanning', sub: 'Scan as many items as you want' },
-            { icon: '🤖', title: 'AI recipe suggestions', sub: 'Recipes based on what\'s about to expire' },
-            { icon: '👨‍👩‍👧', title: 'Household sharing', sub: 'Share your inventory with family' },
-            { icon: '📊', title: 'Waste analytics', sub: 'Track food and money saved over time' },
-            { icon: '⚡', title: 'Priority support', sub: 'Get help fast when you need it' },
-          ].map(f => (
-            <View key={f.icon} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-              <Text style={{ fontSize: 22 }}>{f.icon}</Text>
-              <View>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>{f.title}</Text>
-                <Text style={{ fontSize: 11, color: colors.textSub }}>{f.sub}</Text>
-              </View>
-            </View>
-          ))}
-          <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 20 }]} onPress={() => { showToast('Added to waitlist! 🌱'); setShowPro(false); }}>
-            <Text style={styles.addConfirmText}>Join waitlist →</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowPro(false)}>
-            <Text style={styles.cancelText}>maybe later</Text>
-          </TouchableOpacity>
-        </BottomSheet>
-
-        {/* ── Help & Feedback ── */}
-        <BottomSheet visible={showHelp} onClose={() => setShowHelp(false)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Text style={styles.modalTitle}>Help & Feedback</Text>
-            <TouchableOpacity onPress={() => setShowHelp(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-          </View>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={[styles.fieldLabel, { marginTop: 0 }]}>FAQ</Text>
-            {[
-              { q: 'How do I add items?', a: 'Tap the + button in the top right. Fill in details manually or use 📷 scan label to auto-fill from a food package.' },
-              { q: 'What do the badge colors mean?', a: 'Green = 6+ days left. Amber = 1–5 days. Red = expires today. Dark = already expired. Blue = frozen.' },
-              { q: 'How does label scanning work?', a: 'When adding an item, tap 📷 scan label, take a photo of the packaging, and AI fills in the name, expiry, and macros automatically.' },
-              { q: 'How do I mark something as used?', a: 'Tap any item to expand it, then tap ✓ gone good when used, or 🥀 gone bad if it went to waste.' },
-              { q: 'Can I share with family?', a: 'Household sharing is coming in Go Good Pro. Join the waitlist from the Pro section in this menu.' },
-              { q: 'How do I edit an item?', a: 'Expand the item by tapping it, then tap the ✏️ button to open the edit form.' },
-            ].map((item, i) => (
-              <TouchableOpacity key={i} onPress={() => setOpenFaq(openFaq === i ? null : i)} style={{ paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text, flex: 1, paddingRight: 8 }}>{item.q}</Text>
-                  <Text style={{ fontSize: 12, color: colors.textMuted }}>{openFaq === i ? '▲' : '▾'}</Text>
-                </View>
-                {openFaq === i && <Text style={{ fontSize: 12, color: colors.textSub, marginTop: 8, lineHeight: 18 }}>{item.a}</Text>}
-              </TouchableOpacity>
-            ))}
-            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Send Feedback</Text>
-            <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 4 }]} onPress={() => Linking.openURL('mailto:support@gogood.app?subject=Go Good Feedback')}>
-              <Text style={styles.addConfirmText}>✉️ Email us →</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowHelp(false)}>
-              <Text style={styles.cancelText}>close</Text>
-            </TouchableOpacity>
-            <View style={{ height: 20 }} />
-          </ScrollView>
-        </BottomSheet>
-
-        {/* ── Rate Go Good ── */}
-        <BottomSheet visible={showRate} onClose={() => setShowRate(false)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <Text style={styles.modalTitle}>Rate Go Good</Text>
-            <TouchableOpacity onPress={() => setShowRate(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-          </View>
-          <Text style={{ fontSize: 13, color: '#6B6860', textAlign: 'center', marginBottom: 16 }}>Enjoying Go Good? Your rating helps us grow 🌱</Text>
-          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 20 }}>
-            {[1,2,3,4,5].map(star => (
-              <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                <Text style={{ fontSize: 36 }}>{star <= rating ? '⭐' : '☆'}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {rating > 0 && (
-            <>
-              <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top' }]} placeholder="Tell us what you think (optional)" placeholderTextColor={colors.placeholder} value={review} onChangeText={setReview} multiline />
-              <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 12 }]} onPress={() => {
-                if (rating === 5) Linking.openURL('https://apps.apple.com/app/id0000000000');
-                showToast('Thanks for the feedback! 🌱');
-                setShowRate(false); setRating(0); setReview('');
-              }}>
-                <Text style={styles.addConfirmText}>Submit →</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowRate(false)}>
-            <Text style={styles.cancelText}>maybe later</Text>
-          </TouchableOpacity>
-        </BottomSheet>
+        {drawerEl}
 
         {/* ── Add / Edit ── */}
         <BottomSheet visible={showAdd} onClose={() => setShowAdd(false)}>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 180 }}>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ maxHeight: SCREEN_H * 0.72 }} contentContainerStyle={{ paddingBottom: 180 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <Text style={styles.modalTitle}>{editItem ? 'Edit item' : 'Add item'}</Text>
             </View>
@@ -1588,7 +1964,7 @@ export default function FridgeScreen() {
               {(['fridge', 'freezer', 'pantry'] as const).map(cat => (
                 <TouchableOpacity key={cat} style={[styles.categoryBtn, form.category === cat && styles.categoryBtnActive]} onPress={() => setForm(f => ({...f, category: cat}))}>
                   <Text style={[styles.categoryBtnText, form.category === cat && styles.categoryBtnTextActive]}>
-                    {cat === 'fridge' ? '🥗' : cat === 'freezer' ? '❄️' : '🥫'} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    {cat === 'fridge' ? '❄️' : cat === 'freezer' ? '🧊' : '🥫'} {cat.charAt(0).toUpperCase() + cat.slice(1)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1637,7 +2013,7 @@ export default function FridgeScreen() {
                 <TouchableOpacity
                   key={e.key}
                   style={[
-                    { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', backgroundColor: 'white' },
+                    { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
                     filterExpiry.includes(e.key) && { backgroundColor: e.bg, borderColor: 'transparent' }
                   ]}
                   onPress={() => setFilterExpiry(prev =>
@@ -1645,7 +2021,7 @@ export default function FridgeScreen() {
                   )}
                 >
                   <Text style={{ fontSize: 9 }}>{e.emoji}</Text>
-                  <Text style={[{ fontSize: 12, color: '#6B6860', fontWeight: '500' }, filterExpiry.includes(e.key) && { color: e.text }]}>{e.label}</Text>
+                  <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '500' }, filterExpiry.includes(e.key) && { color: e.text }]}>{e.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -1654,36 +2030,50 @@ export default function FridgeScreen() {
               <>
                 <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Filter by food category</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                  <TouchableOpacity
-                    style={[
-                      { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                      filterFoodCats.length === 0 && { backgroundColor: '#085041', borderColor: '#085041' }
-                    ]}
-                    onPress={() => setFilterFoodCats([])}
-                  >
-                    <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '500' }, filterFoodCats.length === 0 && { color: 'white' }]}>All</Text>
-                  </TouchableOpacity>
                   {availableFoodCats.map(cat => (
                     <TouchableOpacity
                       key={cat}
                       style={[
-                        { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+                        { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
                         filterFoodCats.includes(cat) && { backgroundColor: '#085041', borderColor: '#085041' }
                       ]}
                       onPress={() => setFilterFoodCats(prev =>
                         prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
                       )}
                     >
-                      <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '500' }, filterFoodCats.includes(cat) && { color: 'white' }]}>{cat}</Text>
+                      <Text style={{ fontSize: 13 }}>{CATEGORY_ICONS[cat] || '🥘'}</Text>
+                      <Text style={[{ fontSize: 11, color: colors.textSub, fontWeight: '500' }, filterFoodCats.includes(cat) && { color: 'white' }]}>{cat}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </>
             )}
 
+            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Filter by nutrition</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+              {NUTRITION_FILTERS.map(f => (
+                <TouchableOpacity
+                  key={f.key}
+                  style={[
+                    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+                    filterNutrition.includes(f.key) && { backgroundColor: '#085041', borderColor: '#085041' }
+                  ]}
+                  onPress={() => setFilterNutrition(prev =>
+                    prev.includes(f.key) ? prev.filter(x => x !== f.key) : [...prev, f.key]
+                  )}
+                >
+                  <Text style={{ fontSize: 15 }}>{f.emoji}</Text>
+                  <View>
+                    <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '600' }, filterNutrition.includes(f.key) && { color: 'white' }]}>{f.label}</Text>
+                    <Text style={[{ fontSize: 10, color: colors.textMuted }, filterNutrition.includes(f.key) && { color: 'rgba(255,255,255,0.7)' }]}>{f.desc}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <TouchableOpacity
-              style={{ alignSelf: 'flex-start', marginTop: 12 }}
-              onPress={() => { setFilterExpiry([]); setFilterFoodCats([]); }}
+              style={{ alignSelf: 'flex-start', marginTop: 14 }}
+              onPress={() => { setFilterExpiry([]); setFilterFoodCats([]); setFilterNutrition([]); }}
             >
               <Text style={{ fontSize: 12, color: colors.textMuted }}>clear all filters</Text>
             </TouchableOpacity>
@@ -1774,9 +2164,13 @@ export default function FridgeScreen() {
             {allExpiringSoon.length === 0 ? (
               <Text style={{ color: colors.textSub, textAlign: 'center', paddingVertical: 24 }}>Nothing expiring soon!</Text>
             ) : (
-              [...allExpiringSoon].sort((a,b) => a.days - b.days).map(item => (
+              [...allExpiringSoon].sort((a,b) => getDaysLeft(a.expiryDate) - getDaysLeft(b.expiryDate)).map(item => {
+                const liveDays    = getDaysLeft(item.expiryDate);
+                const liveBadge   = getBadge(liveDays, item.category);
+                const liveExpires = getExpiryText(liveDays);
+                return (
                 <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: colors.border, gap: 12 }}>
-                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: ICON_BG[item.badge], alignItems: 'center', justifyContent: 'center' }}>
+                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: ICON_BG[liveBadge], alignItems: 'center', justifyContent: 'center' }}>
                     <Text style={{ fontSize: 22 }}>{item.icon}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
@@ -1785,11 +2179,12 @@ export default function FridgeScreen() {
                       {item.category.charAt(0).toUpperCase() + item.category.slice(1)} · {item.qty}
                     </Text>
                   </View>
-                  <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: BADGE_SOFT[item.badge].bg }}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: BADGE_SOFT[item.badge].text }}>{item.expires}</Text>
+                  <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: BADGE_SOFT[liveBadge].bg }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: BADGE_SOFT[liveBadge].text }}>{liveExpires}</Text>
                   </View>
                 </View>
-              ))
+                );
+              })
             )}
             <View style={{ height: 20 }} />
           </ScrollView>
@@ -1800,7 +2195,7 @@ export default function FridgeScreen() {
   );
 }
 
-function createStyles(c: ThemeColors, compact = false) { return StyleSheet.create({
+function createStyles(c: ThemeColors, compact = false, isDark = false) { return StyleSheet.create({
   safeArea:              { flex: 1, backgroundColor: c.bg },
   container:             { flex: 1, backgroundColor: c.bg },
   blastWrap:             { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 },
@@ -1810,31 +2205,31 @@ function createStyles(c: ThemeColors, compact = false) { return StyleSheet.creat
   toastText:             { color: 'white', fontSize: 11, fontWeight: '500' },
 
   // Header
-  header:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10, backgroundColor: c.bg },
+  header:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10, backgroundColor: c.bg, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
   logo:                  { fontSize: 30, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   logoGreen:             { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   menuBtn:               { width: 32, height: 32, justifyContent: 'center', gap: 5 },
   menuLine:              { width: 20, height: 1.5, backgroundColor: c.text, borderRadius: 999 },
   expiringBadge:         { backgroundColor: '#FFEAEA', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   expiringBadgeText:     { fontSize: 11, fontWeight: '600', color: '#C0392B' },
-  addBtn:                { width: 34, height: 34, borderRadius: 17, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' },
+  addBtn:                { width: 34, height: 34, borderRadius: 17, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center', shadowColor: '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 14, elevation: 8 },
   addBtnText:            { color: 'white', fontSize: 22, lineHeight: 26, fontWeight: '300' },
 
   // Search
   searchRow:             { paddingHorizontal: 16, paddingBottom: 10 },
-  searchBar:             { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: c.border, gap: 8 },
+  searchBar:             { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: c.border, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
   searchIcon:            { fontSize: 15 },
   searchInput:           { flex: 1, fontSize: 14, color: c.text },
 
   // Tabs
-  tabs:                  { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
-  tab:                   { flex: 1, paddingVertical: 10, borderRadius: 14, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
-  tabActive:             { backgroundColor: c.brand, borderColor: c.brand },
-  tabText:               { fontSize: 12, fontWeight: '500', color: c.textSub },
+  tabs:                  { flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingBottom: 10 },
+  tab:                   { flex: 1, paddingVertical: 9, borderRadius: 12, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.10, shadowRadius: 7, elevation: 3 },
+  tabActive:             { backgroundColor: isDark ? '#1D9E75' : c.brand, borderColor: isDark ? '#1D9E75' : c.brand },
+  tabText:               { fontSize: 10, fontWeight: '500', color: c.textSub },
   tabTextActive:         { color: 'white', fontWeight: '600' },
 
   // Macro bar
-  macroBar:              { marginHorizontal: 16, marginBottom: compact ? 6 : 10, backgroundColor: c.surface, borderRadius: 14, borderWidth: 0.5, borderColor: c.border, padding: compact ? 8 : 14 },
+  macroBar:              { marginHorizontal: 16, marginBottom: compact ? 6 : 10, backgroundColor: c.surface, borderRadius: 14, borderWidth: 0.5, borderColor: c.border, padding: compact ? 8 : 14, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
   macroTitle:            { fontSize: compact ? 8 : 9, color: c.textSub, fontWeight: '700', letterSpacing: 1.2, marginBottom: compact ? 6 : 10 },
   macroRow:              { flexDirection: 'row', alignItems: 'center' },
   macroItem:             { flex: 1, flexDirection: 'row', alignItems: 'center' },
@@ -1848,7 +2243,10 @@ function createStyles(c: ThemeColors, compact = false) { return StyleSheet.creat
   sortBarLeft:           { flex: 1, alignItems: 'flex-start' },
   sortBarRight:          { flex: 1, alignItems: 'flex-end' },
   sortBarLabel:          { fontSize: 10, fontWeight: '700', color: c.text, letterSpacing: 0.5 },
+  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5 },
   sortFilterBtnText:     { fontSize: 12, color: c.teal, fontWeight: '600' },
+  filterBadge:           { width: 16, height: 16, borderRadius: 8, backgroundColor: '#E8756A', alignItems: 'center', justifyContent: 'center' },
+  filterBadgeText:       { fontSize: 9, color: 'white', fontWeight: '700' },
 
   // Items
   scroll:                { flex: 1, paddingHorizontal: 16 },
@@ -1856,15 +2254,42 @@ function createStyles(c: ThemeColors, compact = false) { return StyleSheet.creat
   emptyIcon:             { fontSize: 48 },
   emptyTitle:            { fontSize: 16, fontWeight: '600', color: c.brand },
   emptySub:              { fontSize: 13, color: c.textSub },
-  categoryHeader:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 14, paddingBottom: 6 },
-  categoryHeaderEmoji:   { fontSize: 14 },
+
+  // Flat sort — location mini-tag shown before each item in All view
+  locationTag:           { flexDirection: 'row', alignItems: 'center', gap: 3, paddingTop: 2, paddingBottom: 1 },
+  locationTagText:       { fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, color: c.textMuted },
+  flatListNote:          { fontSize: 10, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', paddingTop: 10, paddingBottom: 4 },
+
+  // Location section (All tab tree — level 1)
+  locationSection:       { marginBottom: 6 },
+  locationHeader:        {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 11, paddingHorizontal: 10,
+    marginBottom: 2,
+    backgroundColor: c.surface,
+    borderRadius: 12,
+    borderLeftWidth: 3,
+    borderWidth: 0.5,
+    borderColor: c.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4,
+  },
+  locationHeaderIcon:    { fontSize: 18 },
+  locationHeaderText:    { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  locationHeaderCount:   { fontSize: 11, fontWeight: '500' },
+  locationContent:       { paddingLeft: 10 },
+
+  // Category header (level 2 in All, level 1 in individual tabs)
+  categoryHeader:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 12, paddingBottom: 5 },
+  categoryHeaderNested:  { paddingTop: 8, paddingBottom: 4 },
+  categoryHeaderEmoji:   { fontSize: 13 },
   categoryHeaderText:    { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
   categoryHeaderLine:    { flex: 1, height: 0.5 },
+  categoryChevron:       { fontSize: 13, fontWeight: '700', width: 16, textAlign: 'center' },
   categoryHeaderCount:   { fontSize: 10, fontWeight: '600' },
 
   // Item cards
   itemWrapMargin:        { height: compact ? 4 : 8 },
-  itemCard:              { backgroundColor: c.surface, borderRadius: compact ? 12 : 16, borderWidth: 0.5, borderColor: c.border, overflow: 'hidden' },
+  itemCard:              { backgroundColor: c.surface, borderRadius: compact ? 12 : 16, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.16, shadowRadius: 14, elevation: 6 },
   itemCardExpanded:      { borderColor: c.borderStrong },
   itemMain:              { flexDirection: 'row', alignItems: 'center', padding: compact ? 10 : 14, gap: compact ? 8 : 12 },
   iconWrap:              { width: compact ? 38 : 52, height: compact ? 38 : 52, borderRadius: compact ? 19 : 26, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
@@ -1903,7 +2328,7 @@ function createStyles(c: ThemeColors, compact = false) { return StyleSheet.creat
 
   // Good Bot CTA
   goodBotWrapper:        { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
-  goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#085041', padding: 16, borderRadius: 16 },
+  goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isDark ? c.surfaceAlt : '#085041', padding: 16, borderRadius: 16, borderWidth: 0.5, borderColor: c.teal, shadowColor: c.teal, shadowOffset: { width: 0, height: 4 }, shadowOpacity: isDark ? 0.35 : 0.45, shadowRadius: 12, elevation: 6 },
   goodBotLeft:           { flexDirection: 'row', alignItems: 'center', gap: 12 },
   goodBotAvatarWrap:     { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
   goodBotText:           { color: 'white', fontSize: 13, fontWeight: '700' },
@@ -1926,8 +2351,8 @@ function createStyles(c: ThemeColors, compact = false) { return StyleSheet.creat
   drawerItemArrow:       { fontSize: 18, color: c.textMuted },
   proBadge:              { backgroundColor: '#E1F5EE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
   proBadgeText:          { fontSize: 9, color: '#085041', fontWeight: '600' },
-  logoutBtn:             { paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginTop: 8 },
-  logoutText:            { fontSize: 14, color: '#E24B4A', fontWeight: '500' },
+  logoutBtn:             { paddingVertical: 13, borderRadius: 12, backgroundColor: 'rgba(232,117,106,0.15)', alignItems: 'center', marginTop: 24 },
+  logoutText:            { fontSize: 14, color: '#E8756A', fontWeight: '600' },
   drawerVersion:         { fontSize: 10, color: c.textMuted, textAlign: 'center', marginTop: 20 },
 
   // Modals

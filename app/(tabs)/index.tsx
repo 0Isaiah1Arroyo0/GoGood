@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard, LayoutAnimation, UIManager } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard, LayoutAnimation, UIManager } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -14,8 +15,11 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAuth } from '../context/auth';
 import { requestNotificationPermission, rescheduleExpiryNotifications } from '../lib/notifications';
-import { pushItems, pullItems } from '../lib/sync';
+import { pushItems, pullItems, fromRow } from '../lib/sync';
+import { HOUSEHOLD_KEY, HOUSEHOLD_NAME_KEY, subscribeToHouseholdItems } from '../lib/household';
 import { useAppDrawer } from '../components/AppDrawer';
+import { useSubscription } from '../context/subscription';
+import { seedSampleItems } from '../lib/seed-items';
 
 type Badge = 'red' | 'amber' | 'green' | 'blue' | 'black';
 type Category = 'fridge' | 'freezer' | 'pantry';
@@ -27,23 +31,40 @@ interface Item {
   qty: string; expiryDate: string; expires: string; badge: Badge; days: number;
   protein: number; carbs: number; fat: number; cal: number;
   qtyNum: number; unit: string; category: Category; addedAt: number;
-  foodCategory?: string;
+  foodCategory?: string; servingSize?: string;
 }
 
-const BADGE_SOFT: Record<Badge, { bg: string; text: string }> = {
+interface HistoryItem {
+  id: string;
+  name: string;
+  icon: string;
+  unit: string;
+  category: Category;
+  foodCategory: string;
+  protein: number;
+  carbs: number;
+  fat: number;
+  cal: number;
+  servingSize?: string;
+  savedAt: number;
+}
+
+const HISTORY_KEY = 'gogood_item_history';
+const HISTORY_DAYS = 30;
+
+const BADGE_SOFT_LIGHT: Record<Badge, { bg: string; text: string }> = {
   red:   { bg: '#FEEBEB', text: '#A52020' },
   amber: { bg: '#FFF8E6', text: '#7A4A00' },
   green: { bg: '#E1F5EE', text: '#0A5740' },
   blue:  { bg: '#EBF4FF', text: '#14428A' },
   black: { bg: '#2C2C2E', text: '#FFFFFF' },
 };
-
-const ICON_BG: Record<Badge, string> = {
-  red:   '#FCEBEB',
-  amber: '#FFF8E6',
-  green: '#E1F5EE',
-  blue:  '#E6F1FB',
-  black: '#2C2C2E',
+const BADGE_SOFT_DARK: Record<Badge, { bg: string; text: string }> = {
+  red:   { bg: 'rgba(245,90,90,0.2)',   text: '#F5A0A0' },
+  amber: { bg: 'rgba(245,180,60,0.2)',  text: '#F5D090' },
+  green: { bg: 'rgba(93,202,165,0.2)',  text: '#5DCAA5' },
+  blue:  { bg: 'rgba(100,160,255,0.2)', text: '#90C0FF' },
+  black: { bg: '#2C2C2E',              text: '#FFFFFF' },
 };
 
 const FOOD_ICONS: Record<string, string> = {
@@ -128,6 +149,8 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'quail': 'Poultry', 'goose': 'Poultry', 'pheasant': 'Poultry',
   // Fish & Seafood
   'smoked salmon': 'Fish & Seafood', 'canned tuna': 'Fish & Seafood', 'canned salmon': 'Fish & Seafood',
+  'tuna can': 'Fish & Seafood', 'salmon can': 'Fish & Seafood', 'sardine can': 'Fish & Seafood',
+  'tuna in water': 'Fish & Seafood', 'tuna in oil': 'Fish & Seafood',
   'salmon': 'Fish & Seafood', 'tuna': 'Fish & Seafood', 'tilapia': 'Fish & Seafood',
   'cod': 'Fish & Seafood', 'halibut': 'Fish & Seafood', 'trout': 'Fish & Seafood',
   'snapper': 'Fish & Seafood', 'swordfish': 'Fish & Seafood', 'catfish': 'Fish & Seafood',
@@ -138,20 +161,25 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'clam': 'Fish & Seafood', 'mussel': 'Fish & Seafood', 'squid': 'Fish & Seafood',
   'octopus': 'Fish & Seafood', 'crawfish': 'Fish & Seafood', 'pollock': 'Fish & Seafood',
   'mackerel': 'Fish & Seafood', 'flounder': 'Fish & Seafood',
-  // Dairy & Eggs
-  'cottage cheese': 'Dairy & Eggs', 'cream cheese': 'Dairy & Eggs', 'string cheese': 'Dairy & Eggs',
-  'greek yogurt': 'Dairy & Eggs', 'oat milk': 'Dairy & Eggs', 'almond milk': 'Dairy & Eggs',
-  'soy milk': 'Dairy & Eggs', 'coconut milk': 'Dairy & Eggs', 'half and half': 'Dairy & Eggs',
-  'heavy cream': 'Dairy & Eggs', 'sour cream': 'Dairy & Eggs', 'whipping cream': 'Dairy & Eggs',
-  'whipped cream': 'Dairy & Eggs', 'lactose free milk': 'Dairy & Eggs',
-  'egg': 'Dairy & Eggs', 'milk': 'Dairy & Eggs', 'cheese': 'Dairy & Eggs',
-  'butter': 'Dairy & Eggs', 'yogurt': 'Dairy & Eggs', 'cream': 'Dairy & Eggs',
-  'cheddar': 'Dairy & Eggs', 'mozzarella': 'Dairy & Eggs', 'brie': 'Dairy & Eggs',
-  'gouda': 'Dairy & Eggs', 'feta': 'Dairy & Eggs', 'ricotta': 'Dairy & Eggs',
-  'provolone': 'Dairy & Eggs', 'gruyere': 'Dairy & Eggs', 'parmesan': 'Dairy & Eggs',
-  'swiss cheese': 'Dairy & Eggs', 'american cheese': 'Dairy & Eggs',
-  'bocconcini': 'Dairy & Eggs', 'quark': 'Dairy & Eggs', 'buttermilk': 'Dairy & Eggs',
-  'kefir': 'Dairy & Eggs', 'ghee': 'Dairy & Eggs', 'margarine': 'Dairy & Eggs',
+  // Dairy
+  'cottage cheese': 'Dairy', 'cream cheese': 'Dairy', 'string cheese': 'Dairy',
+  'greek yogurt': 'Dairy', 'oat milk': 'Dairy', 'almond milk': 'Dairy',
+  'soy milk': 'Dairy', 'coconut milk': 'Dairy', 'half and half': 'Dairy',
+  'heavy cream': 'Dairy', 'sour cream': 'Dairy', 'whipping cream': 'Dairy',
+  'whipped cream': 'Dairy', 'lactose free milk': 'Dairy',
+  'milk': 'Dairy', 'cheese': 'Dairy', 'butter': 'Dairy',
+  'yogurt': 'Dairy', 'cream': 'Dairy',
+  'cheddar': 'Dairy', 'mozzarella': 'Dairy', 'brie': 'Dairy',
+  'gouda': 'Dairy', 'feta': 'Dairy', 'ricotta': 'Dairy',
+  'provolone': 'Dairy', 'gruyere': 'Dairy', 'parmesan': 'Dairy',
+  'swiss cheese': 'Dairy', 'american cheese': 'Dairy',
+  'bocconcini': 'Dairy', 'quark': 'Dairy', 'buttermilk': 'Dairy',
+  'kefir': 'Dairy', 'ghee': 'Dairy', 'margarine': 'Dairy',
+  // Eggs
+  'egg': 'Eggs', 'eggs': 'Eggs', 'large egg': 'Eggs', 'free range egg': 'Eggs',
+  'cage free egg': 'Eggs', 'pasture raised egg': 'Eggs', 'organic egg': 'Eggs',
+  'hard boiled egg': 'Eggs', 'liquid egg': 'Eggs', 'egg white': 'Eggs',
+  'egg yolk': 'Eggs', 'whole egg': 'Eggs', 'dozen eggs': 'Eggs',
   // Vegetables
   'cherry tomato': 'Vegetables', 'sweet potato': 'Vegetables', 'sweet corn': 'Vegetables',
   'bell pepper': 'Vegetables', 'green bean': 'Vegetables', 'snap pea': 'Vegetables',
@@ -251,7 +279,7 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'corn starch': 'Baking', 'vanilla extract': 'Baking', 'almond extract': 'Baking',
   'vanilla': 'Baking', 'cream of tartar': 'Baking', 'gelatin': 'Baking',
   'flour': 'Baking', 'cornmeal': 'Baking', 'sugar': 'Baking',
-  'shortening': 'Baking', 'lard': 'Baking', 'molasses': 'Baking',
+  'shortening': 'Baking', 'lard': 'Baking',
   // Condiments & Sauces
   'soy sauce': 'Condiments & Sauces', 'olive oil': 'Condiments & Sauces',
   'coconut oil': 'Condiments & Sauces', 'avocado oil': 'Condiments & Sauces',
@@ -271,35 +299,123 @@ const FOOD_CATEGORIES: Record<string, string> = {
   'buffalo sauce': 'Condiments & Sauces', 'bbq sauce': 'Condiments & Sauces',
   'chili sauce': 'Condiments & Sauces', 'stir fry sauce': 'Condiments & Sauces',
   'jam': 'Condiments & Sauces', 'jelly': 'Condiments & Sauces',
-  'honey': 'Condiments & Sauces', 'syrup': 'Condiments & Sauces',
-  'maple syrup': 'Condiments & Sauces', 'agave': 'Condiments & Sauces',
+  // Syrups & Sweeteners
+  'vanilla syrup': 'Syrups & Sweeteners', 'hazelnut syrup': 'Syrups & Sweeteners',
+  'caramel syrup': 'Syrups & Sweeteners', 'pumpkin spice syrup': 'Syrups & Sweeteners',
+  'lavender syrup': 'Syrups & Sweeteners', 'brown sugar syrup': 'Syrups & Sweeteners',
+  'simple syrup': 'Syrups & Sweeteners', 'coffee syrup': 'Syrups & Sweeteners',
+  'flavored syrup': 'Syrups & Sweeteners', 'torani': 'Syrups & Sweeteners',
+  'monin': 'Syrups & Sweeteners', 'maple syrup': 'Syrups & Sweeteners',
+  'corn syrup': 'Syrups & Sweeteners', 'golden syrup': 'Syrups & Sweeteners',
+  'date syrup': 'Syrups & Sweeteners', 'agave syrup': 'Syrups & Sweeteners',
+  'brown rice syrup': 'Syrups & Sweeteners', 'coconut nectar': 'Syrups & Sweeteners',
+  'treacle': 'Syrups & Sweeteners', 'molasses': 'Syrups & Sweeteners',
+  'honey': 'Syrups & Sweeteners', 'agave': 'Syrups & Sweeteners',
+  'syrup': 'Syrups & Sweeteners', 'sweetener': 'Syrups & Sweeteners',
+  'stevia': 'Syrups & Sweeteners', 'monk fruit': 'Syrups & Sweeteners',
   // Drinks
   'orange juice': 'Drinks', 'apple juice': 'Drinks', 'grape juice': 'Drinks',
   'cranberry juice': 'Drinks', 'coconut water': 'Drinks', 'sparkling water': 'Drinks',
-  'cold brew': 'Drinks', 'green tea': 'Drinks', 'herbal tea': 'Drinks',
-  'black tea': 'Drinks', 'oolong tea': 'Drinks', 'white tea': 'Drinks',
   'protein shake': 'Drinks', 'energy drink': 'Drinks', 'sports drink': 'Drinks',
-  'juice': 'Drinks', 'coffee': 'Drinks', 'espresso': 'Drinks', 'tea': 'Drinks',
-  'wine': 'Drinks', 'beer': 'Drinks', 'cider': 'Drinks', 'hard seltzer': 'Drinks',
-  'kombucha': 'Drinks', 'smoothie': 'Drinks', 'lemonade': 'Drinks', 'limeade': 'Drinks',
-  'soda': 'Drinks', 'matcha': 'Drinks', 'chai': 'Drinks', 'seltzer': 'Drinks',
-  'tonic water': 'Drinks', 'club soda': 'Drinks', 'water': 'Drinks',
-  'milk alternative': 'Drinks',
+  'juice': 'Drinks', 'wine': 'Drinks', 'beer': 'Drinks', 'cider': 'Drinks',
+  'hard seltzer': 'Drinks', 'kombucha': 'Drinks', 'smoothie': 'Drinks',
+  'lemonade': 'Drinks', 'limeade': 'Drinks', 'soda': 'Drinks',
+  'seltzer': 'Drinks', 'tonic water': 'Drinks', 'club soda': 'Drinks',
+  'water': 'Drinks', 'milk alternative': 'Drinks',
+  // Coffee & Tea
+  'coffee bean': 'Coffee & Tea', 'ground coffee': 'Coffee & Tea',
+  'instant coffee': 'Coffee & Tea', 'k-cup': 'Coffee & Tea', 'kcup': 'Coffee & Tea',
+  'coffee pod': 'Coffee & Tea', 'espresso pod': 'Coffee & Tea',
+  'nespresso': 'Coffee & Tea', 'keurig': 'Coffee & Tea',
+  'tea bag': 'Coffee & Tea', 'loose leaf tea': 'Coffee & Tea',
+  'matcha powder': 'Coffee & Tea', 'chai concentrate': 'Coffee & Tea',
+  'cold brew concentrate': 'Coffee & Tea', 'coffee grounds': 'Coffee & Tea',
+  'decaf': 'Coffee & Tea', 'cold brew': 'Coffee & Tea',
+  'green tea': 'Coffee & Tea', 'herbal tea': 'Coffee & Tea',
+  'chamomile tea': 'Coffee & Tea', 'chamomile': 'Coffee & Tea',
+  'peppermint tea': 'Coffee & Tea', 'ginger tea': 'Coffee & Tea',
+  'lavender tea': 'Coffee & Tea', 'rooibos': 'Coffee & Tea',
+  'black tea': 'Coffee & Tea', 'oolong tea': 'Coffee & Tea', 'white tea': 'Coffee & Tea',
+  'coffee': 'Coffee & Tea', 'espresso': 'Coffee & Tea', 'tea': 'Coffee & Tea',
+  'matcha': 'Coffee & Tea', 'chai': 'Coffee & Tea',
   // Snacks & Sweets
-  'granola bar': 'Snacks & Sweets', 'protein bar': 'Snacks & Sweets',
-  'energy bar': 'Snacks & Sweets', 'trail mix': 'Snacks & Sweets',
-  'dark chocolate': 'Snacks & Sweets', 'milk chocolate': 'Snacks & Sweets',
-  'white chocolate': 'Snacks & Sweets', 'ice cream': 'Snacks & Sweets',
-  'frozen yogurt': 'Snacks & Sweets', 'fruit snack': 'Snacks & Sweets',
-  'chocolate bar': 'Snacks & Sweets', 'chocolate': 'Snacks & Sweets',
-  'cookie': 'Snacks & Sweets', 'cake': 'Snacks & Sweets', 'pie': 'Snacks & Sweets',
+  'potato chip': 'Snacks & Sweets', 'corn chip': 'Snacks & Sweets',
+  'licorice': 'Snacks & Sweets', 'granola bar': 'Snacks & Sweets',
+  'protein bar': 'Snacks & Sweets', 'energy bar': 'Snacks & Sweets',
+  'trail mix': 'Snacks & Sweets', 'dark chocolate': 'Snacks & Sweets',
+  'milk chocolate': 'Snacks & Sweets', 'white chocolate': 'Snacks & Sweets',
+  'fruit snack': 'Snacks & Sweets', 'chocolate bar': 'Snacks & Sweets',
+  'chocolate': 'Snacks & Sweets', 'cookie': 'Snacks & Sweets',
+  'cake': 'Snacks & Sweets', 'pie': 'Snacks & Sweets',
   'popcorn': 'Snacks & Sweets', 'chips': 'Snacks & Sweets', 'pretzel': 'Snacks & Sweets',
   'cracker': 'Snacks & Sweets', 'jerky': 'Snacks & Sweets', 'gummy': 'Snacks & Sweets',
   'candy': 'Snacks & Sweets', 'brownie': 'Snacks & Sweets', 'donut': 'Snacks & Sweets',
-  'cupcake': 'Snacks & Sweets', 'pudding': 'Snacks & Sweets', 'sorbet': 'Snacks & Sweets',
-  'popsicle': 'Snacks & Sweets', 'wafer': 'Snacks & Sweets', 'fruit roll': 'Snacks & Sweets',
-  'rice cake': 'Snacks & Sweets', 'cheese puff': 'Snacks & Sweets', 'pork rind': 'Snacks & Sweets',
-  'nachos': 'Snacks & Sweets', 'tortilla chip': 'Snacks & Sweets',
+  'cupcake': 'Snacks & Sweets', 'pudding': 'Snacks & Sweets',
+  'wafer': 'Snacks & Sweets', 'fruit roll': 'Snacks & Sweets',
+  'rice cake': 'Snacks & Sweets', 'cheese puff': 'Snacks & Sweets',
+  'pork rind': 'Snacks & Sweets', 'nachos': 'Snacks & Sweets',
+  'tortilla chip': 'Snacks & Sweets', 'veggie chip': 'Snacks & Sweets',
+  'veggie straw': 'Snacks & Sweets', 'rice cracker': 'Snacks & Sweets',
+  'cheese cracker': 'Snacks & Sweets', 'animal cracker': 'Snacks & Sweets',
+  'graham cracker': 'Snacks & Sweets', 'peanut butter cup': 'Snacks & Sweets',
+  'fruit leather': 'Snacks & Sweets', 'dried fruit': 'Snacks & Sweets',
+  'puffed rice': 'Snacks & Sweets', 'popcorn cake': 'Snacks & Sweets',
+  'kettle corn': 'Snacks & Sweets', 'beef jerky': 'Snacks & Sweets',
+  'turkey jerky': 'Snacks & Sweets', 'meat stick': 'Snacks & Sweets',
+  'slim jim': 'Snacks & Sweets', 'cheese stick': 'Snacks & Sweets',
+  'string cheese': 'Snacks & Sweets', 'babybel': 'Snacks & Sweets',
+  'yogurt cup': 'Snacks & Sweets', 'applesauce pouch': 'Snacks & Sweets',
+  'nut bar': 'Snacks & Sweets', 'larabar': 'Snacks & Sweets', 'rxbar': 'Snacks & Sweets',
+  'kind bar': 'Snacks & Sweets', 'clif bar': 'Snacks & Sweets',
+  'nutter butter': 'Snacks & Sweets', 'oreo': 'Snacks & Sweets',
+  'chips ahoy': 'Snacks & Sweets', 'cheeto': 'Snacks & Sweets',
+  'dorito': 'Snacks & Sweets', 'lays': 'Snacks & Sweets', 'ruffles': 'Snacks & Sweets',
+  'pringles': 'Snacks & Sweets', 'goldfish': 'Snacks & Sweets',
+  'wheat thin': 'Snacks & Sweets', 'triscuit': 'Snacks & Sweets',
+  'snack mix': 'Snacks & Sweets', 'chex mix': 'Snacks & Sweets',
+  // Frozen Foods
+  'frozen pizza': 'Frozen Foods', 'frozen meal': 'Frozen Foods',
+  'frozen burrito': 'Frozen Foods', 'frozen dinner': 'Frozen Foods',
+  'frozen lasagna': 'Frozen Foods', 'frozen chicken': 'Frozen Foods',
+  'frozen fish': 'Frozen Foods', 'frozen shrimp': 'Frozen Foods',
+  'frozen vegetable': 'Frozen Foods', 'frozen veggie': 'Frozen Foods',
+  'frozen fruit': 'Frozen Foods', 'frozen berry': 'Frozen Foods',
+  'frozen berries': 'Frozen Foods', 'frozen mango': 'Frozen Foods',
+  'frozen broccoli': 'Frozen Foods', 'frozen spinach': 'Frozen Foods',
+  'frozen peas': 'Frozen Foods', 'frozen corn': 'Frozen Foods',
+  'frozen edamame': 'Frozen Foods', 'frozen waffle': 'Frozen Foods',
+  'frozen pancake': 'Frozen Foods', 'frozen biscuit': 'Frozen Foods',
+  'toaster waffle': 'Frozen Foods', 'eggo': 'Frozen Foods',
+  'tater tot': 'Frozen Foods', 'frozen fries': 'Frozen Foods',
+  'french fry': 'Frozen Foods', 'fish stick': 'Frozen Foods',
+  'chicken nugget': 'Frozen Foods', 'corn dog': 'Frozen Foods',
+  'veggie burger': 'Frozen Foods', 'hot pocket': 'Frozen Foods',
+  'pot pie': 'Frozen Foods', 'tv dinner': 'Frozen Foods',
+  'ice cream': 'Frozen Foods', 'frozen yogurt': 'Frozen Foods',
+  'sorbet': 'Frozen Foods', 'popsicle': 'Frozen Foods', 'gelato': 'Frozen Foods',
+  // Prepared & Deli
+  'rotisserie chicken': 'Prepared & Deli', 'deli salad': 'Prepared & Deli',
+  'prepared meal': 'Prepared & Deli', 'heat and eat': 'Prepared & Deli',
+  'ready to eat': 'Prepared & Deli', 'meal kit': 'Prepared & Deli',
+  'ready meal': 'Prepared & Deli', 'mac and cheese': 'Prepared & Deli',
+  'macaroni and cheese': 'Prepared & Deli', 'hello fresh': 'Prepared & Deli',
+  'blue apron': 'Prepared & Deli', 'deli': 'Prepared & Deli',
+  'pre-made': 'Prepared & Deli', 'party platter': 'Prepared & Deli',
+  'cooked chicken': 'Prepared & Deli', 'smoked brisket': 'Prepared & Deli',
+  // Supplements
+  'protein powder': 'Supplements', 'whey protein': 'Supplements',
+  'whey': 'Supplements', 'creatine': 'Supplements',
+  'multivitamin': 'Supplements', 'fish oil': 'Supplements',
+  'omega 3': 'Supplements', 'collagen': 'Supplements',
+  'collagen peptide': 'Supplements', 'probiotic': 'Supplements',
+  'greens powder': 'Supplements', 'super greens': 'Supplements',
+  'bcaa': 'Supplements', 'pre-workout': 'Supplements', 'preworkout': 'Supplements',
+  'electrolyte': 'Supplements', 'vitamin c': 'Supplements',
+  'vitamin d': 'Supplements', 'zinc': 'Supplements', 'magnesium': 'Supplements',
+  'iron supplement': 'Supplements', 'calcium': 'Supplements',
+  'vitamin': 'Supplements', 'supplement': 'Supplements',
+  // Leftovers
+  'leftover': 'Leftovers', 'leftovers': 'Leftovers',
   // Herbs & Spices
   'fennel seed': 'Herbs & Spices', 'bay leaf': 'Herbs & Spices', 'lemongrass': 'Herbs & Spices',
   'fresh basil': 'Herbs & Spices', 'fresh cilantro': 'Herbs & Spices',
@@ -320,6 +436,28 @@ const FOOD_CATEGORIES: Record<string, string> = {
 
 function getIcon(name: string): string {
   const lower = name.toLowerCase();
+
+  // Tier 1 — product-type wins over any ingredient/flavour match.
+  // "Blueberry Pomegranate Drink" → 🧃, not 🍎 (pomegranate).
+  if (/\b(juice|drink|beverage|punch|nectar|cocktail|lemonade|limeade|agua fresca|agua)\b/.test(lower)) return '🧃';
+  if (/\b(smoothie|shake)\b/.test(lower)) return '🥤';
+  if (/\b(soda|cola|\bpop\b|sparkling water|seltzer|tonic water|club soda)\b/.test(lower)) return '🥤';
+  if (/\b(energy drink|sports drink)\b/.test(lower)) return '🥤';
+  if (/\b(coffee|espresso|cold brew|latte|cappuccino|americano|macchiato)\b/.test(lower)) return '☕';
+  if (/\b(tea\b|matcha|kombucha|chai\b)\b/.test(lower)) return '🍵';
+  if (/\b(beer\b|ale\b|lager\b|stout\b|porter\b|ipa\b|hard seltzer)\b/.test(lower)) return '🍺';
+  if (/\b(wine\b|rosé|champagne|prosecco|cava|merlot|cabernet|chardonnay)\b/.test(lower)) return '🍷';
+  if (/\bwater\b/.test(lower) && !/\bwatermelon\b/.test(lower)) return '💧';
+  if (/\b(ice cream|frozen yogurt|sorbet|gelato|popsicle|ice pop)\b/.test(lower)) return '🍦';
+  if (/\b(yogurt|kefir)\b/.test(lower)) return '🥛';
+  if (/\b(granola bar|protein bar|energy bar|snack bar|nut.*bar|fruit.*bar)\b/.test(lower)) return '🍫';
+  if (/\b(cookie|cookies|biscuit)\b/.test(lower)) return '🍪';
+  if (/\b(candy|gummies|gummy|caramel)\b/.test(lower)) return '🍬';
+  if (/\b(cereal|granola|oatmeal|\boats\b)\b/.test(lower)) return '🥣';
+  if (/\b(pizza)\b/.test(lower)) return '🍕';
+  if (/\b(soup\b|stew\b|chili\b|bisque)\b/.test(lower)) return '🍲';
+
+  // Tier 2 — longest-key ingredient match (existing behaviour).
   const sorted = Object.entries(FOOD_ICONS).sort((a, b) => b[0].length - a[0].length);
   for (const [key, icon] of sorted) {
     if (key !== 'default' && lower.includes(key)) return icon;
@@ -327,61 +465,132 @@ function getIcon(name: string): string {
   return FOOD_ICONS.default;
 }
 
+// All food & drink emojis, for the manual icon picker in the add/edit sheet.
+const FOOD_EMOJIS: string[] = [
+  // Fruits
+  '🍏','🍎','🍐','🍊','🍋','🍋‍🟩','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝',
+  // Vegetables
+  '🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🫒','🧄','🧅','🥔','🍠','🫘','🥜','🫛','🍄','🍄‍🟫','🫚','🌰','🫜',
+  // Bread, grains & prepared
+  '🍞','🥐','🥖','🫓','🥨','🥯','🥞','🧇','🍳','🧈','🍚','🍘','🍙','🍛','🍜','🍝','🍠','🥣','🥗','🍲','🫕','🥘','🍿','🧆','🥫','🫙','🥟','🥡',
+  // Protein & mains
+  '🍖','🍗','🥩','🥓','🍔','🍟','🍕','🌭','🥪','🌮','🌯','🫔','🥙','🥚','🦴',
+  // Seafood
+  '🦪','🦐','🦞','🦀','🦑','🐙','🐟','🐠','🐡','🍤','🍣','🍱',
+  // Dairy & eggs
+  '🥛','🧀','🥚','🍳','🍦','🍨',
+  // Sweets & desserts
+  '🍧','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍩','🍪','🌰','🍯',
+  // Drinks
+  '🍼','🫗','☕','🫖','🍵','🧃','🥤','🧋','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🧊','💧',
+  // Misc / staples
+  '🧂','🥢','🍴','🥄','🔪','🧊','🌾','🍃',
+];
+
 function getFoodCategory(name: string): string {
-  const lower = name.toLowerCase();
+  // Strip packing/liquid descriptors so "tuna in water" → "tuna", etc.
+  const lower = name.toLowerCase()
+    .replace(/\bin (water|oil|brine|juice|syrup|sauce|tomato sauce|olive oil|broth|gravy|cream)\b/g, '')
+    .replace(/\b(packed in|marinated in|preserved in)\b/g, '')
+    .replace(/\s+/g, ' ').trim();
+
+  // Strip origin/quality qualifiers that don't change the food type so
+  // "organic grass-fed ground beef" → "ground beef", "wild-caught atlantic salmon" → "salmon", etc.
+  const QUALIFIERS = /\b(organic|natural|fresh|raw|wild|wild-caught|farm-raised|grass-fed|grass fed|free-range|free range|pasture-raised|hormone-free|antibiotic-free|non-gmo|locally sourced|whole|sliced|diced|chopped|minced|shredded|grated|cubed|crushed|pureed|mashed|baked|roasted|grilled|steamed|air-fried|slow-cooked|smoked|cured|aged|marinated|seasoned|spiced|flavored|infused|reduced fat|low fat|fat free|full fat|light|extra|mild|medium|sharp|premium|artisan|artisanal|homemade|traditional|authentic|gourmet|imported|local|certified|lean|extra lean|boneless|bone-in|skin-on|skinless|peeled|deveined|cleaned|trimmed|halved|quartered|regular|plain|original|classic|xl|large|small|mini|baby|giant|jumbo|petite|thin|thick|atlantic|pacific|alaskan|norwegian|canadian|italian|french|greek|japanese|korean|mexican|spanish|thai|chinese|american|british|european)\b/g;
+  const stripped = lower.replace(QUALIFIERS, '').replace(/\s+/g, ' ').trim();
+
   const sorted = Object.entries(FOOD_CATEGORIES).sort((a, b) => b[0].length - a[0].length);
 
-  // 1. Direct substring match
-  for (const [key, cat] of sorted) {
-    if (lower.includes(key)) return cat;
+  // Word-boundary match: key must not be preceded or followed by a letter.
+  // Prevents "ham" matching "chamomile", "egg" matching "eggplant", etc.
+  const wordMatch = (text: string, key: string): boolean => {
+    const idx = text.indexOf(key);
+    if (idx === -1) return false;
+    const before = idx === 0 || !/[a-z]/.test(text[idx - 1]);
+    const after  = idx + key.length >= text.length || !/[a-z]/.test(text[idx + key.length]);
+    return before && after;
+  };
+
+  // Score a text: collect ALL matching categories, accumulate key-length points.
+  // Longer keys score more, so "ground beef" (11) beats "beef" (4) alone.
+  // Multiple matches for one category stack — "greek yogurt with blueberries"
+  // scores Dairy=18 (greek yogurt=12 + yogurt=6) vs Fruit=9 (blueberry), so Dairy wins.
+  const scoreText = (text: string): string | null => {
+    const scores: Record<string, number> = {};
+    for (const [key, cat] of sorted) {
+      if (wordMatch(text, key)) scores[cat] = (scores[cat] ?? 0) + key.length;
+    }
+    const entries = Object.entries(scores);
+    if (entries.length === 0) return null;
+    entries.sort((a, b) => b[1] - a[1]);
+    return entries[0][0];
+  };
+
+  // Normalise a string through several plural forms.
+  const normForms = (text: string): string[] => [
+    text.replace(/([a-z]+)ies\b/g, (_, s) => s + 'y'),
+    text.replace(/([a-z]+)ves\b/g, (_, s) => s + 'f'),
+    text.replace(/([a-z]{3,})es\b/g, (_, s) => s),
+    text.replace(/([a-z]{3,})s\b/g,  (_, s) => s),
+  ];
+
+  // ── Pass 1: score on original ────────────────────────────────────────────
+  const p1 = scoreText(lower);
+  if (p1) return p1;
+
+  // ── Pass 2: score on qualifier-stripped ─────────────────────────────────
+  if (stripped !== lower) {
+    const p2 = scoreText(stripped);
+    if (p2) return p2;
   }
 
-  // 2. Normalise plurals and retry
-  //    "ies" → "y"  e.g. strawberries→strawberry, blueberries→blueberry, cherries→cherry
-  const deIes = lower.replace(/([a-z]+)ies\b/g, (_, s) => s + 'y');
-  if (deIes !== lower) {
-    for (const [key, cat] of sorted) {
-      if (deIes.includes(key)) return cat;
+  // ── Pass 3: plural normalization on both forms ───────────────────────────
+  for (const norm of [...normForms(lower), ...normForms(stripped)]) {
+    if (norm !== lower && norm !== stripped) {
+      const p3 = scoreText(norm);
+      if (p3) return p3;
     }
   }
 
-  //    "ves" → "f"  e.g. leaves→leaf, loaves→loaf, halves→half
-  const deVes = lower.replace(/([a-z]+)ves\b/g, (_, s) => s + 'f');
-  if (deVes !== lower) {
-    for (const [key, cat] of sorted) {
-      if (deVes.includes(key)) return cat;
-    }
-  }
-
-  //    strip trailing "es"  e.g. tomatoes→tomato, peaches→peach, potatoes→potato
-  const deEs = lower.replace(/([a-z]{3,})es\b/g, (_, s) => s);
-  if (deEs !== lower) {
-    for (const [key, cat] of sorted) {
-      if (deEs.includes(key)) return cat;
-    }
-  }
-
-  //    strip trailing "s"  e.g. carrots→carrot, almonds→almond, prawns→prawn
-  const deS = lower.replace(/([a-z]{3,})s\b/g, (_, s) => s);
-  if (deS !== lower) {
-    for (const [key, cat] of sorted) {
-      if (deS.includes(key)) return cat;
-    }
-  }
+  // ── Pass 4: structural pattern shortcuts ─────────────────────────────────
+  // These catch anything with a clear structural signal not covered by the map.
+  if (/\bsyrup\b/.test(lower))                                                        return 'Syrups & Sweeteners';
+  if (/\b(powder|supplement)\b/.test(lower) && /\b(protein|collagen|greens|vitamin|whey|creatine|bcaa|probiotic)\b/.test(lower)) return 'Supplements';
+  if (/\bfrozen\b/.test(lower))                                                        return 'Frozen Foods';
+  if (/\bberr(y|ies)\b/.test(lower))                                                   return 'Fruit';
+  if (/\b(nectar|juice)\b/.test(lower) && !/\b(lemon|lime|orange|apple|grape|cran)\b/.test(lower)) return 'Drinks';
+  if (/\beggs?\b/.test(lower))                                                           return 'Eggs';
+  if (/\bmilk\b/.test(lower))                                                           return 'Dairy';
+  if (/\b(coffee|espresso)\b/.test(lower))                                              return 'Coffee & Tea';
+  if (/\btea\b/.test(lower))                                                            return 'Coffee & Tea';
+  if (/\b(oil)\b/.test(lower))                                                          return 'Condiments & Sauces';
+  if (/\bsauce\b/.test(lower))                                                          return 'Condiments & Sauces';
+  if (/\bbutter\b/.test(lower))                                                         return 'Condiments & Sauces';
+  if (/\b(spread|dressing|vinegar|marinade)\b/.test(lower))                             return 'Condiments & Sauces';
+  if (/\bchips?\b/.test(lower))                                                         return 'Snacks & Sweets';
+  if (/\bcrackers?\b/.test(lower))                                                      return 'Snacks & Sweets';
+  if (/\bbar\b/.test(lower) && !/\bbarley\b/.test(lower))                              return 'Snacks & Sweets';
+  if (/\b(supplement|vitamin|probiotic|prebiotic|mineral)\b/.test(lower))               return 'Supplements';
+  if (/\b(cake|cookie|brownie|donut|pastry|tart|biscuit)\b/.test(lower))                return 'Snacks & Sweets';
+  if (/\b(steak|roast|chop|loin|cutlet|rack|shank|filet)\b/.test(lower))               return 'Meat';
+  if (/\b(breast|thigh|wing|drumstick|tender)\b/.test(lower))                          return 'Poultry';
+  if (/\b(fillet|fillet|fin|gill)\b/.test(lower))                                       return 'Fish & Seafood';
+  if (/\b(flour|dough)\b/.test(lower))                                                  return 'Baking';
+  if (/\b(broth|stock|soup)\b/.test(lower))                                             return 'Canned & Jarred';
 
   return 'Other';
 }
 
 function getStorageWarning(name: string, category: Category): string | null {
   const n = name.toLowerCase();
-  const preserved = /\b(canned|jarred|dried|dry\b|smoked|cured|pickled|preserved|powdered|dehydrated|freeze.?dried)\b/.test(n);
+  const preserved = /\b(canned|can\b|jarred|jar\b|dried|dry\b|smoked|cured|pickled|preserved|powdered|dehydrated|freeze.?dried|in water|in oil|in brine|in juice|in syrup)\b/.test(n);
 
   // ── Pantry warnings (perishables that must be cold) ───────────────────────
   if (category === 'pantry' && !preserved) {
     if (/\b(chicken|turkey|duck|quail|beef|steak|pork|lamb|veal|bison|venison|ribs|brisket|tenderloin|sirloin|ribeye|chuck|flank|burger|meatball|meatloaf|sausage|bacon|bratwurst|chorizo|salami|pepperoni|prosciutto|pancetta|pastrami|bologna|hot dog|deli meat|lunch meat|ground beef|ground pork|ground turkey)\b/.test(n)) {
       return `Raw meat like ${name} spoils rapidly at room temperature and can grow dangerous bacteria within 2 hours. It must be stored in the Fridge (use within 2–3 days) or Freezer.`;
     }
-    if (/\b(salmon|tuna|tilapia|cod|halibut|trout|snapper|swordfish|catfish|mahi|bass|flounder|mackerel|herring|sardine|anchovy|pollock|shrimp|prawn|lobster|crab|scallop|oyster|clam|mussel|squid|octopus|crawfish|seafood)\b/.test(n) && !/\b(canned|smoked|dried|pickled)\b/.test(n)) {
+    if (/\b(salmon|tuna|tilapia|cod|halibut|trout|snapper|swordfish|catfish|mahi|bass|flounder|mackerel|herring|sardine|anchovy|pollock|shrimp|prawn|lobster|crab|scallop|oyster|clam|mussel|squid|octopus|crawfish|seafood)\b/.test(n) && !preserved) {
       return `Fresh ${name} is extremely perishable and will spoil within hours at room temperature. It belongs in the Fridge (use within 1–2 days) or Freezer for longer storage.`;
     }
     if (/\b(milk\b|oat milk|almond milk|soy milk|skim milk|whole milk|buttermilk|kefir|yogurt|greek yogurt|sour cream|whipping cream|heavy cream|half and half|cream\b|crème)\b/.test(n)) {
@@ -577,7 +786,8 @@ function categoryFromOffTags(tags: string[]): string {
   if (/\b(meats?|beef|pork|lamb|veal|deli|charcuterie)\b/.test(t))          return 'Meat';
   if (/\b(poultry|chicken|turkey|duck)\b/.test(t))                          return 'Poultry';
   if (/\b(fish|seafood|salmon|tuna|shrimps?|shellfishes?)\b/.test(t))       return 'Fish & Seafood';
-  if (/\b(dairies|dairy|milks?|cheeses?|yogurts?|eggs?|butters?|creams?)\b/.test(t)) return 'Dairy & Eggs';
+  if (/\b(dairies|dairy|milks?|cheeses?|yogurts?|butters?|creams?)\b/.test(t)) return 'Dairy';
+  if (/\beggs?\b/.test(t)) return 'Eggs';
   if (/\b(legumes?|beans?|lentils?|chickpeas?|tofu|tempeh|soy)\b/.test(t)) return 'Legumes & Beans';
   if (/\b(nuts?|seeds?|almonds?|cashews?|peanuts?|walnuts?)\b/.test(t))    return 'Nuts & Seeds';
   if (/\b(vegetables?|greens|salads?)\b/.test(t))                          return 'Vegetables';
@@ -593,20 +803,23 @@ function categoryFromOffTags(tags: string[]): string {
 }
 
 const CATEGORY_ORDER = [
-  'Meat', 'Poultry', 'Fish & Seafood', 'Dairy & Eggs',
+  'Meat', 'Poultry', 'Fish & Seafood', 'Dairy', 'Eggs',
   'Vegetables', 'Fruit', 'Legumes & Beans', 'Nuts & Seeds',
   'Bread & Grains', 'Canned & Jarred', 'Baking',
-  'Condiments & Sauces', 'Drinks', 'Snacks & Sweets',
-  'Herbs & Spices', 'Other',
+  'Condiments & Sauces', 'Syrups & Sweeteners', 'Drinks', 'Coffee & Tea',
+  'Snacks & Sweets', 'Frozen Foods', 'Prepared & Deli',
+  'Supplements', 'Herbs & Spices', 'Leftovers', 'Other',
 ];
 
 const CATEGORY_ICONS: Record<string, string> = {
   'Meat': '🥩', 'Poultry': '🍗', 'Fish & Seafood': '🐟',
-  'Dairy & Eggs': '🧀', 'Vegetables': '🥦', 'Fruit': '🍎',
+  'Dairy': '🥛', 'Eggs': '🥚', 'Vegetables': '🥦', 'Fruit': '🍎',
   'Legumes & Beans': '🫘', 'Nuts & Seeds': '🥜',
   'Bread & Grains': '🍞', 'Canned & Jarred': '🥫', 'Baking': '🧁',
-  'Condiments & Sauces': '🫙', 'Drinks': '🧃',
-  'Snacks & Sweets': '🍫', 'Herbs & Spices': '🌿', 'Other': '🥘',
+  'Condiments & Sauces': '🫙', 'Syrups & Sweeteners': '🍯',
+  'Drinks': '🧃', 'Coffee & Tea': '☕',
+  'Snacks & Sweets': '🍫', 'Frozen Foods': '🥶', 'Prepared & Deli': '🥙',
+  'Supplements': '💊', 'Herbs & Spices': '🌿', 'Leftovers': '🍽️', 'Other': '🥘',
 };
 
 function getDaysLeft(d: string): number {
@@ -660,7 +873,7 @@ const NUTRITION_FILTERS = [
 
 const emptyForm = () => ({
   name: '', qty: '1', unit: '', expiryDate: '', category: 'fridge' as Category,
-  protein: '', carbs: '', fat: '', cal: '', foodCategory: '',
+  protein: '', carbs: '', fat: '', cal: '', foodCategory: '', icon: '', servingSize: '',
 });
 
 const SCREEN_H      = Dimensions.get('window').height;
@@ -680,14 +893,14 @@ function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose
       setMounted(true);
       overlay.setValue(0); sheet.setValue(600);
       Animated.parallel([
-        Animated.timing(overlay, { toValue: 1, duration: 280, useNativeDriver: true }),
-        Animated.spring(sheet,   { toValue: 0, damping: 22, stiffness: 180, useNativeDriver: true }),
+        Animated.timing(overlay, { toValue: 1, duration: 320, useNativeDriver: true }),
+        Animated.spring(sheet,   { toValue: 0, damping: 36, stiffness: 130, useNativeDriver: true }),
       ]).start();
     } else if (mounted) {
       kbOffset.setValue(0);
       Animated.parallel([
-        Animated.timing(overlay, { toValue: 0, duration: 220, useNativeDriver: true }),
-        Animated.timing(sheet,   { toValue: 600, duration: 220, useNativeDriver: true }),
+        Animated.timing(overlay, { toValue: 0, duration: 260, useNativeDriver: true }),
+        Animated.timing(sheet,   { toValue: 600, duration: 280, useNativeDriver: true }),
       ]).start(() => setMounted(false));
     }
   }, [visible]);
@@ -712,9 +925,9 @@ function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose
   if (!mounted) return null;
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: overlay }]} />
-        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
+      <View style={{ flex: 1 }}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: overlay }]} pointerEvents="none" />
+        <TouchableOpacity style={{ flex: 1 }} onPress={onClose} activeOpacity={1} />
         <Animated.View
           onLayout={e => { measuredSheetH.current = e.nativeEvent.layout.height; }}
           style={{
@@ -774,7 +987,7 @@ function ConfettiBlast({ good, onDone }: { good: boolean; onDone: () => void }) 
   }, []);
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { zIndex: 999, elevation: 999 }]} pointerEvents="none">
       {anims.map((a, i) => (
         <Animated.Text
           key={i}
@@ -791,6 +1004,158 @@ function ConfettiBlast({ good, onDone }: { good: boolean; onDone: () => void }) 
         </Animated.Text>
       ))}
     </View>
+  );
+}
+
+// ─── Scan Status Strip (receipt + label scans) ───────────────────────────────
+function ScanStatusStrip({ visible, label, sublabel }: { visible: boolean; label: string; sublabel: string }) {
+  const insets = useSafeAreaInsets();
+  const translateY = useRef(new Animated.Value(120)).current;
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
+  const dotLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(translateY, { toValue: 0, damping: 22, stiffness: 260, useNativeDriver: true }).start();
+      dotLoopRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(dot1, { toValue: 1,   duration: 220, useNativeDriver: true }),
+          Animated.timing(dot1, { toValue: 0.3, duration: 220, useNativeDriver: true }),
+          Animated.timing(dot2, { toValue: 1,   duration: 220, useNativeDriver: true }),
+          Animated.timing(dot2, { toValue: 0.3, duration: 220, useNativeDriver: true }),
+          Animated.timing(dot3, { toValue: 1,   duration: 220, useNativeDriver: true }),
+          Animated.timing(dot3, { toValue: 0.3, duration: 220, useNativeDriver: true }),
+        ])
+      );
+      dotLoopRef.current.start();
+    } else {
+      dotLoopRef.current?.stop();
+      dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3);
+      Animated.timing(translateY, { toValue: 120, duration: 200, useNativeDriver: true }).start();
+    }
+    return () => dotLoopRef.current?.stop();
+  }, [visible]);
+
+  return (
+    <Animated.View
+      pointerEvents={visible ? 'auto' : 'none'}
+      style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        paddingBottom: Math.max(insets.bottom, 20) + 10,
+        paddingTop: 18, paddingHorizontal: 24,
+        backgroundColor: '#0A5740',
+        flexDirection: 'row', alignItems: 'center', gap: 16,
+        borderTopLeftRadius: 16, borderTopRightRadius: 16,
+        shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.2, shadowRadius: 10, elevation: 10,
+        transform: [{ translateY }],
+        zIndex: 200,
+      }}
+    >
+      <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+        {([dot1, dot2, dot3] as Animated.Value[]).map((dot, i) => (
+          <Animated.View key={i} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#5DCAA5', opacity: dot }} />
+        ))}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600', fontFamily: 'Fraunces_400Regular' }}>{label}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 }}>{sublabel}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+
+// ─── Barcode Scan Strip ────────────────────────────────────────────────────────
+function BarcodeScanStrip({ visible, scanSuccess, scannedEmoji, scannedName }: {
+  visible: boolean;
+  scanSuccess: boolean | null;
+  scannedEmoji: string;
+  scannedName: string;
+}) {
+  const insets = useSafeAreaInsets();
+  const translateY = useRef(new Animated.Value(120)).current;
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
+  const dotLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3);
+      Animated.spring(translateY, { toValue: 0, damping: 22, stiffness: 260, useNativeDriver: true }).start();
+      dotLoopRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(dot1, { toValue: 1,   duration: 220, useNativeDriver: true }),
+          Animated.timing(dot1, { toValue: 0.3, duration: 220, useNativeDriver: true }),
+          Animated.timing(dot2, { toValue: 1,   duration: 220, useNativeDriver: true }),
+          Animated.timing(dot2, { toValue: 0.3, duration: 220, useNativeDriver: true }),
+          Animated.timing(dot3, { toValue: 1,   duration: 220, useNativeDriver: true }),
+          Animated.timing(dot3, { toValue: 0.3, duration: 220, useNativeDriver: true }),
+        ])
+      );
+      dotLoopRef.current.start();
+    } else {
+      dotLoopRef.current?.stop();
+      dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3);
+      Animated.timing(translateY, { toValue: 120, duration: 200, useNativeDriver: true }).start();
+    }
+    return () => dotLoopRef.current?.stop();
+  }, [visible]);
+
+  useEffect(() => {
+    if (scanSuccess !== null) {
+      dotLoopRef.current?.stop();
+      dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3);
+    }
+  }, [scanSuccess]);
+
+  return (
+    <Animated.View
+      pointerEvents={visible ? 'auto' : 'none'}
+      style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        paddingBottom: Math.max(insets.bottom, 20) + 10,
+        paddingTop: 18, paddingHorizontal: 24,
+        backgroundColor: '#0A5740',
+        borderTopLeftRadius: 16, borderTopRightRadius: 16,
+        shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.2, shadowRadius: 10, elevation: 10,
+        transform: [{ translateY }],
+        zIndex: 1001,
+      }}
+    >
+      {scanSuccess === null ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+            {([dot1, dot2, dot3] as Animated.Value[]).map((dot, i) => (
+              <Animated.View key={i} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#5DCAA5', opacity: dot }} />
+            ))}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600', fontFamily: 'Fraunces_400Regular' }}>looking up product</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 }}>Searching Open Food Facts…</Text>
+          </View>
+        </View>
+      ) : scanSuccess === true ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Text style={{ fontSize: 26 }}>{scannedEmoji}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#5DCAA5', fontSize: 13, fontWeight: '700' }}>found it ✓</Text>
+            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '500', marginTop: 1 }} numberOfLines={1}>{scannedName}</Text>
+          </View>
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Text style={{ fontSize: 20, color: '#E8756A' }}>✕</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#E8756A', fontSize: 14, fontWeight: '600' }}>not in database</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 1 }}>try adding nutrition manually</Text>
+          </View>
+        </View>
+      )}
+    </Animated.View>
   );
 }
 
@@ -814,85 +1179,225 @@ function makeSeedItems(): Item[] {
     };
   };
   return [
-    // ── Fridge ────────────────────────────────────────────────────────────────
-    s('🥛', 'Whole Milk 2%',            '1',   'gallon', 'fridge',  6,  8, 12,  5, 120),
-    s('🥚', 'Large Eggs',               '12',  'ct',     'fridge', 18,  6,  1,  5,  70),
-    s('🧀', 'Sharp Cheddar Block',       '8',   'oz',     'fridge', 14, 25,  0, 34, 420),
-    s('🥩', 'Chicken Breast',            '2',   'lbs',    'fridge',  2, 31,  0,  3, 165),
+    // ── Fridge — Meat ─────────────────────────────────────────────────────────
     s('🥩', 'Ground Beef 80/20',         '1',   'lb',     'fridge',  1, 17,  0, 20, 254),
+    s('🥩', 'Chicken Breast',            '2',   'lbs',    'fridge',  2, 31,  0,  3, 165),
+    s('🥓', 'Applewood Smoked Bacon',    '12',  'oz',     'fridge',  7, 10,  0, 22, 240),
+    s('🥩', 'Pork Tenderloin',           '1',   'lb',     'fridge',  3, 26,  0,  4, 143),
+    s('🥓', 'Deli Turkey Slices',        '9',   'oz',     'fridge',  5, 18,  2,  2, 100),
+    // ── Fridge — Fish & Seafood ───────────────────────────────────────────────
     s('🐟', 'Atlantic Salmon Fillet',    '6',   'oz',     'fridge',  3, 34,  0, 12, 233),
+    s('🐟', 'Cod Fillet',                '8',   'oz',     'fridge',  2, 20,  0,  1,  90),
+    s('🍳', 'Smoked Salmon',             '4',   'oz',     'fridge',  0, 22,  0,  6, 132),
+    // ── Fridge — Dairy / Eggs ─────────────────────────────────────────────────
+    s('🥛', 'Whole Milk 2%',             '1',   'gallon', 'fridge',  6,  8, 12,  5, 120),
+    s('🥚', 'Large Eggs',                '12',  'ct',     'fridge', 18,  6,  1,  5,  70),
+    s('🧀', 'Sharp Cheddar Block',       '8',   'oz',     'fridge', 14, 25,  0, 34, 420),
+    s('🧀', 'Parmesan Wedge',            '4',   'oz',     'fridge', 21, 10,  1, 29, 420),
+    s('🧀', 'Feta Cheese',               '6',   'oz',     'fridge', 10,  4,  1, 12, 140),
+    s('🧀', 'Cream Cheese',              '8',   'oz',     'fridge', 12,  2,  4, 10, 100),
+    s('🥛', 'Greek Yogurt Plain',        '32',  'oz',     'fridge',  9, 17,  9,  0, 100),
+    s('🫙', 'Cottage Cheese',            '16',  'oz',     'fridge',  6, 14,  4,  2,  90),
+    s('🥛', 'Sour Cream',                '16',  'oz',     'fridge',  8,  1,  4, 20, 200),
+    s('🥛', 'Heavy Whipping Cream',      '16',  'oz',     'fridge', 14,  0,  3, 44, 414),
+    s('🧈', 'Unsalted Butter',           '1',   'lb',     'fridge', 30,  0,  0, 11, 102),
+    // ── Fridge — Vegetables ───────────────────────────────────────────────────
     s('🥦', 'Broccoli Florets',          '12',  'oz',     'fridge',  5,  2,  6,  0,  31),
     s('🥕', 'Baby Carrots',              '16',  'oz',     'fridge', 12,  1,  7,  0,  35),
     s('🫑', 'Bell Peppers Mix',           '3',   'ct',     'fridge',  8,  1,  6,  0,  31),
     s('🥬', 'Baby Spinach',              '5',   'oz',     'fridge',  4,  3,  3,  0,  23),
+    s('🥬', 'Kale Bunch',                '1',   'bunch',  'fridge',  6,  3,  9,  1,  49),
+    s('🍅', 'Cherry Tomatoes',           '10',  'oz',     'fridge',  7,  1,  4,  0,  27),
+    s('🍄', 'Baby Bella Mushrooms',      '8',   'oz',     'fridge',  5,  2,  3,  0,  20),
+    s('🥒', 'Persian Cucumbers',         '6',   'ct',     'fridge',  8,  1,  3,  0,  16),
+    s('🌿', 'Celery Stalks',             '1',   'bunch',  'fridge', 10,  1,  3,  0,  14),
+    s('🧅', 'Green Onions',              '1',   'bunch',  'fridge',  7,  1,  3,  0,  16),
+    s('🌿', 'Fresh Ginger Root',         '4',   'oz',     'fridge', 30,  0,  9,  0,  40),
+    s('🧄', 'Garlic Bulb',               '1',   'head',   'fridge', 21,  0,  4,  0,  18),
+    // ── Fridge — Fruit ────────────────────────────────────────────────────────
     s('🥑', 'Hass Avocados',             '2',   'ct',     'fridge',  3,  2,  9, 15, 160),
     s('🍓', 'Strawberries',              '1',   'lb',     'fridge',  5,  1, 11,  0,  49),
     s('🫐', 'Blueberries',               '6',   'oz',     'fridge',  7,  1, 14,  0,  57),
+    s('🍇', 'Red Seedless Grapes',       '2',   'lbs',    'fridge', 10,  1, 27,  0, 104),
+    s('🍑', 'Peaches',                   '4',   'ct',     'fridge',  4,  1, 14,  0,  59),
     s('🍋', 'Lemons',                    '5',   'ct',     'fridge', 14,  0,  7,  0,  29),
-    s('🧈', 'Unsalted Butter',           '1',   'lb',     'fridge', 30,  0,  0, 11, 102),
-    s('🥛', 'Greek Yogurt Plain',        '32',  'oz',     'fridge',  9, 17,  9,  0, 100),
-    s('🫙', 'Cottage Cheese',            '16',  'oz',     'fridge',  6, 14,  4,  2,  90),
-    s('🍳', 'Smoked Salmon',             '4',   'oz',     'fridge',  0, 22,  0,  6, 132),
+    s('🍋', 'Limes',                     '6',   'ct',     'fridge', 14,  0,  7,  0,  20),
+    s('🍊', 'Grapefruit',                '2',   'ct',     'fridge', 21,  1, 11,  0,  42),
+    // ── Fridge — Condiments & Sauces ─────────────────────────────────────────
+    s('🫙', 'Hummus Classic',            '10',  'oz',     'fridge',  7,  5,  8,  9, 140),
+    s('🥑', 'Guacamole',                 '8',   'oz',     'fridge',  3,  1,  6, 11, 110),
+    s('🫙', 'Ranch Dressing',            '16',  'oz',     'fridge', 30,  1,  2, 14, 140),
+    s('🫙', 'Salsa Roja',                '16',  'oz',     'fridge', 21,  1,  4,  0,  20),
+    s('🫙', 'Dijon Mustard',             '8',   'oz',     'fridge', 90,  1,  1,  1,  15),
+    s('🫙', 'Miso Paste',                '14',  'oz',     'fridge', 45,  3, 10,  1,  56),
+    s('🥫', 'Mayonnaise',                '30',  'oz',     'fridge', 90,  0,  0, 10,  90),
+    // ── Fridge — Bread & Grains ───────────────────────────────────────────────
+    s('🥞', 'Flour Tortillas',           '10',  'ct',     'fridge', 12,  3, 27,  3, 140),
+    // ── Fridge — Drinks ───────────────────────────────────────────────────────
+    s('🧃', 'Orange Juice',              '52',  'oz',     'fridge',  8,  2, 26,  0, 110),
+    s('☕', 'Cold Brew Coffee',           '32',  'oz',     'fridge',  7,  0,  0,  0,   5),
+    s('🥛', 'Oat Milk',                  '32',  'oz',     'fridge', 10,  1,  9,  3,  60),
+    s('🧃', 'Green Juice',               '16',  'oz',     'fridge',  2,  2, 18,  0,  80),
+    // ── Fridge — Herbs & Spices ───────────────────────────────────────────────
     s('🌿', 'Fresh Basil',               '1',   'bunch',  'fridge', -1,  1,  1,  0,   8),
     s('🌿', 'Cilantro',                  '1',   'bunch',  'fridge',  2,  1,  1,  0,   8),
-    s('🧄', 'Garlic Bulb',               '1',   'head',   'fridge', 21,  0,  4,  0,  18),
-    s('🫚', 'Miso Paste',                '14',  'oz',     'fridge', 45,  3, 10,  1,  56),
-    s('🥞', 'Flour Tortillas',           '10',  'ct',     'fridge', 12,  3, 27,  3, 140),
-    s('🧃', 'Orange Juice',              '52',  'oz',     'fridge',  8,  2, 26,  0, 110),
-    // ── Freezer ───────────────────────────────────────────────────────────────
-    s('🍗', 'Frozen Chicken Thighs',     '4',   'lbs',    'freezer', 90, 27,  0, 13, 209),
+    s('🌿', 'Flat-Leaf Parsley',         '1',   'bunch',  'fridge',  5,  1,  2,  0,  11),
+    s('🌿', 'Fresh Dill',                '1',   'bunch',  'fridge',  4,  1,  2,  0,  11),
+
+    // ── Freezer — Meat ────────────────────────────────────────────────────────
     s('🥩', 'Ribeye Steaks',             '2',   'ct',     'freezer', 60, 28,  0, 34, 410),
+    s('🥩', 'Ground Turkey',             '2',   'lbs',    'freezer', 90, 22,  0,  8, 170),
+    s('🌭', 'Italian Sausage Links',     '5',   'ct',     'freezer', 60, 14,  2, 22, 260),
+    s('🥩', 'Turkey Meatballs',          '32',  'oz',     'freezer', 90, 14,  9, 10, 180),
+    // ── Freezer — Poultry ─────────────────────────────────────────────────────
+    s('🍗', 'Frozen Chicken Thighs',     '4',   'lbs',    'freezer', 90, 27,  0, 13, 209),
+    s('🍗', 'Chicken Nuggets',           '32',  'oz',     'freezer', 45, 12, 17,  9, 200),
+    // ── Freezer — Fish & Seafood ──────────────────────────────────────────────
     s('🍤', 'Frozen Shrimp Large',       '2',   'lbs',    'freezer', 75, 20,  0,  2,  99),
     s('🐟', 'Tilapia Fillets',           '4',   'ct',     'freezer', 120, 23, 0,  2, 110),
+    s('🐟', 'Wild Caught Cod Portions',  '4',   'ct',     'freezer', 90, 19,  0,  1,  82),
+    s('🐟', 'King Salmon Portions',      '4',   'ct',     'freezer', 120, 25, 0, 12, 208),
+    // ── Freezer — Vegetables ──────────────────────────────────────────────────
     s('🌽', 'Frozen Sweet Corn',         '12',  'oz',     'freezer', 180,  3, 19,  1,  90),
     s('🥦', 'Frozen Broccoli',           '12',  'oz',     'freezer', 200,  3,  7,  0,  35),
     s('🫛', 'Frozen Edamame',            '16',  'oz',     'freezer', 150, 11,  9,  5, 122),
-    s('🍕', 'Frozen Margherita Pizza',   '1',   'ct',     'freezer',  45, 12, 46, 16, 370),
-    s('🥣', 'Açaí Packs',               '4',   'ct',     'freezer',  90,  2, 18,  7, 150),
-    s('🧇', 'Frozen Waffles',            '10',  'ct',     'freezer',  90,  3, 25,  4, 150),
-    s('🍦', 'Vanilla Ice Cream',         '1.5', 'qt',     'freezer',  60,  4, 28, 11, 210),
-    s('🥟', 'Pork Dumplings',            '24',  'ct',     'freezer',  120, 9, 23,  8, 200),
-    s('🌯', 'Frozen Breakfast Burritos', '4',   'ct',     'freezer',  90, 16, 36, 12, 310),
     s('🥕', 'Frozen Mixed Vegetables',   '16',  'oz',     'freezer', 240,  2, 11,  0,  50),
+    s('🥬', 'Frozen Chopped Spinach',    '10',  'oz',     'freezer', 180,  3,  3,  0,  23),
+    s('🫛', 'Frozen Green Peas',         '16',  'oz',     'freezer', 180,  5, 14,  0,  81),
+    // ── Freezer — Fruit ───────────────────────────────────────────────────────
     s('🫐', 'Frozen Mixed Berries',      '16',  'oz',     'freezer',  90,  1, 15,  0,  60),
-    // ── Pantry ────────────────────────────────────────────────────────────────
+    s('🥭', 'Frozen Mango Chunks',       '16',  'oz',     'freezer', 90,   1, 25,  0, 100),
+    s('🍌', 'Frozen Bananas',            '4',   'ct',     'freezer', 90,   1, 27,  0, 105),
+    // ── Freezer — Snacks & Sweets ─────────────────────────────────────────────
+    s('🥣', 'Açaí Packs',               '4',   'ct',     'freezer',  90,  2, 18,  7, 150),
+    s('🍦', 'Vanilla Ice Cream',         '1.5', 'qt',     'freezer',  60,  4, 28, 11, 210),
+    s('🍭', 'Frozen Fruit Bars',         '6',   'ct',     'freezer',  90,  0, 16,  0,  60),
+    // ── Freezer — Bread & Grains ──────────────────────────────────────────────
+    s('🧇', 'Frozen Waffles',            '10',  'ct',     'freezer',  90,  3, 25,  4, 150),
+    s('🍞', 'Sourdough Dinner Rolls',    '6',   'ct',     'freezer', 120,  4, 26,  1, 130),
+    // ── Freezer — Meals (pre-packaged) ───────────────────────────────────────
+    s('🍕', 'Frozen Margherita Pizza',   '1',   'ct',     'freezer',  45, 12, 46, 16, 370),
+    s('🥟', 'Pork Dumplings',            '24',  'ct',     'freezer', 120,  9, 23,  8, 200),
+    s('🌯', 'Frozen Breakfast Burritos', '4',   'ct',     'freezer',  90, 16, 36, 12, 310),
+    s('🥧', 'Frozen Chicken Pot Pie',    '1',   'ct',     'freezer',  60, 12, 38, 22, 390),
+
+    // ── Pantry — Bread & Grains ───────────────────────────────────────────────
     s('🍚', 'Jasmine Rice',              '5',   'lbs',    'pantry', 365,  4, 44,  0, 200),
+    s('🍚', 'Brown Rice',                '2',   'lbs',    'pantry', 365,  3, 45,  1, 216),
     s('🍝', 'Penne Pasta',               '16',  'oz',     'pantry', 540,  7, 43,  1, 200),
+    s('🍝', 'Spaghetti',                 '16',  'oz',     'pantry', 540,  7, 43,  1, 200),
     s('🌾', 'Rolled Oats',               '42',  'oz',     'pantry', 365,  5, 27,  3, 150),
+    s('🍚', 'Quinoa',                    '16',  'oz',     'pantry', 365,  8, 39,  4, 222),
+    s('🌾', 'Farro',                     '16',  'oz',     'pantry', 365,  6, 39,  1, 200),
+    s('🌾', 'All-Purpose Flour',         '5',   'lbs',    'pantry', 365,  3, 23,  0, 100),
+    s('🌾', 'Bread Flour',               '5',   'lbs',    'pantry', 365,  4, 22,  1, 100),
+    s('🥣', 'Granola',                   '12',  'oz',     'pantry', 180,  4, 32,  7, 200),
+    s('🥣', 'Corn Flakes Cereal',        '18',  'oz',     'pantry', 270,  2, 24,  0, 100),
+    s('🍞', 'Sourdough Bread',           '1',   'loaf',   'pantry',  4,   4, 24,  1, 120),
+    s('🫓', 'Corn Tortillas',            '30',  'ct',     'pantry', 30,   1, 11,  1,  50),
+    s('🍚', 'Panko Breadcrumbs',         '8',   'oz',     'pantry', 365,  4, 22,  1, 110),
+    s('🍜', 'Ramen Noodles',             '4',   'ct',     'pantry', 365,  4, 52,  7, 380),
+    // ── Pantry — Canned & Jarred ──────────────────────────────────────────────
     s('🫘', 'Black Beans Can',           '15',  'oz',     'pantry', 730,  7, 20,  0, 110),
     s('🫘', 'Chickpeas Can',             '15',  'oz',     'pantry', 730,  7, 27,  2, 170),
+    s('🫘', 'Kidney Beans Can',          '15',  'oz',     'pantry', 730,  8, 20,  0, 110),
+    s('🫘', 'Red Lentils',               '16',  'oz',     'pantry', 365,  9, 20,  0, 116),
     s('🍅', 'Crushed Tomatoes Can',      '28',  'oz',     'pantry', 540,  2,  6,  0,  35),
+    s('🍅', 'Diced Tomatoes Can',        '14.5','oz',     'pantry', 540,  1,  5,  0,  25),
+    s('🍅', 'Tomato Paste',              '6',   'oz',     'pantry', 365,  2, 10,  0,  50),
     s('🐟', 'Tuna Can in Water',         '5',   'oz',     'pantry', 365, 22,  0,  1, 100),
-    s('🥜', 'Natural Peanut Butter',     '16',  'oz',     'pantry', 180,  8,  7, 16, 190),
-    s('🍯', 'Raw Honey',                 '12',  'oz',     'pantry', 1825, 0, 17,  0,  60),
-    s('🫒', 'Extra Virgin Olive Oil',    '16.9','oz',     'pantry', 365,  0,  0, 14, 120),
-    s('🌶️','Sriracha Hot Sauce',        '17',  'oz',     'pantry', 365,  0,  1,  0,   5),
-    s('🧂', 'Kosher Salt',               '26',  'oz',     'pantry', 1825, 0,  0,  0,   0),
-    s('🌿', 'Dried Oregano',             '0.75','oz',     'pantry', 365,  0,  2,  0,   8),
-    s('🫙', 'Chicken Broth',             '32',  'oz',     'pantry', 180,  1,  1,  0,  10),
-    s('🍎', 'Apple Cider Vinegar',       '16',  'oz',     'pantry', 365,  0,  0,  0,   3),
-    s('🌰', 'Raw Almonds',               '16',  'oz',     'pantry', 365,  6,  6, 14, 164),
-    s('🍫', 'Dark Chocolate 70%',        '3.5', 'oz',     'pantry',  90,  3, 20, 18, 250),
-    s('🍞', 'Sourdough Bread',           '1',   'loaf',   'pantry',  4,   4, 24,  1, 120),
-    s('🌽', 'Popcorn Kernels',           '32',  'oz',     'pantry', 365,  3, 28,  4, 140),
-    s('🧃', 'Soy Sauce',                 '10',  'oz',     'pantry', 365,  1,  1,  0,  10),
-    s('🍚', 'Panko Breadcrumbs',         '8',   'oz',     'pantry', 365,  4, 22,  1, 110),
+    s('🐟', 'Canned Salmon',             '14.5','oz',     'pantry', 365, 25,  0,  7, 170),
     s('🥫', 'Coconut Milk Can',          '13.5','oz',     'pantry', 365,  1,  2, 14, 138),
-    s('🌾', 'All-Purpose Flour',         '5',   'lbs',    'pantry', 365,  3, 23,  0, 100),
+    s('🫙', 'Chicken Broth',             '32',  'oz',     'pantry', 180,  1,  1,  0,  10),
+    s('🫙', 'Vegetable Broth',           '32',  'oz',     'pantry', 365,  0,  2,  0,  10),
+    s('🫒', 'Kalamata Olives Jar',       '6',   'oz',     'pantry', 365,  0,  2, 10,  90),
+    s('🫙', 'Roasted Red Peppers Jar',   '12',  'oz',     'pantry', 365,  1,  4,  0,  25),
+    s('🥫', 'Artichoke Hearts Can',      '14',  'oz',     'pantry', 540,  4, 10,  0,  60),
+    s('🎃', 'Canned Pumpkin',            '15',  'oz',     'pantry', 730,  1,  7,  0,  35),
+    // ── Pantry — Legumes & Beans (dry) ────────────────────────────────────────
+    s('🫘', 'Dry Pinto Beans',           '16',  'oz',     'pantry', 730,  8, 22,  0, 122),
+    s('🫘', 'Green Lentils',             '16',  'oz',     'pantry', 730,  9, 20,  0, 116),
+    // ── Pantry — Nuts & Seeds ─────────────────────────────────────────────────
+    s('🌰', 'Raw Almonds',               '16',  'oz',     'pantry', 365,  6,  6, 14, 164),
+    s('🥜', 'Walnut Halves',             '12',  'oz',     'pantry', 180,  4,  4, 18, 185),
+    s('🥜', 'Roasted Cashews',           '8',   'oz',     'pantry', 180,  5,  9, 12, 157),
+    s('🥜', 'Natural Peanut Butter',     '16',  'oz',     'pantry', 180,  8,  7, 16, 190),
+    s('🥜', 'Sunflower Seeds',           '8',   'oz',     'pantry', 365,  6,  5, 14, 164),
+    s('🫙', 'Chia Seeds',                '12',  'oz',     'pantry', 365,  5, 12, 10, 138),
+    s('🫙', 'Tahini',                    '16',  'oz',     'pantry', 180,  5,  5, 15, 178),
+    // ── Pantry — Condiments & Sauces ─────────────────────────────────────────
+    s('🫒', 'Extra Virgin Olive Oil',    '16.9','oz',     'pantry', 365,  0,  0, 14, 120),
+    s('🫙', 'Soy Sauce',                 '10',  'oz',     'pantry', 365,  1,  1,  0,  10),
+    s('🌶️','Sriracha Hot Sauce',        '17',  'oz',     'pantry', 365,  0,  1,  0,   5),
+    s('🍎', 'Apple Cider Vinegar',       '16',  'oz',     'pantry', 365,  0,  0,  0,   3),
+    s('🫙', 'Balsamic Vinegar',          '16',  'oz',     'pantry', 365,  0,  3,  0,  14),
+    s('🫙', 'Fish Sauce',                '6.76','oz',     'pantry', 365,  1,  1,  0,  10),
+    s('🫙', 'Worcestershire Sauce',      '10',  'oz',     'pantry', 365,  0,  1,  0,   5),
+    s('🫙', 'Ketchup',                   '20',  'oz',     'pantry', 365,  0,  5,  0,  20),
+    s('🍯', 'Maple Syrup',               '12',  'oz',     'pantry', 730,  0, 13,  0,  52),
+    s('🍯', 'Raw Honey',                 '12',  'oz',     'pantry', 1825, 0, 17,  0,  60),
+    s('🫙', 'Teriyaki Sauce',            '12',  'oz',     'pantry', 365,  1,  8,  0,  40),
+    s('🫙', 'BBQ Sauce',                 '18',  'oz',     'pantry', 365,  0, 12,  0,  50),
+    s('🌶️','Tabasco Hot Sauce',         '5',   'oz',     'pantry', 730,  0,  0,  0,   0),
+    // ── Pantry — Baking ───────────────────────────────────────────────────────
     s('🍬', 'Granulated Sugar',          '4',   'lbs',    'pantry', 1825, 0, 25,  0, 100),
+    s('🍬', 'Dark Brown Sugar',          '2',   'lbs',    'pantry', 1825, 0, 27,  0, 106),
+    s('🌾', 'Cornstarch',                '16',  'oz',     'pantry', 1825, 0, 30,  0, 120),
+    s('🫙', 'Baking Powder',             '8.1', 'oz',     'pantry', 730,  0,  1,  0,   2),
+    s('🫙', 'Baking Soda',               '16',  'oz',     'pantry', 1825, 0,  0,  0,   0),
+    s('🫙', 'Vanilla Extract',           '4',   'oz',     'pantry', 1825, 0,  1,  0,  12),
+    s('🍫', 'Cocoa Powder',              '8',   'oz',     'pantry', 365,  2,  3,  1,  20),
+    s('🍫', 'Chocolate Chips',           '12',  'oz',     'pantry', 365,  2, 18,  9, 140),
+    s('🍫', 'Dark Chocolate 70%',        '3.5', 'oz',     'pantry',  90,  3, 20, 18, 250),
+    s('🫙', 'Active Dry Yeast',          '4',   'oz',     'pantry', 180,  8,  7,  1,  60),
+    // ── Pantry — Herbs & Spices ───────────────────────────────────────────────
+    s('🧂', 'Kosher Salt',               '26',  'oz',     'pantry', 1825, 0,  0,  0,   0),
+    s('🌿', 'Black Pepper Grinder',      '2',   'oz',     'pantry', 365,  0,  1,  0,   6),
+    s('🌿', 'Ground Cumin',              '2',   'oz',     'pantry', 365,  0,  1,  0,   8),
+    s('🌿', 'Smoked Paprika',            '2',   'oz',     'pantry', 365,  0,  2,  0,  10),
+    s('🌿', 'Ground Cinnamon',           '2',   'oz',     'pantry', 365,  0,  2,  0,   8),
+    s('🌿', 'Ground Turmeric',           '2',   'oz',     'pantry', 365,  0,  2,  0,   8),
+    s('🌿', 'Garlic Powder',             '3',   'oz',     'pantry', 365,  1,  3,  0,  16),
+    s('🌿', 'Onion Powder',              '2.5', 'oz',     'pantry', 365,  0,  3,  0,  14),
+    s('🌿', 'Italian Seasoning',         '2',   'oz',     'pantry', 365,  0,  2,  0,  10),
+    s('🌶️','Cayenne Pepper',            '2',   'oz',     'pantry', 365,  0,  1,  0,   6),
+    s('🌶️','Red Pepper Flakes',         '2',   'oz',     'pantry', 365,  0,  1,  0,   6),
+    s('🌿', 'Dried Oregano',             '0.75','oz',     'pantry', 365,  0,  2,  0,   8),
+    s('🌿', 'Dried Thyme',               '0.75','oz',     'pantry', 365,  0,  2,  0,   8),
+    s('🌿', 'Bay Leaves',                '0.5', 'oz',     'pantry', 730,  0,  1,  0,   4),
+    s('🌿', 'Curry Powder',              '2',   'oz',     'pantry', 365,  0,  2,  0,  10),
+    // ── Pantry — Snacks & Sweets ──────────────────────────────────────────────
+    s('🌽', 'Popcorn Kernels',           '32',  'oz',     'pantry', 365,  3, 28,  4, 140),
+    s('🥜', 'Granola Bars',              '6',   'ct',     'pantry',  30,  3, 29,  7, 190),
+    s('💪', 'Protein Bars',              '12',  'ct',     'pantry',  60, 20, 22,  8, 210),
+    s('🍘', 'Rice Cakes',                '4.5', 'oz',     'pantry', 90,   1, 14,  0,  60),
+    s('🌮', 'Tortilla Chips',            '10',  'oz',     'pantry',  30,  2, 20,  7, 140),
+    s('🥜', 'Trail Mix',                 '16',  'oz',     'pantry',  30,  5, 21, 12, 200),
+    s('🥨', 'Pretzels',                  '16',  'oz',     'pantry',  60,  3, 22,  1, 110),
+    // ── Pantry — Drinks ───────────────────────────────────────────────────────
+    s('☕', 'Ground Coffee',              '12',  'oz',     'pantry', 180,  0,  0,  0,   0),
+    s('🍵', 'Green Tea Bags',             '20',  'ct',     'pantry', 365,  0,  0,  0,   0),
+    s('🍵', 'Chamomile Tea Bags',         '20',  'ct',     'pantry', 365,  0,  0,  0,   0),
+    s('🧃', 'Sparkling Water Cases',      '12',  'ct',     'pantry', 365,  0,  0,  0,   0),
   ].map((item, i) => ({ ...item, id: i + 1 }));
 }
 
 export default function FridgeScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme, listDensity } = useTheme();
+  const insets = useSafeAreaInsets();
+  const badgeSoft = isDark ? BADGE_SOFT_DARK : BADGE_SOFT_LIGHT;
+  const iconBg: Record<Badge, string> = isDark
+    ? { red: 'rgba(245,90,90,0.2)', amber: 'rgba(245,180,60,0.2)', green: 'rgba(93,202,165,0.2)', blue: 'rgba(100,160,255,0.2)', black: '#2C2C2E' }
+    : { red: '#FCEBEB', amber: '#FFF8E6', green: '#E1F5EE', blue: '#E6F1FB', black: '#2C2C2E' };
   const { signOut, user } = useAuth();
   const { menuBtn, drawerEl } = useAppDrawer();
+  const { isPremium, isAnnual, isHouseholdJoiner, showPaywall } = useSubscription();
   const styles = useMemo(() => createStyles(colors, listDensity === 'compact', isDark), [colors, listDensity, isDark]);
   const [items, setItems]               = useState<Item[]>([]);
   const [expanded, setExpanded]         = useState<number | null>(null);
-  const [activeTab, setActiveTab]       = useState<TabView>('fridge');
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['fridge','freezer','pantry']));
+  const [activeTab, setActiveTab]       = useState<TabView>('all');
+  const [openedSections, setOpenedSections] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd]           = useState(false);
   const [editItem, setEditItem]         = useState<Item | null>(null);
   const [form, setForm]                 = useState(emptyForm());
@@ -907,9 +1412,16 @@ export default function FridgeScreen() {
   const [filterNutrition, setFilterNutrition]       = useState<string[]>([]);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [barcodeScanned, setBarcodeScanned]         = useState(false);
+  const [scanningReceipt, setScanningReceipt]       = useState(false);
+  const [scanningLabel,   setScanningLabel]         = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [showSuccess, setShowSuccess]               = useState(false);
+  const [showSaveConfirm, setShowSaveConfirm]       = useState(false);
+  const [lastSaved, setLastSaved]                   = useState<Item | null>(null);
+  const [itemHistory, setItemHistory]               = useState<HistoryItem[]>([]);
   const [barcodeProcessing, setBarcodeProcessing]   = useState(false);
+  const [useModalItem, setUseModalItem]             = useState<Item | null>(null);
+  const [useAmount, setUseAmount]                   = useState('');
   const [scannedName, setScannedName]               = useState('');
   const [scannedEmoji, setScannedEmoji]             = useState('🔍');
   const [scanSuccess, setScanSuccess]               = useState<boolean | null>(null);
@@ -926,12 +1438,7 @@ export default function FridgeScreen() {
   const heroScale      = useRef(new Animated.Value(0.94)).current;
   const contentOpacity = useRef(new Animated.Value(0)).current;
   const contentSlide   = useRef(new Animated.Value(15)).current;
-  const loadOverlayAnim = useRef(new Animated.Value(0)).current;
-  const loadEmojiAnim   = useRef(new Animated.Value(0)).current;
-  const loadRingAnim    = useRef(new Animated.Value(0)).current;
-  const loadResultAnim  = useRef(new Animated.Value(0)).current;
-  const ringLoopRef     = useRef<Animated.CompositeAnimation | null>(null);
-  const emojiLoopRef    = useRef<Animated.CompositeAnimation | null>(null);
+  const barcodeLockRef = useRef(false);
   const [blastVisible, setBlastVisible] = useState(false);
   const [badVisible,   setBadVisible]   = useState(false);
   const [toastMsg, setToastMsg]         = useState('');
@@ -939,20 +1446,23 @@ export default function FridgeScreen() {
   const toastAnim = useRef(new Animated.Value(0)).current;
 
   const [stats, setStats] = useState({ goneGood: 0, goneBad: 0, totalAdded: 0 });
+  const [householdId,   setHouseholdId]   = useState<string | null>(null);
+  const [householdName, setHouseholdName] = useState<string | null>(null);
+  const loadedHouseholdIdRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     const loadItems = async () => {
       // 1. Load from AsyncStorage immediately (fast, offline-safe)
       const raw = await AsyncStorage.getItem('gogood_items');
       // Seed demo data once (version flag prevents re-seeding after user clears items)
-      const seeded = await AsyncStorage.getItem('gogood_seed_v2');
+      const seeded = await AsyncStorage.getItem('gogood_seed_v3');
       const val = !seeded
         ? (() => {
             const existing = raw ? JSON.parse(raw) : [];
             const seed = makeSeedItems();
             const merged = [...existing, ...seed];
             AsyncStorage.setItem('gogood_items', JSON.stringify(merged));
-            AsyncStorage.setItem('gogood_seed_v2', '1');
+            AsyncStorage.setItem('gogood_seed_v3', '1');
             return JSON.stringify(merged);
           })()
         : raw;
@@ -979,7 +1489,14 @@ export default function FridgeScreen() {
 
       // 2. Pull from Supabase and merge (remote wins for newer items)
       if (user?.id) {
-        const remote = await pullItems(user.id);
+        const [hhId, hhName] = await Promise.all([
+          AsyncStorage.getItem(HOUSEHOLD_KEY),
+          AsyncStorage.getItem(HOUSEHOLD_NAME_KEY),
+        ]);
+        setHouseholdId(hhId);
+        setHouseholdName(hhName);
+        loadedHouseholdIdRef.current = hhId;
+        const remote = await pullItems(user.id, hhId ?? undefined);
         if (remote && remote.length > 0) {
           const merged = [...localItems];
           for (const r of remote) {
@@ -995,32 +1512,42 @@ export default function FridgeScreen() {
       }
     };
     loadItems();
-    // Restore persisted collapsed state; fall back to all-collapsed default
-    AsyncStorage.getItem('gogood_collapsed_sections').then(sv => {
+    // Restore which sections the user last had open. Default is all-collapsed —
+    // only sections the user explicitly opened are remembered across sessions.
+    AsyncStorage.getItem('gogood_opened_sections').then(sv => {
       if (sv) {
-        setCollapsedSections(new Set(JSON.parse(sv)));
-      } else {
-        // First launch: derive all possible section keys and collapse them
-        AsyncStorage.getItem('gogood_items').then(iv => {
-          const its: any[] = iv ? JSON.parse(iv) : [];
-          const cats = new Set<string>(['fridge', 'freezer', 'pantry']);
-          its.forEach(i => {
-            const cat = resolveCategory(i);
-            cats.add(cat);
-            cats.add(`fridge::${cat}`);
-            cats.add(`freezer::${cat}`);
-            cats.add(`pantry::${cat}`);
-          });
-          setCollapsedSections(cats);
-        });
+        const keys: string[] = JSON.parse(sv);
+        setOpenedSections(new Set(keys));
       }
+      // No saved state → leave openedSections empty = all collapsed (desired default)
     });
   }, [user?.id]);
 
   useEffect(() => {
     AsyncStorage.setItem('gogood_items', JSON.stringify(items));
-    if (user?.id) pushItems(items, user.id);
+    if (user?.id) {
+      AsyncStorage.getItem(HOUSEHOLD_KEY).then(hhId => {
+        pushItems(items, user.id!, hhId ?? undefined);
+      });
+    }
   }, [items]);
+
+  useEffect(() => {
+    if (!householdId) return;
+    const ch = subscribeToHouseholdItems(
+      householdId,
+      row => {
+        const item = fromRow(row) as unknown as Item;
+        setItems(prev => prev.some(i => i.id === item.id) ? prev : [...prev, item]);
+      },
+      row => {
+        const item = fromRow(row) as unknown as Item;
+        setItems(prev => prev.map(i => i.id === item.id ? item : i));
+      },
+      id => setItems(prev => prev.filter(i => i.id !== id)),
+    );
+    return () => { ch.unsubscribe(); };
+  }, [householdId]);
 
   useEffect(() => {
     AsyncStorage.getItem('gogood_stats').then(v => { if (v) setStats(JSON.parse(v)); });
@@ -1060,10 +1587,32 @@ export default function FridgeScreen() {
     } else {
       beamAnim.stopAnimation();
       beamAnim.setValue(0);
+      setBarcodeProcessing(false);
     }
   }, [showBarcodeScanner]);
 
   useFocusEffect(useCallback(() => {
+    // Refresh household state in case user just joined/left from the Household tab.
+    // Atomic read + re-pull items if membership changed.
+    Promise.all([
+      AsyncStorage.getItem(HOUSEHOLD_KEY),
+      AsyncStorage.getItem(HOUSEHOLD_NAME_KEY),
+    ]).then(([id, name]) => {
+      setHouseholdId(id);
+      setHouseholdName(name);
+      if (id !== loadedHouseholdIdRef.current && user?.id) {
+        loadedHouseholdIdRef.current = id;
+        pullItems(user.id, id ?? undefined).then(remote => {
+          if (remote && remote.length > 0) {
+            setItems(remote as unknown as Item[]);
+            const maxId = Math.max(...remote.map((i: any) => i.id), 99);
+            setNextId(maxId + 1);
+            AsyncStorage.setItem('gogood_items', JSON.stringify(remote));
+          }
+        });
+      }
+    });
+
     // Re-read storage in case foodreport restored an item while this screen was backgrounded
     AsyncStorage.getItem('gogood_items').then(val => {
       if (val) {
@@ -1085,7 +1634,7 @@ export default function FridgeScreen() {
     contentOpacity.setValue(0);
     contentSlide.setValue(15);
     Animated.parallel([
-      Animated.timing(screenFade,  { toValue: 1, duration: 280, useNativeDriver: true }),
+      Animated.timing(screenFade,  { toValue: 1, duration: 260, useNativeDriver: true }),
       Animated.spring(screenSlide, { toValue: 0, damping: 24, stiffness: 200, useNativeDriver: true }),
       Animated.spring(heroScale,   { toValue: 1, damping: 16, stiffness: 200, useNativeDriver: true }),
     ]).start();
@@ -1181,13 +1730,20 @@ export default function FridgeScreen() {
   const filtered        = getFiltered();
   const allInTab        = activeTab === 'all' ? [...items] : items.filter(i => i.category === activeTab);
   const allExpiringSoon = items.filter(i => getDaysLeft(i.expiryDate) <= 3);
-  const totalProtein    = filtered.reduce((a,i) => a + i.protein * i.qtyNum, 0);
-  const totalCarbs      = filtered.reduce((a,i) => a + i.carbs   * i.qtyNum, 0);
-  const totalFat        = filtered.reduce((a,i) => a + i.fat     * i.qtyNum, 0);
-  const totalCal        = filtered.reduce((a,i) => a + i.cal     * i.qtyNum, 0);
   const expiringSoon    = allInTab.filter(i => getDaysLeft(i.expiryDate) <= 3).length;
 
   const availableFoodCats = [...new Set(allInTab.map(i => resolveCategory(i)))].sort();
+
+  // Whether the list is rendered as flat (no category sections) — sections only exist in category sort with no filters
+  const noSections = ['expiry', 'expiryAsc'].includes(sortBy)
+    || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0
+    || filtered.length === 0;
+  const sectKeys = noSections
+    ? []
+    : [...new Set(filtered.map(i => `${activeTab}_${resolveCategory(i)}`))];
+
+  const collapseAll = () => setOpenedSections(prev => { const n = new Set(prev); sectKeys.forEach(k => n.delete(k)); return n; });
+  const expandAll   = () => setOpenedSections(prev => { const n = new Set(prev); sectKeys.forEach(k => n.add(k)); return n; });
 
   const goodBotMsg = () => {
     if (items.length === 0) return 'add items to get started';
@@ -1216,6 +1772,50 @@ export default function FridgeScreen() {
     setItems(prev => prev.map(i => i.id === id ? { ...i, qtyNum: Math.max(0, i.qtyNum + delta) } : i).filter(i => i.qtyNum > 0));
   };
 
+  const fmtQty = (n: number) => n % 1 === 0 ? String(n) : n.toFixed(1);
+
+  const handleUseAmount = () => {
+    if (!useModalItem) return;
+    const amount = parseFloat(useAmount);
+    if (isNaN(amount) || amount <= 0) return;
+    const remaining = useModalItem.qtyNum - amount;
+    if (remaining <= 0) {
+      setUseModalItem(null);
+      setUseAmount('');
+      goneGood(useModalItem);
+    } else {
+      setItems(prev => prev.map(i =>
+        i.id === useModalItem.id
+          ? { ...i, qtyNum: remaining, qty: `${fmtQty(remaining)} ${i.unit}`.trim() }
+          : i
+      ));
+      // Log the partial use to gone-good history so it counts in the report
+      const portionStr = useModalItem.unit
+        ? `${fmtQty(amount)} ${useModalItem.unit}`
+        : fmtQty(amount);
+      AsyncStorage.getItem('gogood_gone_good').then(val => {
+        const prev = val ? JSON.parse(val) : [];
+        const entry = {
+          id: useModalItem.id,
+          name: useModalItem.baseName,
+          icon: useModalItem.icon,
+          date: new Date().toISOString(),
+          expiryDate: useModalItem.expiryDate,
+          category: resolveCategory(useModalItem),
+          storageLocation: useModalItem.category,
+          daysLeft: useModalItem.days,
+          portion: portionStr,
+        };
+        AsyncStorage.setItem('gogood_gone_good', JSON.stringify([entry, ...prev]));
+      });
+      updateStats('goneGood');
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      showToast(`${portionStr} used 🌱`);
+      setUseModalItem(null);
+      setUseAmount('');
+    }
+  };
+
   const updateStats = (key: 'goneGood' | 'goneBad' | 'totalAdded') => {
     setStats(prev => { const u = { ...prev, [key]: prev[key] + 1 }; AsyncStorage.setItem('gogood_stats', JSON.stringify(u)); return u; });
   };
@@ -1227,7 +1827,7 @@ export default function FridgeScreen() {
       if (expanded === item.id) setExpanded(null);
       AsyncStorage.getItem('gogood_gone_good').then(val => {
         const prev = val ? JSON.parse(val) : [];
-        const entry = { id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(), expiryDate: item.expiryDate, category: resolveCategory(item) };
+        const entry = { id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(), expiryDate: item.expiryDate, category: resolveCategory(item), storageLocation: item.category, daysLeft: item.days };
         AsyncStorage.setItem('gogood_gone_good', JSON.stringify([entry, ...prev]));
       });
     });
@@ -1243,7 +1843,7 @@ export default function FridgeScreen() {
       if (expanded === item.id) setExpanded(null);
       AsyncStorage.getItem('gogood_gone_bad').then(val => {
         const prev = val ? JSON.parse(val) : [];
-        const entry = { id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(), expiryDate: item.expiryDate };
+        const entry = { id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(), expiryDate: item.expiryDate, storageLocation: item.category, daysLeft: item.days };
         AsyncStorage.setItem('gogood_gone_bad', JSON.stringify([entry, ...prev]));
       });
     });
@@ -1257,10 +1857,17 @@ export default function FridgeScreen() {
     if (expanded === id) setExpanded(null);
   };
 
+  const FREE_ITEM_LIMIT = 10;
+
   const openAdd = () => {
+    if (!isPremium && !isHouseholdJoiner && items.length >= FREE_ITEM_LIMIT) {
+      showPaywall();
+      return;
+    }
     const defaultCat: Category = activeTab === 'all' ? 'fridge' : activeTab;
     setForm({ ...emptyForm(), category: defaultCat });
     setEditItem(null);
+    loadHistory();
     setShowAdd(true);
   };
 
@@ -1270,55 +1877,50 @@ export default function FridgeScreen() {
       expiryDate: item.expiryDate, category: item.category,
       protein: String(item.protein), carbs: String(item.carbs),
       fat: String(item.fat), cal: String(item.cal),
-      foodCategory: item.foodCategory || '',
+      foodCategory: item.foodCategory || '', icon: item.icon || '',
+      servingSize: item.servingSize || '',
     });
     setEditItem(item);
     setShowAdd(true);
   };
 
   const openBarcodeScanner = async () => {
-    if (!cameraPermission?.granted) {
-      const result = await requestCameraPermission();
-      if (!result.granted) { showToast('Camera permission needed', true); return; }
+    if (!isPremium) { showPaywall(); return; }
+    try {
+      if (cameraPermission?.status === 'denied') {
+        Alert.alert(
+          'Camera access needed',
+          'Please enable camera access in Settings to scan barcodes.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
+      if (!cameraPermission?.granted) {
+        const result = await requestCameraPermission();
+        if (!result.granted) { showToast('Camera permission needed', true); return; }
+      }
+      setShowAdd(false);
+      setBarcodeScanned(false);
+      barcodeLockRef.current = false;
+      setTimeout(() => setShowBarcodeScanner(true), 300);
+    } catch {
+      showToast('Could not open camera', true);
     }
-    setShowAdd(false);
-    setBarcodeScanned(false);
-    // Wait for BottomSheet close animation (220ms) before opening camera Modal
-    setTimeout(() => setShowBarcodeScanner(true), 280);
   };
 
   const handleBarcodeScan = async ({ data }: { data: string }) => {
-    if (barcodeScanned) return;
+    if (barcodeLockRef.current) return;
+    barcodeLockRef.current = true;
     setBarcodeScanned(true);
     setBarcodeProcessing(true);
     setScanSuccess(null);
     setScannedEmoji('🔍');
-    loadResultAnim.setValue(0);
-
-    // Animate overlay in
-    Animated.timing(loadOverlayAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-
-    // Start sonar ring loop
-    ringLoopRef.current = Animated.loop(
-      Animated.sequence([
-        Animated.timing(loadRingAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
-        Animated.timing(loadRingAnim, { toValue: 0, duration: 0,    useNativeDriver: true }),
-      ])
-    );
-    ringLoopRef.current.start();
-
-    // Start emoji bounce loop
-    emojiLoopRef.current = Animated.loop(
-      Animated.sequence([
-        Animated.timing(loadEmojiAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(loadEmojiAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ])
-    );
-    emojiLoopRef.current.start();
+    const scanStart = Date.now();
 
     const finishScan = (success: boolean, name: string, emoji: string, formUpdater?: () => void) => {
-      ringLoopRef.current?.stop();
-      emojiLoopRef.current?.stop();
       if (success) {
         setScannedEmoji(emoji);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1328,16 +1930,11 @@ export default function FridgeScreen() {
       setScanSuccess(success);
       setScannedName(name);
       formUpdater?.();
-      Animated.spring(loadResultAnim, { toValue: 1, damping: 18, stiffness: 200, useNativeDriver: true }).start();
       setTimeout(() => {
-        Animated.timing(loadOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
-          setBarcodeProcessing(false);
-          loadRingAnim.setValue(0);
-          loadEmojiAnim.setValue(0);
-        });
+        setBarcodeProcessing(false);
         setShowBarcodeScanner(false);
         setTimeout(() => setShowAdd(true), 300);
-      }, 900);
+      }, 1800);
     };
 
     try {
@@ -1347,19 +1944,16 @@ export default function FridgeScreen() {
       const json = await res.json();
 
       if (json.status !== 1 || !json.product) {
-        ringLoopRef.current?.stop(); emojiLoopRef.current?.stop();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Animated.timing(loadOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
-          setBarcodeProcessing(false); loadRingAnim.setValue(0); loadEmojiAnim.setValue(0);
-        });
+        setBarcodeProcessing(false);
         setShowBarcodeScanner(false);
         setTimeout(() => {
           Alert.alert(
             'Product not found',
-            'This barcode isn\'t in the Open Food Facts database. Add it manually?',
+            'This barcode isn\'t in the Open Food Facts database.',
             [
               { text: 'Cancel', style: 'cancel', onPress: () => setBarcodeScanned(false) },
-              { text: 'Add manually', onPress: () => { setShowAdd(true); } },
+              { text: editItem ? 'Back to edit' : 'Fill in manually', onPress: () => { setShowAdd(true); } },
             ]
           );
         }, 350);
@@ -1406,6 +2000,8 @@ export default function FridgeScreen() {
       const carbs_ps   = perServing('carbohydrates');
       const fat_ps     = perServing('fat');
 
+      const minWait = Math.max(0, 2000 - (Date.now() - scanStart));
+      if (minWait > 0) await new Promise(r => setTimeout(r, minWait));
       finishScan(true, productName, getIcon(productName), () => {
         setForm(f => ({
           ...f,
@@ -1421,11 +2017,8 @@ export default function FridgeScreen() {
         }));
       });
     } catch {
-      ringLoopRef.current?.stop(); emojiLoopRef.current?.stop();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Animated.timing(loadOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
-        setBarcodeProcessing(false); loadRingAnim.setValue(0); loadEmojiAnim.setValue(0);
-      });
+      setBarcodeProcessing(false);
       setShowBarcodeScanner(false);
       setTimeout(() => {
         Alert.alert(
@@ -1440,6 +2033,67 @@ export default function FridgeScreen() {
     }
   };
 
+  const doScanReceipt = async (source: 'camera' | 'library', storeName?: string) => {
+    try {
+      let result: ImagePicker.ImagePickerResult;
+      if (source === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') { showToast('Camera permission needed', true); return; }
+        // Higher quality for receipts — fine text needs good resolution
+        result = await ImagePicker.launchCameraAsync({ base64: true, quality: 1.0 });
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') { showToast('Photo library access needed', true); return; }
+        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 1.0, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+      }
+      if (result.canceled || !result.assets?.[0]?.base64) { return; }
+      // Close the BottomSheet Modal first — iOS only allows one Modal at a time.
+      // Wait for its 280ms close animation to fully unmount before showing the overlay.
+      setShowAdd(false);
+      await new Promise<void>(r => setTimeout(r, 320));
+      setScanningReceipt(true);
+      const { data: { session } } = await import('../lib/supabase').then(m => m.supabase.auth.getSession());
+      if (!session) { showToast('Please sign in to scan receipts', true); setScanningReceipt(false); return; }
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/scan-receipt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          imageBase64: result.assets[0].base64,
+          mimeType: 'image/jpeg',
+          storeName: storeName ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (data._debug) console.log('[scan-receipt debug]', JSON.stringify(data._debug, null, 2));
+      if (!data.sessionId) {
+        Alert.alert(
+          'Receipt Not Recognized',
+          'Make sure the entire receipt is visible, well-lit, and the text is in focus. Try flattening the receipt on a dark surface.\n\nTip: item number codes on your receipt help us look up exact nutrition info.',
+          [{ text: 'Try Again', onPress: () => scanReceipt() }, { text: 'Cancel', style: 'cancel' }],
+        );
+        setScanningReceipt(false);
+        return;
+      }
+      router.push({ pathname: '/receipt-review', params: { sessionId: data.sessionId, storeName: storeName ?? '' } } as any);
+    } catch {
+      showToast('Receipt scan failed — check your connection', true);
+    }
+    setScanningReceipt(false);
+  };
+
+  const scanReceipt = () => {
+    if (!isAnnual) { showPaywall(); return; }
+    Alert.alert(
+      'Scan Walmart Receipt',
+      'Choose how to add your receipt. Item codes on the receipt are used to look up exact nutrition info.',
+      [
+        { text: '📷  Take Photo',    onPress: () => doScanReceipt('camera',  'Walmart') },
+        { text: '🖼️  Photo Library', onPress: () => doScanReceipt('library', 'Walmart') },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  };
+
   const scanLabel = async () => {
     setScanning(true);
     try {
@@ -1447,7 +2101,10 @@ export default function FridgeScreen() {
       if (status !== 'granted') { showToast('Camera permission needed', true); setScanning(false); return; }
       const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
       if (result.canceled || !result.assets?.[0]?.base64) { setScanning(false); return; }
-      showToast('Scanning for expiry date… 📷');
+      setShowAdd(false);
+      await new Promise<void>(r => setTimeout(r, 320));
+      setScanningLabel(true);
+      const labelStart = Date.now();
       const base64 = result.assets[0].base64!;
       const res = await fetch(`${SUPABASE_URL}/functions/v1/goodbot`, {
         method: 'POST',
@@ -1467,13 +2124,73 @@ export default function FridgeScreen() {
       const data = await res.json();
       if (!data.content?.[0]?.text) throw new Error('Empty response');
       const json = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
+      const labelWait = Math.max(0, 2500 - (Date.now() - labelStart));
+      if (labelWait > 0) await new Promise(r => setTimeout(r, labelWait));
+      setScanningLabel(false);
+      setTimeout(() => setShowAdd(true), 320);
       if (!json.expiryDate) { showToast('No expiry date found on label', true); setScanning(false); return; }
       setForm(f => ({ ...f, expiryDate: json.expiryDate }));
       showToast('Expiry date captured! 📅');
     } catch (e: any) {
+      setScanningLabel(false);
+      setTimeout(() => setShowAdd(true), 320);
       showToast(`Scan failed: ${e.message || 'unknown error'}`, true);
     }
     setScanning(false);
+  };
+
+  const saveToHistory = async (item: Item) => {
+    try {
+      const raw = await AsyncStorage.getItem(HISTORY_KEY);
+      const prev: HistoryItem[] = raw ? JSON.parse(raw) : [];
+      const entry: HistoryItem = {
+        id: String(Date.now()),
+        name: item.baseName || item.name,
+        icon: item.icon,
+        unit: item.unit,
+        category: item.category,
+        foodCategory: item.foodCategory || '',
+        protein: item.protein,
+        carbs: item.carbs,
+        fat: item.fat,
+        cal: item.cal,
+        servingSize: item.servingSize || undefined,
+        savedAt: Date.now(),
+      };
+      // Deduplicate by name — keep most recent occurrence only
+      const deduped = prev.filter(h => h.name.toLowerCase() !== entry.name.toLowerCase());
+      // Prune to last 30 days and cap at 200 entries
+      const cutoff = Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000;
+      const next = [entry, ...deduped].filter(h => h.savedAt >= cutoff).slice(0, 200);
+      await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    } catch {}
+  };
+
+  const loadHistory = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(HISTORY_KEY);
+      if (!raw) return;
+      const all: HistoryItem[] = JSON.parse(raw);
+      const cutoff = Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000;
+      setItemHistory(all.filter(h => h.savedAt >= cutoff).slice(0, 50));
+    } catch {}
+  };
+
+  const prefillFromHistory = (h: HistoryItem) => {
+    Haptics.selectionAsync();
+    setForm(f => ({
+      ...f,
+      name: h.name,
+      icon: h.icon,
+      unit: h.unit,
+      category: h.category,
+      foodCategory: h.foodCategory,
+      protein: h.protein > 0 ? String(h.protein) : '',
+      carbs:   h.carbs   > 0 ? String(h.carbs)   : '',
+      fat:     h.fat     > 0 ? String(h.fat)     : '',
+      cal:     h.cal     > 0 ? String(h.cal)     : '',
+      servingSize: h.servingSize || '',
+    }));
   };
 
   const saveItem = () => {
@@ -1490,7 +2207,7 @@ export default function FridgeScreen() {
     const batchNum = !editItem && existing.length > 0 ? existing.length + 1 : (editItem ? editItem.batch : 1);
     const built: Item = {
       id:         editItem ? editItem.id : nextId,
-      icon:       getIcon(safeName),
+      icon:       form.icon || getIcon(safeName),
       name:       safeName,
       baseName:   safeName,
       batch:      batchNum,
@@ -1502,13 +2219,14 @@ export default function FridgeScreen() {
       carbs:    parseFloat(form.carbs)   || 0,
       fat:      parseFloat(form.fat)     || 0,
       cal:      parseFloat(form.cal)     || 0,
-      qtyNum:   parseInt(form.qty)       || 1,
+      qtyNum:   parseFloat(form.qty)      || 1,
       unit:     form.unit,
-      category: form.category,
       addedAt:      editItem ? editItem.addedAt : Date.now(),
-      foodCategory: (() => {
-        const derived = getFoodCategory(safeName);
-        return derived !== 'Other' ? derived : (form.foodCategory || 'Other');
+      foodCategory: form.foodCategory || getFoodCategory(safeName),
+      servingSize:  form.servingSize || undefined,
+      category: (() => {
+        const fc = form.foodCategory || getFoodCategory(safeName);
+        return fc === 'Leftovers' ? 'fridge' : form.category;
       })(),
     };
 
@@ -1526,9 +2244,12 @@ export default function FridgeScreen() {
         updateStats('totalAdded');
       }
       setShowAdd(false);
+      saveToHistory(item);
+      setLastSaved(item);
+      setTimeout(() => setShowSaveConfirm(true), 350);
     };
 
-    const warning = getStorageWarning(safeName, form.category);
+    const warning = getStorageWarning(safeName, built.category);
     if (warning) {
       Alert.alert(
         'Heads up — storage mismatch',
@@ -1545,15 +2266,15 @@ export default function FridgeScreen() {
 
   const toggleSection = (key: string) => {
     LayoutAnimation.configureNext({
-      duration: 260,
-      create:  { type: 'easeInEaseOut', property: 'opacity' },
-      update:  { type: 'easeInEaseOut' },
-      delete:  { type: 'easeInEaseOut', property: 'opacity' },
+      duration: 60,
+      create:  { type: 'linear', property: 'opacity' },
+      update:  { type: 'linear' },
+      delete:  { type: 'linear', property: 'opacity' },
     });
-    setCollapsedSections(prev => {
+    setOpenedSections(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
-      AsyncStorage.setItem('gogood_collapsed_sections', JSON.stringify([...next]));
+      AsyncStorage.setItem('gogood_opened_sections', JSON.stringify([...next]));
       return next;
     });
   };
@@ -1569,7 +2290,7 @@ export default function FridgeScreen() {
     return CATEGORY_ORDER
       .filter(cat => grouped[cat]?.length > 0)
       .map(cat => {
-        const key      = locPrefix ? `${locPrefix}::${cat}` : cat;
+        const key      = `${activeTab}_${locPrefix ? `${locPrefix}::${cat}` : cat}`;
         const group    = [...grouped[cat]].sort((a, b) => {
           if (sortBy === 'alpha')       return (a.baseName||'').localeCompare(b.baseName||'');
           if (sortBy === 'alphaDesc')   return (b.baseName||'').localeCompare(a.baseName||'');
@@ -1583,7 +2304,7 @@ export default function FridgeScreen() {
           if (sortBy === 'oldest')      return a.addedAt - b.addedAt;
           return getDaysLeft(a.expiryDate) - getDaysLeft(b.expiryDate); // default: soonest first
         });
-        const collapsed = collapsedSections.has(key);
+        const collapsed = !openedSections.has(key);
         return (
           <View key={key}>
             <TouchableOpacity
@@ -1628,49 +2349,7 @@ export default function FridgeScreen() {
       );
     }
 
-    // ── All tab — two-level tree ────────────────────────────────────
-    if (activeTab === 'all') {
-      const LOC_META: { key: Category; icon: string; label: string; color: string }[] = [
-        { key: 'fridge',  icon: '❄️', label: 'Fridge',  color: colors.teal },
-        { key: 'freezer', icon: '🧊', label: 'Freezer', color: '#4A9EDB'   },
-        { key: 'pantry',  icon: '🥫', label: 'Pantry',  color: '#C47B3A'   },
-      ];
-      return (
-        <>
-          {LOC_META.map(({ key: loc, icon, label, color }) => {
-            const locItems = filtered.filter(i => i.category === loc);
-            if (locItems.length === 0) return null;
-            const locCollapsed = collapsedSections.has(loc);
-            return (
-              <View key={loc} style={styles.locationSection}>
-                <TouchableOpacity
-                  style={[styles.locationHeader, { borderLeftColor: color }]}
-                  onPress={() => toggleSection(loc)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.locationHeaderIcon}>{icon}</Text>
-                  <Text style={[styles.locationHeaderText, { color }]}>{label}</Text>
-                  <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
-                  <Text style={[styles.locationHeaderCount, { color: colors.textMuted }]}>
-                    {locItems.length} item{locItems.length !== 1 ? 's' : ''}
-                  </Text>
-                  <Text style={[styles.categoryChevron, { color }]}>
-                    {locCollapsed ? '›' : '⌄'}
-                  </Text>
-                </TouchableOpacity>
-                {!locCollapsed && (
-                  <View style={styles.locationContent}>
-                    {renderCategorySection(locItems, loc)}
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </>
-      );
-    }
-
-    // ── Single-location tab — one-level category tree ──────────────
+    // ── Category tree (all tabs) ────────────────────────────────────
     return <>{renderCategorySection(filtered)}</>;
   };
 
@@ -1684,10 +2363,19 @@ export default function FridgeScreen() {
     <View style={[styles.itemCard, expanded === item.id && styles.itemCardExpanded]}>
       <TouchableOpacity
         style={styles.itemMain}
-        onPress={() => setExpanded(prev => prev === item.id ? null : item.id)}
+        onPress={() => {
+          Haptics.selectionAsync();
+          LayoutAnimation.configureNext({
+            duration: 180,
+            create:  { type: 'easeInEaseOut', property: 'opacity' },
+            update:  { type: 'spring', springDamping: 0.8 },
+            delete:  { type: 'easeInEaseOut', property: 'opacity' },
+          });
+          setExpanded(prev => prev === item.id ? null : item.id);
+        }}
         activeOpacity={0.7}
       >
-        <View style={[styles.iconWrap, { backgroundColor: ICON_BG[liveBadge] }]}>
+        <View style={[styles.iconWrap, { backgroundColor: iconBg[liveBadge] }]}>
           <Text style={styles.itemIcon}>{item.icon}</Text>
         </View>
         <View style={styles.itemInfo}>
@@ -1698,8 +2386,8 @@ export default function FridgeScreen() {
           <Text style={styles.itemQty}>{item.unit ? `${item.qtyNum} ${item.unit}` : item.qty || item.qtyNum}</Text>
         </View>
         <View style={styles.itemRight}>
-          <View style={[styles.badge, { backgroundColor: ICON_BG[liveBadge] }]}>
-            <Text style={[styles.badgeText, { color: BADGE_SOFT[liveBadge].text }]}>{liveExpires}</Text>
+          <View style={[styles.badge, { backgroundColor: iconBg[liveBadge] }]}>
+            <Text style={[styles.badgeText, { color: badgeSoft[liveBadge].text }]}>{liveExpires}</Text>
           </View>
           {expanded !== item.id && <Text style={styles.tapDetails}>tap for details</Text>}
         </View>
@@ -1707,31 +2395,28 @@ export default function FridgeScreen() {
 
       {expanded === item.id && (
         <View style={styles.itemDetail}>
-          <View style={styles.detailMacros}>
-            {[
-              { label: 'protein', val: item.protein ? item.protein + 'g' : '—' },
-              { label: 'carbs',   val: item.carbs   ? item.carbs   + 'g' : '—' },
-              { label: 'fat',     val: item.fat     ? item.fat     + 'g' : '—' },
-              { label: 'cal',     val: item.cal     ? String(item.cal)   : '—' },
-            ].map(m => (
-              <View key={m.label} style={styles.macroPill}>
-                <Text style={styles.macroPillNum}>{m.val}</Text>
-                <Text style={styles.macroPillLabel}>{m.label}</Text>
-              </View>
-            ))}
-          </View>
           <View style={styles.qtyRow}>
             <Text style={styles.qtyLabel}>quantity</Text>
             <View style={styles.qtyControls}>
               <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(item.id, -1)}>
                 <Text style={styles.qtyBtnText}>−</Text>
               </TouchableOpacity>
-              <Text style={styles.qtyNum}>{item.qtyNum} {item.unit}</Text>
+              <Text style={styles.qtyNum}>{fmtQty(item.qtyNum)} {item.unit}</Text>
               <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(item.id, 1)}>
                 <Text style={styles.qtyBtnText}>+</Text>
               </TouchableOpacity>
             </View>
           </View>
+          {item.servingSize ? (
+            <Text style={{ fontSize: 10, color: colors.textMuted, textAlign: 'center' }}>serving: {item.servingSize}</Text>
+          ) : null}
+          <TouchableOpacity
+            onPress={() => { setUseModalItem(item); setUseAmount(''); }}
+            style={{ paddingTop: 4, paddingBottom: 2, alignSelf: 'center' }}
+            activeOpacity={0.6}
+          >
+            <Text style={{ fontSize: 11, color: colors.teal, fontWeight: '600' }}>use a portion →</Text>
+          </TouchableOpacity>
           <View style={styles.actionRow}>
             <TouchableOpacity style={[styles.actionBtn, styles.actionUsed]} onPress={() => goneGood(item)}>
               <Text style={styles.actionUsedText}>✓ gone good</Text>
@@ -1754,7 +2439,10 @@ export default function FridgeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
+      <ScanStatusStrip visible={scanningReceipt} label="scanning receipt" sublabel="Reading items & looking up nutrition…" />
+      <ScanStatusStrip visible={scanningLabel}   label="reading label"    sublabel="Extracting expiry date…" />
+      <BarcodeScanStrip visible={barcodeProcessing} scanSuccess={scanSuccess} scannedEmoji={scannedEmoji} scannedName={scannedName} />
       <StatusBar style={colors.statusBar} backgroundColor={colors.bg} />
       <Animated.View style={[styles.container, { opacity: screenFade, transform: [{ translateY: screenSlide }] }]}>
 
@@ -1780,7 +2468,8 @@ export default function FridgeScreen() {
         </Animated.View>
 
         {/* ── Header ── */}
-        <View style={styles.header}>
+        <Animated.View style={{ transform: [{ scale: heroScale }] }}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           {menuBtn}
           <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
           <Animated.View style={{ transform: [{ scale: addBtnScale }] }}>
@@ -1794,6 +2483,7 @@ export default function FridgeScreen() {
             </TouchableOpacity>
           </Animated.View>
         </View>
+        </Animated.View>
 
         {/* ── Search row ── */}
         <View style={styles.searchRow}>
@@ -1825,28 +2515,6 @@ export default function FridgeScreen() {
           ))}
         </View>
 
-        {/* ── Macro bar ── */}
-        <Animated.View style={{ transform: [{ scale: heroScale }] }}>
-        <View style={styles.macroBar}>
-          <Text style={styles.macroTitle}>{activeTab === 'all' ? 'ALL' : activeTab.toUpperCase()} MACROS · {filtered.length} ITEMS</Text>
-          <View style={styles.macroRow}>
-            {[
-              { label: 'PROTEIN', val: Math.round(totalProtein) + 'g' },
-              { label: 'CARBS',   val: Math.round(totalCarbs)   + 'g' },
-              { label: 'FAT',     val: Math.round(totalFat)     + 'g' },
-              { label: 'CAL',     val: String(Math.round(totalCal)) },
-            ].map((m, i) => (
-              <View key={m.label} style={styles.macroItem}>
-                {i > 0 && <View style={styles.macroDivider} />}
-                <View style={styles.macroItemInner}>
-                  <Text style={styles.macroNum}>{m.val}</Text>
-                  <Text style={styles.macroLabel}>{m.label}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </View>
-        </Animated.View>
 
         <Animated.View style={{ flex: 1, opacity: contentOpacity, transform: [{ translateY: contentSlide }] }}>
         {/* ── Sort bar ── */}
@@ -1856,7 +2524,27 @@ export default function FridgeScreen() {
               <TouchableOpacity style={styles.expiringBadge} onPress={() => setShowExpiringDetail(true)}>
                 <Text style={styles.expiringBadgeText}>{allExpiringSoon.length} expiring soon</Text>
               </TouchableOpacity>
-            ) : <View />}
+            ) : (
+              !['expiry','expiryAsc'].includes(sortBy) && filterFoodCats.length === 0 && filterExpiry.length === 0 && filterNutrition.length === 0 && filtered.length > 0 && (() => {
+                const sectionKeys = [...new Set(filtered.map(i => `${activeTab}_${resolveCategory(i)}`))];
+                const allCollapsed = sectionKeys.length > 0 && sectionKeys.every(k => !openedSections.has(k));
+                return (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (allCollapsed) {
+                        setOpenedSections(prev => { const n = new Set(prev); sectionKeys.forEach(k => n.add(k)); return n; });
+                      } else {
+                        setOpenedSections(prev => { const n = new Set(prev); sectionKeys.forEach(k => n.delete(k)); return n; });
+                      }
+                    }}
+                  >
+                    <Text style={[styles.collapseAllText, { color: colors.teal }]}>
+                      {allCollapsed ? '⊕ expand all' : '⊖ collapse all'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()
+            )}
           </View>
           <Text style={styles.sortBarLabel}>{SORT_LABELS[sortBy].toUpperCase()}</Text>
           <View style={styles.sortBarRight}>
@@ -1884,6 +2572,21 @@ export default function FridgeScreen() {
                 <Text style={styles.emptyIcon}>{activeTab === 'all' ? '🗂️' : activeTab === 'freezer' ? '🧊' : activeTab === 'pantry' ? '🥫' : '❄️'}</Text>
                 <Text style={styles.emptyTitle}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'No matches' : 'Nothing here yet'}</Text>
                 <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'Try adjusting your search or filters' : 'Tap + to add your first item'}</Text>
+                {!searchQuery && filterFoodCats.length === 0 && filterExpiry.length === 0 && filterNutrition.length === 0 && items.length === 0 && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      await seedSampleItems();
+                      const raw = await AsyncStorage.getItem('gogood_items');
+                      if (raw) setItems(JSON.parse(raw));
+                      showToast('25 sample items loaded 🥦');
+                    }}
+                    style={{ marginTop: 8 }}
+                  >
+                    <Text style={{ fontSize: 13, color: colors.teal, fontWeight: '600' }}>
+                      Load 25 sample items →
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : renderItems()}
           </Animated.View>
@@ -1891,10 +2594,14 @@ export default function FridgeScreen() {
 
         {/* ── Good Bot CTA ── */}
         <View style={styles.goodBotWrapper}>
-          <TouchableOpacity style={styles.goodBotBtn} onPress={() => items.length === 0 ? openAdd() : router.navigate('/(tabs)/goodbot' as any)}>
+          <TouchableOpacity style={styles.goodBotBtn} onPress={() => {
+            if (items.length === 0) { openAdd(); return; }
+            if (!isPremium) { showPaywall(); return; }
+            router.navigate('/(tabs)/goodbot' as any);
+          }}>
             <View style={styles.goodBotLeft}>
               <View style={styles.goodBotAvatarWrap}>
-                <Text style={{ fontSize: 20 }}>🤖</Text>
+                <Text style={{ fontSize: 15 }}>🤖</Text>
               </View>
               <View>
                 <Text style={styles.goodBotText}>Ask Good Bot what to make</Text>
@@ -1909,29 +2616,132 @@ export default function FridgeScreen() {
 
         {drawerEl}
 
+        {/* ── Use a Portion ── */}
+        <BottomSheet visible={!!useModalItem} onClose={() => { setUseModalItem(null); setUseAmount(''); }}>
+          <Text style={styles.modalTitle}>Use a portion</Text>
+          <Text style={{ color: colors.textSub, fontSize: 13, marginBottom: 16 }}>
+            You have: {fmtQty(useModalItem?.qtyNum ?? 0)}{useModalItem?.unit ? ` ${useModalItem.unit}` : ''}
+          </Text>
+          <Text style={styles.fieldLabel}>How much did you use?</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TextInput
+              style={[styles.input, { flex: 1, color: colors.inputText, backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}
+              value={useAmount}
+              onChangeText={setUseAmount}
+              keyboardType="decimal-pad"
+              placeholder={useModalItem?.unit ? `e.g. 8` : 'e.g. 1'}
+              placeholderTextColor={colors.placeholder}
+              autoFocus
+            />
+            {useModalItem?.unit ? (
+              <Text style={{ fontSize: 15, color: colors.text, fontWeight: '500', minWidth: 36 }}>
+                {useModalItem.unit}
+              </Text>
+            ) : null}
+          </View>
+          {useAmount !== '' && !isNaN(parseFloat(useAmount)) && (
+            <Text style={{ fontSize: 13, color: colors.textSub, marginTop: 8 }}>
+              {parseFloat(useAmount) >= (useModalItem?.qtyNum ?? 0)
+                ? '→ This will mark it as gone good 🌱'
+                : `→ ${fmtQty((useModalItem?.qtyNum ?? 0) - parseFloat(useAmount))}${useModalItem?.unit ? ` ${useModalItem.unit}` : ''} remaining`}
+            </Text>
+          )}
+          <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 16 }]} onPress={handleUseAmount}>
+            <Text style={styles.addConfirmText}>
+              {!isNaN(parseFloat(useAmount)) && parseFloat(useAmount) >= (useModalItem?.qtyNum ?? 0)
+                ? 'Mark gone good 🌱'
+                : 'Use it →'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => { setUseModalItem(null); setUseAmount(''); }}>
+            <Text style={styles.cancelText}>cancel</Text>
+          </TouchableOpacity>
+        </BottomSheet>
+
         {/* ── Add / Edit ── */}
         <BottomSheet visible={showAdd} onClose={() => setShowAdd(false)}>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ maxHeight: SCREEN_H * 0.72 }} contentContainerStyle={{ paddingBottom: 180 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <Text style={styles.modalTitle}>{editItem ? 'Edit item' : 'Add item'}</Text>
             </View>
-            {!editItem && (
-              <View style={styles.scanRow}>
-                <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode]} onPress={openBarcodeScanner}>
-                  <Text style={styles.scanBtnText}>📊 scan barcode</Text>
+            {editItem ? (
+              <>
+                <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode, { marginBottom: 6 }]} onPress={openBarcodeScanner}>
+                  <Text style={styles.scanBtnText}>🏷️ Scan barcode to update nutrition</Text>
                 </TouchableOpacity>
-                <Animated.View style={{ flex: 1, opacity: scanPulse }}>
-                  <TouchableOpacity style={[styles.scanBtn, { width: '100%' }]} onPress={scanLabel} disabled={scanning}>
-                    <Text style={styles.scanBtnText}>{scanning ? '⏳ scanning...' : '📷 scan label'}</Text>
+                <Text style={styles.scanHint}>Fills in nutrition, name, and quantity from the product barcode</Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.scanRow}>
+                  <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode]} onPress={openBarcodeScanner}>
+                    <Text style={styles.scanBtnText}>🏷️ Barcode</Text>
                   </TouchableOpacity>
-                </Animated.View>
-              </View>
+                  <Animated.View style={{ flex: 1, opacity: scanPulse }}>
+                    <TouchableOpacity style={[styles.scanBtn, { width: '100%' }]} onPress={scanLabel} disabled={scanning}>
+                      <Text style={styles.scanBtnText}>{scanning ? '⏳...' : '📷 Label'}</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                  <TouchableOpacity
+                    style={[styles.scanBtn, { backgroundColor: colors.brand }]}
+                    onPress={scanReceipt}
+                    disabled={scanningReceipt}
+                  >
+                    <Text style={styles.scanBtnText}>🧾 Receipt</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.scanHint}>Barcode · Label · Receipt — all fill the form automatically</Text>
+              </>
             )}
-            {!editItem && (
-              <Text style={styles.scanHint}>Barcode fills name & macros · Label scan also reads expiry date</Text>
+            {!editItem && itemHistory.length > 0 && (
+              <>
+                <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Recent items</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+                  {itemHistory.map(h => (
+                    <TouchableOpacity
+                      key={h.id}
+                      onPress={() => prefillFromHistory(h)}
+                      style={{ alignItems: 'center', padding: 8, borderRadius: 12, borderWidth: 0.5, borderColor: colors.border, backgroundColor: colors.surface, minWidth: 60, maxWidth: 84 }}
+                    >
+                      <Text style={{ fontSize: 26 }}>{h.icon}</Text>
+                      <Text numberOfLines={2} style={{ fontSize: 9, color: colors.text, fontWeight: '600', marginTop: 3, textAlign: 'center' }}>{h.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
             )}
             <Text style={styles.fieldLabel}>Item name</Text>
             <TextInput style={styles.input} placeholder="e.g. Ribeye steak" placeholderTextColor={colors.placeholder} value={form.name} onChangeText={v => setForm(f => ({...f, name: v}))} returnKeyType="next" />
+            {(() => {
+              const selectedIcon = form.icon || getIcon(form.name || '');
+              return (
+                <>
+                  <Text style={styles.fieldLabel}>Icon</Text>
+                  <View style={styles.iconPickerRow}>
+                    <View style={styles.iconPickerPreview}>
+                      <Text style={{ fontSize: 26 }}>{selectedIcon}</Text>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      style={styles.iconPickerScroll}
+                      contentContainerStyle={{ gap: 6, paddingRight: 8 }}
+                    >
+                      {FOOD_EMOJIS.map((emoji, i) => (
+                        <TouchableOpacity
+                          key={`${emoji}-${i}`}
+                          style={[styles.iconChip, selectedIcon === emoji && styles.iconChipActive]}
+                          onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, icon: emoji })); }}
+                        >
+                          <Text style={{ fontSize: 22 }}>{emoji}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </>
+              );
+            })()}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.fieldLabel}>Quantity</Text>
@@ -1944,6 +2754,8 @@ export default function FridgeScreen() {
             </View>
             <Text style={styles.fieldLabel}>Expiry date (YYYY-MM-DD)</Text>
             <TextInput style={styles.input} placeholder="2026-05-15" placeholderTextColor={colors.placeholder} value={form.expiryDate} onChangeText={v => setForm(f => ({...f, expiryDate: v}))} keyboardType="numbers-and-punctuation" returnKeyType="next" />
+            <Text style={styles.fieldLabel}>Serving size</Text>
+            <TextInput style={styles.input} placeholder="e.g. 1/4 cup, 1 tbsp, 100g" placeholderTextColor={colors.placeholder} value={form.servingSize} onChangeText={v => setForm(f => ({...f, servingSize: v}))} returnKeyType="next" />
             <Text style={styles.fieldLabel}>Macros (per serving)</Text>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {[{key:'protein',label:'Protein g'},{key:'carbs',label:'Carbs g'},{key:'fat',label:'Fat g'},{key:'cal',label:'Cal'}].map(m => (
@@ -1969,6 +2781,26 @@ export default function FridgeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            <Text style={styles.fieldLabel}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginTop: 4 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
+              <TouchableOpacity
+                style={[styles.categoryBtn, { flex: 0, paddingHorizontal: 12 }, !form.foodCategory && styles.categoryBtnActive]}
+                onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, foodCategory: '' })); }}
+              >
+                <Text style={[styles.categoryBtnText, !form.foodCategory && styles.categoryBtnTextActive]}>Auto</Text>
+              </TouchableOpacity>
+              {CATEGORY_ORDER.map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.categoryBtn, { flex: 0, paddingHorizontal: 12 }, form.foodCategory === cat && styles.categoryBtnActive]}
+                  onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, foodCategory: cat })); }}
+                >
+                  <Text style={[styles.categoryBtnText, form.foodCategory === cat && styles.categoryBtnTextActive]}>
+                    {CATEGORY_ICONS[cat]} {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
             <TouchableOpacity style={styles.addConfirmBtn} onPress={saveItem}>
               <Text style={styles.addConfirmText}>{editItem ? 'Save changes →' : `Add to ${form.category} →`}</Text>
             </TouchableOpacity>
@@ -1993,22 +2825,56 @@ export default function FridgeScreen() {
                   key={key}
                   style={[
                     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                    sortBy === key && { backgroundColor: '#085041', borderColor: '#085041' }
+                    sortBy === key && { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary }
                   ]}
-                  onPress={() => setSortBy(key)}
+                  onPress={() => { Haptics.selectionAsync(); setSortBy(key); }}
                 >
                   <Text style={{ fontSize: 15 }}>{SORT_ICONS[key]}</Text>
                   <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '500' }, sortBy === key && { color: 'white' }]}>{label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Filter by expiry</Text>
+            {/* ── Collapse / Expand All ── */}
+            <Text style={[styles.fieldLabel, { marginTop: 20 }]}>Groups</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+              {[
+                { label: 'Collapse All', icon: '⊖', onPress: collapseAll },
+                { label: 'Expand All',   icon: '⊕', onPress: expandAll   },
+              ].map(btn => (
+                <TouchableOpacity
+                  key={btn.label}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 11, borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: noSections ? colors.border : colors.teal,
+                    backgroundColor: noSections ? colors.surface : 'rgba(29,158,117,0.08)',
+                    opacity: noSections ? 0.4 : 1,
+                  }}
+                  disabled={noSections}
+                  onPress={() => { btn.onPress(); setShowSortFilter(false); }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={{ fontSize: 15, color: noSections ? colors.textMuted : colors.teal }}>{btn.icon}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: noSections ? colors.textMuted : colors.teal }}>
+                    {btn.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {noSections && (
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
+                Switch to "By Category" sort with no filters to use groups.
+              </Text>
+            )}
+
+            <Text style={[styles.fieldLabel, { marginTop: 20 }]}>Filter by expiry</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
               {[
-                { key: 'expired', emoji: '💀', label: 'Expired',    bg: ICON_BG.black, text: BADGE_SOFT.black.text },
-                { key: 'today',   emoji: '🔴', label: 'Today',      bg: ICON_BG.red,   text: BADGE_SOFT.red.text   },
-                { key: 'soon',    emoji: '🟡', label: '1–3 days',   bg: ICON_BG.amber, text: BADGE_SOFT.amber.text },
-                { key: 'fresh',   emoji: '🟢', label: 'Fresh (4+)', bg: ICON_BG.green, text: BADGE_SOFT.green.text },
+                { key: 'expired', emoji: '💀', label: 'Expired',    bg: iconBg.black, text: badgeSoft.black.text },
+                { key: 'today',   emoji: '🔴', label: 'Today',      bg: iconBg.red,   text: badgeSoft.red.text   },
+                { key: 'soon',    emoji: '🟡', label: '1–3 days',   bg: iconBg.amber, text: badgeSoft.amber.text },
+                { key: 'fresh',   emoji: '🟢', label: 'Fresh (4+)', bg: iconBg.green, text: badgeSoft.green.text },
               ].map(e => (
                 <TouchableOpacity
                   key={e.key}
@@ -2035,7 +2901,7 @@ export default function FridgeScreen() {
                       key={cat}
                       style={[
                         { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                        filterFoodCats.includes(cat) && { backgroundColor: '#085041', borderColor: '#085041' }
+                        filterFoodCats.includes(cat) && { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary }
                       ]}
                       onPress={() => setFilterFoodCats(prev =>
                         prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
@@ -2056,7 +2922,7 @@ export default function FridgeScreen() {
                   key={f.key}
                   style={[
                     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                    filterNutrition.includes(f.key) && { backgroundColor: '#085041', borderColor: '#085041' }
+                    filterNutrition.includes(f.key) && { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary }
                   ]}
                   onPress={() => setFilterNutrition(prev =>
                     prev.includes(f.key) ? prev.filter(x => x !== f.key) : [...prev, f.key]
@@ -2084,17 +2950,30 @@ export default function FridgeScreen() {
           </ScrollView>
         </BottomSheet>
 
-        {/* ── Barcode Scanner ── */}
-        <Modal visible={showBarcodeScanner} animationType="slide" onRequestClose={() => { setShowBarcodeScanner(false); setBarcodeScanned(false); setTimeout(() => setShowAdd(true), 300); }}>
-          <View style={{ flex: 1, backgroundColor: '#000' }}>
+        {/* ── Barcode Scanner (absolute overlay — avoids iOS "one modal at a time" limit) ── */}
+        {showBarcodeScanner && (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', zIndex: 999 }]}>
+            {/* Layer 1 — full-screen live camera feed */}
             <CameraView
               style={StyleSheet.absoluteFillObject}
               facing="back"
               onBarcodeScanned={handleBarcodeScan}
               barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39'] }}
             />
-            {/* Viewfinder */}
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+
+            {/* Layer 2 — solid mask with a transparent cutout for the scan window */}
+            <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.76)' }} />
+              <View style={{ flexDirection: 'row', height: 160 }}>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.76)' }} />
+                <View style={{ width: 280 }} />
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.76)' }} />
+              </View>
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.76)' }} />
+            </View>
+
+            {/* Layer 3 — corner marks, scanning beam, and hint text */}
+            <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
               <View style={styles.barcodeFrame}>
                 <View style={[styles.barcodeCorner, { top: -2, left: -2, borderTopWidth: 3, borderLeftWidth: 3 }]} />
                 <View style={[styles.barcodeCorner, { top: -2, right: -2, borderTopWidth: 3, borderRightWidth: 3 }]} />
@@ -2105,61 +2984,48 @@ export default function FridgeScreen() {
                   opacity:   beamAnim.interpolate({ inputRange: [0, 0.04, 0.96, 1], outputRange: [0, 1, 1, 0] }),
                 }]} />
               </View>
-              <Text style={{ color: 'white', marginTop: 20, fontSize: 14, fontWeight: '500' }}>
+              <Text style={{ color: 'rgba(255,255,255,0.75)', marginTop: 18, fontSize: 13, fontWeight: '500' }}>
                 Point at a barcode or QR code
               </Text>
-              <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 6, fontSize: 11 }}>
+              <Text style={{ color: 'rgba(255,255,255,0.4)', marginTop: 5, fontSize: 11 }}>
                 UPC · EAN · Code128 supported
               </Text>
             </View>
-            {/* Close */}
+
+            {/* Close button */}
             <TouchableOpacity
-              style={{ position: 'absolute', top: 60, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}
-              onPress={() => { setShowBarcodeScanner(false); setBarcodeScanned(false); setTimeout(() => setShowAdd(true), 300); }}
+              style={{ position: 'absolute', top: 60, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}
+              onPress={() => { barcodeLockRef.current = false; setShowBarcodeScanner(false); setBarcodeScanned(false); setTimeout(() => setShowAdd(true), 300); }}
             >
               <Text style={{ color: 'white', fontSize: 18, lineHeight: 22 }}>✕</Text>
             </TouchableOpacity>
+
             {/* Brand */}
-            <View style={{ alignItems: 'center', paddingBottom: 48 }}>
-              <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11 }}>powered by Open Food Facts</Text>
+            <View style={{ position: 'absolute', bottom: 48, left: 0, right: 0, alignItems: 'center' }}>
+              <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>powered by Open Food Facts</Text>
             </View>
-            {/* Scan loading overlay */}
-            {barcodeProcessing && (
-              <Animated.View style={[styles.scanOverlay, { opacity: loadOverlayAnim }]}>
-                {[0, 1, 2].map(i => (
-                  <Animated.View key={i} style={[styles.scanRing, {
-                    opacity: loadRingAnim.interpolate({ inputRange: [0, 0.3, 0.7, 1], outputRange: [0, 0.6, 0.2, 0] }),
-                    transform: [{ scale: loadRingAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4 + i * 0.3, 1.4 + i * 0.3] }) }],
-                  }]} />
-                ))}
-                <Animated.Text style={[styles.scanEmojiLarge, {
-                  transform: [{ scale: loadEmojiAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.15, 1] }) }],
-                }]}>{scannedEmoji}</Animated.Text>
-                {scanSuccess === null && (
-                  <Text style={styles.scanLoadingLabel}>looking up product…</Text>
-                )}
-                {scanSuccess === true && (
-                  <Animated.View style={{ alignItems: 'center', gap: 6, opacity: loadResultAnim, transform: [{ translateY: loadResultAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }}>
-                    <Text style={styles.scanFoundCheck}>✓</Text>
-                    <Text style={styles.scanFoundName}>{scannedName}</Text>
-                  </Animated.View>
-                )}
-                {scanSuccess === false && (
-                  <Animated.View style={{ alignItems: 'center', opacity: loadResultAnim }}>
-                    <Text style={styles.scanNotFoundText}>not in database</Text>
-                  </Animated.View>
-                )}
-              </Animated.View>
-            )}
           </View>
-        </Modal>
+        )}
 
         {/* ── Expiring Detail ── */}
         <BottomSheet visible={showExpiringDetail} onClose={() => setShowExpiringDetail(false)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={styles.modalTitle}>Expiring Soon</Text>
             <TouchableOpacity onPress={() => setShowExpiringDetail(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
           </View>
+          {!isPremium && (
+            <TouchableOpacity
+              onPress={() => { setShowExpiringDetail(false); showPaywall(); }}
+              style={{ backgroundColor: colors.btnPrimary, borderRadius: 12, padding: 12, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+            >
+              <Text style={{ fontSize: 22 }}>🤖</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#5DCAA5' }}>Turn expiring food into recipes</Text>
+                <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 2 }}>Good Bot creates meals from what you have — upgrade to Go Good+</Text>
+              </View>
+              <Text style={{ fontSize: 16, color: '#5DCAA5' }}>›</Text>
+            </TouchableOpacity>
+          )}
           <ScrollView showsVerticalScrollIndicator={false}>
             {allExpiringSoon.length === 0 ? (
               <Text style={{ color: colors.textSub, textAlign: 'center', paddingVertical: 24 }}>Nothing expiring soon!</Text>
@@ -2169,19 +3035,29 @@ export default function FridgeScreen() {
                 const liveBadge   = getBadge(liveDays, item.category);
                 const liveExpires = getExpiryText(liveDays);
                 return (
-                <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: colors.border, gap: 12 }}>
-                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: ICON_BG[liveBadge], alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontSize: 22 }}>{item.icon}</Text>
+                <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: iconBg[liveBadge], alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 22 }}>{item.icon}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{item.baseName}</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
+                        {item.category.charAt(0).toUpperCase() + item.category.slice(1)} · {item.qty}
+                      </Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: badgeSoft[liveBadge].bg }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: badgeSoft[liveBadge].text }}>{liveExpires}</Text>
+                    </View>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{item.baseName}</Text>
-                    <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
-                      {item.category.charAt(0).toUpperCase() + item.category.slice(1)} · {item.qty}
-                    </Text>
-                  </View>
-                  <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: BADGE_SOFT[liveBadge].bg }}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: BADGE_SOFT[liveBadge].text }}>{liveExpires}</Text>
-                  </View>
+                  {liveDays < 0 && (
+                    <TouchableOpacity
+                      style={{ marginTop: 8, alignSelf: 'flex-end', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(232,117,106,0.12)', borderWidth: 1, borderColor: 'rgba(232,117,106,0.3)' }}
+                      onPress={() => { setShowExpiringDetail(false); goneBad(item); }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#C0392B' }}>Gone bad 🥀</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 );
               })
@@ -2190,8 +3066,42 @@ export default function FridgeScreen() {
           </ScrollView>
         </BottomSheet>
 
+        {/* ── Save confirmation ── */}
+        <BottomSheet visible={showSaveConfirm} onClose={() => setShowSaveConfirm(false)}>
+          <Text style={styles.modalTitle}>Does everything look right?</Text>
+          {lastSaved && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginVertical: 14, padding: 14, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 0.5, borderColor: colors.border }}>
+              <Text style={{ fontSize: 42 }}>{lastSaved.icon}</Text>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{lastSaved.baseName}</Text>
+                <Text style={{ fontSize: 12, color: colors.textSub }}>
+                  {lastSaved.category === 'fridge' ? '❄️' : lastSaved.category === 'freezer' ? '🧊' : '🥫'} {lastSaved.category.charAt(0).toUpperCase() + lastSaved.category.slice(1)}
+                  {lastSaved.foodCategory ? `  ·  ${CATEGORY_ICONS[lastSaved.foodCategory] ?? ''} ${lastSaved.foodCategory}` : ''}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textSub }}>
+                  📅 {lastSaved.expiryDate || 'No expiry set'}{lastSaved.qty ? `  ·  📦 ${lastSaved.qty}` : ''}
+                </Text>
+                {(lastSaved.protein > 0 || lastSaved.cal > 0) && (
+                  <Text style={{ fontSize: 11, color: colors.textSub }}>
+                    {[lastSaved.cal > 0 && `${lastSaved.cal} cal`, lastSaved.protein > 0 && `${lastSaved.protein}g protein`].filter(Boolean).join('  ·  ')}
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
+          <TouchableOpacity style={styles.addConfirmBtn} onPress={() => setShowSaveConfirm(false)}>
+            <Text style={styles.addConfirmText}>Looks good ✓</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.cancelBtn, { marginTop: 8 }]} onPress={() => {
+            setShowSaveConfirm(false);
+            if (lastSaved) setTimeout(() => openEdit(lastSaved), 350);
+          }}>
+            <Text style={styles.cancelText}>Edit this item</Text>
+          </TouchableOpacity>
+        </BottomSheet>
+
       </Animated.View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -2200,50 +3110,44 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   container:             { flex: 1, backgroundColor: c.bg },
   blastWrap:             { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 },
   blastEmoji:            { position: 'absolute', fontSize: 14 },
-  toast:                 { position: 'absolute', bottom: 110, alignSelf: 'center', backgroundColor: '#085041', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, zIndex: 100 },
+  toast:                 { position: 'absolute', bottom: 110, alignSelf: 'center', backgroundColor: c.btnPrimary, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, zIndex: 100 },
   toastBad:              { backgroundColor: '#E24B4A' },
   toastText:             { color: 'white', fontSize: 11, fontWeight: '500' },
 
   // Header
-  header:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10, backgroundColor: c.bg, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
+  header:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: 0.5, borderBottomColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
   logo:                  { fontSize: 30, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   logoGreen:             { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   menuBtn:               { width: 32, height: 32, justifyContent: 'center', gap: 5 },
   menuLine:              { width: 20, height: 1.5, backgroundColor: c.text, borderRadius: 999 },
   expiringBadge:         { backgroundColor: '#FFEAEA', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   expiringBadgeText:     { fontSize: 11, fontWeight: '600', color: '#C0392B' },
-  addBtn:                { width: 34, height: 34, borderRadius: 17, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center', shadowColor: '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 14, elevation: 8 },
-  addBtnText:            { color: 'white', fontSize: 22, lineHeight: 26, fontWeight: '300' },
+  addBtn:                { width: 34, height: 34, borderRadius: 17, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.5, shadowRadius: 14, elevation: 8 },
+  addBtnText:            { color: 'white', fontSize: 22, lineHeight: 22, fontWeight: '300', includeFontPadding: false, marginTop: 1 },
+  scanIconBtn:           { width: 34, height: 34, borderRadius: 17, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.4, shadowRadius: 12, elevation: 6 },
 
   // Search
-  searchRow:             { paddingHorizontal: 16, paddingBottom: 10 },
+  searchRow:             { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 },
   searchBar:             { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: c.border, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
   searchIcon:            { fontSize: 15 },
   searchInput:           { flex: 1, fontSize: 14, color: c.text },
 
   // Tabs
   tabs:                  { flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingBottom: 10 },
-  tab:                   { flex: 1, paddingVertical: 9, borderRadius: 12, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.10, shadowRadius: 7, elevation: 3 },
+  tab:                   { flex: 1, paddingVertical: 9, borderRadius: 100, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.10, shadowRadius: 7, elevation: 3 },
   tabActive:             { backgroundColor: isDark ? '#1D9E75' : c.brand, borderColor: isDark ? '#1D9E75' : c.brand },
   tabText:               { fontSize: 10, fontWeight: '500', color: c.textSub },
   tabTextActive:         { color: 'white', fontWeight: '600' },
 
-  // Macro bar
-  macroBar:              { marginHorizontal: 16, marginBottom: compact ? 6 : 10, backgroundColor: c.surface, borderRadius: 14, borderWidth: 0.5, borderColor: c.border, padding: compact ? 8 : 14, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
-  macroTitle:            { fontSize: compact ? 8 : 9, color: c.textSub, fontWeight: '700', letterSpacing: 1.2, marginBottom: compact ? 6 : 10 },
-  macroRow:              { flexDirection: 'row', alignItems: 'center' },
-  macroItem:             { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  macroItemInner:        { flex: 1, alignItems: 'center' },
-  macroDivider:          { width: 0.5, height: compact ? 24 : 34, backgroundColor: c.border },
-  macroNum:              { fontSize: compact ? 15 : 20, fontWeight: '700', color: c.text },
-  macroLabel:            { fontSize: compact ? 7 : 8, color: c.textSub, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: compact ? 1 : 2 },
 
   // Sort bar
   sortBar:               { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },
+  collapseAllBtn:        { alignSelf: 'flex-end', paddingHorizontal: 16, paddingBottom: 6, paddingTop: 0 },
+  collapseAllText:       { fontSize: 11, fontWeight: '600' },
   sortBarLeft:           { flex: 1, alignItems: 'flex-start' },
   sortBarRight:          { flex: 1, alignItems: 'flex-end' },
   sortBarLabel:          { fontSize: 10, fontWeight: '700', color: c.text, letterSpacing: 0.5 },
-  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12 },
   sortFilterBtnText:     { fontSize: 12, color: c.teal, fontWeight: '600' },
   filterBadge:           { width: 16, height: 16, borderRadius: 8, backgroundColor: '#E8756A', alignItems: 'center', justifyContent: 'center' },
   filterBadgeText:       { fontSize: 9, color: 'white', fontWeight: '700' },
@@ -2305,35 +3209,31 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
 
   // Item expanded
   itemDetail:            { paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 0.5, borderTopColor: c.border, gap: 10, paddingTop: 12 },
-  detailMacros:          { flexDirection: 'row', gap: 6 },
-  macroPill:             { flex: 1, backgroundColor: c.bg, borderRadius: 10, padding: 8, alignItems: 'center' },
-  macroPillNum:          { fontSize: 13, fontWeight: '600', color: c.brand },
-  macroPillLabel:        { fontSize: 7, color: c.textSub, marginTop: 1, textTransform: 'uppercase' },
   qtyRow:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   qtyLabel:              { fontSize: 10, color: c.textSub },
   qtyControls:           { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  qtyBtn:                { width: 26, height: 26, borderRadius: 13, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center' },
+  qtyBtn:                { width: 26, height: 26, borderRadius: 13, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center' },
   qtyBtnText:            { color: 'white', fontSize: 18, lineHeight: 20 },
   qtyNum:                { fontSize: 13, fontWeight: '500', color: c.text, minWidth: 40, textAlign: 'center' },
   actionRow:             { flexDirection: 'row', gap: 6 },
-  actionBtn:             { flex: 1, padding: 8, borderRadius: 10, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
-  actionUsed:            { backgroundColor: '#E1F5EE', borderColor: '#9FE1CB' },
-  actionBad:             { backgroundColor: '#FAEEDA', borderColor: '#FAC775' },
-  actionEdit:            { flex: 0, paddingHorizontal: 12, backgroundColor: '#E6F1FB', borderColor: '#B3D4F5' },
-  actionDelete:          { flex: 0, paddingHorizontal: 12, backgroundColor: '#FCEBEB', borderColor: '#F7C1C1' },
-  actionUsedText:        { fontSize: 10, color: '#085041', fontWeight: '500' },
-  actionBadText:         { fontSize: 10, color: '#854F0B', fontWeight: '500' },
-  actionEditText:        { fontSize: 12, color: '#185FA5' },
-  actionDeleteText:      { fontSize: 12, color: '#A32D2D' },
+  actionBtn:             { flex: 1, padding: 8, borderRadius: 12, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
+  actionUsed:            { backgroundColor: c.goneGoodBg, borderColor: isDark ? 'rgba(93,202,165,0.3)' : '#9FE1CB' },
+  actionBad:             { backgroundColor: isDark ? 'rgba(245,180,60,0.15)' : '#FAEEDA', borderColor: isDark ? 'rgba(245,180,60,0.3)' : '#FAC775' },
+  actionEdit:            { flex: 0, paddingHorizontal: 12, backgroundColor: isDark ? 'rgba(100,160,255,0.15)' : '#E6F1FB', borderColor: isDark ? 'rgba(100,160,255,0.3)' : '#B3D4F5' },
+  actionDelete:          { flex: 0, paddingHorizontal: 12, backgroundColor: c.goneBadBg, borderColor: isDark ? 'rgba(240,120,100,0.3)' : '#F7C1C1' },
+  actionUsedText:        { fontSize: 10, color: c.goneGoodText, fontWeight: '500' },
+  actionBadText:         { fontSize: 10, color: isDark ? '#F5D090' : '#854F0B', fontWeight: '500' },
+  actionEditText:        { fontSize: 12, color: isDark ? '#90C0FF' : '#185FA5' },
+  actionDeleteText:      { fontSize: 12, color: c.goneBadText },
 
   // Good Bot CTA
-  goodBotWrapper:        { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
-  goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isDark ? c.surfaceAlt : '#085041', padding: 16, borderRadius: 16, borderWidth: 0.5, borderColor: c.teal, shadowColor: c.teal, shadowOffset: { width: 0, height: 4 }, shadowOpacity: isDark ? 0.35 : 0.45, shadowRadius: 12, elevation: 6 },
-  goodBotLeft:           { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  goodBotAvatarWrap:     { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-  goodBotText:           { color: 'white', fontSize: 13, fontWeight: '700' },
-  goodBotSub:            { color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 2 },
-  goodBotArrow:          { color: '#5DCAA5', fontSize: 20 },
+  goodBotWrapper:        { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8, backgroundColor: c.bg },
+  goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.btnPrimary, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 30, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isDark ? 0.12 : 0.18, shadowRadius: 6, elevation: 4 },
+  goodBotLeft:           { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  goodBotAvatarWrap:     { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  goodBotText:           { color: 'white', fontSize: 12, fontWeight: '700' },
+  goodBotSub:            { color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 1 },
+  goodBotArrow:          { color: '#5DCAA5', fontSize: 16 },
 
   // Drawer
   drawerOverlay:         { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 50 },
@@ -2349,8 +3249,8 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   drawerItemIcon:        { fontSize: 18, width: 24, textAlign: 'center' },
   drawerItemText:        { flex: 1, fontSize: 14, color: c.text, fontWeight: '400' },
   drawerItemArrow:       { fontSize: 18, color: c.textMuted },
-  proBadge:              { backgroundColor: '#E1F5EE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
-  proBadgeText:          { fontSize: 9, color: '#085041', fontWeight: '600' },
+  proBadge:              { backgroundColor: c.goneGoodBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  proBadgeText:          { fontSize: 9, color: c.goneGoodText, fontWeight: '600' },
   logoutBtn:             { paddingVertical: 13, borderRadius: 12, backgroundColor: 'rgba(232,117,106,0.15)', alignItems: 'center', marginTop: 24 },
   logoutText:            { fontSize: 14, color: '#E8756A', fontWeight: '600' },
   drawerVersion:         { fontSize: 10, color: c.textMuted, textAlign: 'center', marginTop: 20 },
@@ -2360,25 +3260,30 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   fieldLabel:            { fontSize: 10, fontWeight: '600', color: c.textSub, textTransform: 'uppercase', letterSpacing: 1, marginTop: 10, marginBottom: 4 },
   input:                 { backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder, borderRadius: 10, padding: 11, fontSize: 14, color: c.inputText },
   scanRow:               { flexDirection: 'row', gap: 8, marginBottom: 6, marginTop: 10 },
-  scanBtn:               { flex: 1, backgroundColor: '#085041', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  scanBtnBarcode:        { backgroundColor: '#1D9E75' },
+  scanBtn:               { flex: 1, backgroundColor: c.btnPrimary, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
+  scanBtnBarcode:        { backgroundColor: c.teal },
   scanBtnText:           { color: 'white', fontSize: 11, fontWeight: '600' },
   scanHint:              { fontSize: 10, color: c.textMuted, textAlign: 'center', marginBottom: 14 },
   barcodeFrame:          { width: 280, height: 160, borderRadius: 12, position: 'relative' },
   barcodeCorner:         { position: 'absolute', width: 24, height: 24, borderColor: '#5DCAA5', borderRadius: 2 },
+  iconPickerRow:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  iconPickerPreview:     { width: 46, height: 46, borderRadius: 12, backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  iconPickerScroll:      { flex: 1 },
+  iconChip:              { width: 40, height: 40, borderRadius: 10, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
+  iconChipActive:        { borderColor: c.btnPrimary, borderWidth: 2, backgroundColor: c.inputBg },
   categoryRow:           { flexDirection: 'row', gap: 6, marginTop: 4 },
-  categoryBtn:           { flex: 1, padding: 8, borderRadius: 8, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
-  categoryBtnActive:     { backgroundColor: '#085041', borderColor: '#085041' },
+  categoryBtn:           { flex: 1, padding: 8, borderRadius: 100, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
+  categoryBtnActive:     { backgroundColor: c.btnPrimary, borderColor: c.btnPrimary },
   categoryBtnText:       { fontSize: 10, fontWeight: '500', color: c.textSub },
   categoryBtnTextActive: { color: 'white' },
-  addConfirmBtn:         { backgroundColor: '#1D9E75', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 12 },
+  addConfirmBtn:         { backgroundColor: c.teal, padding: 14, borderRadius: 14, alignItems: 'center', marginTop: 12 },
   addConfirmText:        { color: 'white', fontSize: 14, fontWeight: '600' },
   cancelBtn:             { alignItems: 'center', padding: 10 },
   cancelText:            { fontSize: 13, color: c.textMuted },
 
   // Overlays
   successOverlay:        { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 100 },
-  successCircle:         { width: 88, height: 88, borderRadius: 44, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 10 },
+  successCircle:         { width: 88, height: 88, borderRadius: 44, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 10 },
   barcodeBeam:           { position: 'absolute', left: 4, right: 4, height: 2, backgroundColor: '#5DCAA5', shadowColor: '#5DCAA5', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 5 },
 
   // Scan loading overlay

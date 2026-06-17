@@ -1,51 +1,70 @@
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, SafeAreaView, ScrollView,
+  ActivityIndicator, Alert, Animated, Easing, SafeAreaView, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/auth';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signIn, signInWithApple, resetPassword } = useAuth();
+  const { signIn, resetPassword } = useAuth();
 
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
-  const [forgotMode, setForgotMode]   = useState(false);
-  const [resetSent, setResetSent]     = useState(false);
+  const [forgotMode, setForgotMode]         = useState(false);
+  const [resetSent, setResetSent]           = useState(false);
+  const [forgotUsernameMode, setForgotUsernameMode] = useState(false);
+  const [usernameSent, setUsernameSent]             = useState(false);
   const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [scanning, setScanning]         = useState(false);
+  const enterAnim = useRef(new Animated.Value(0)).current;
+  const scanPulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.timing(enterAnim, { toValue: 1, duration: 480, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, []);
 
   useEffect(() => {
     (async () => {
-      const enabled = await SecureStore.getItemAsync('gogood_biometric');
-      if (enabled !== 'enabled') return;
       const hasHw   = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       if (!hasHw || !enrolled) return;
       const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-      const hasFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-      setBiometricLabel(hasFace ? 'Face ID' : 'Fingerprint');
+      const hasFace        = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+      const hasFingerprint = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+      setBiometricLabel(hasFace ? 'Face ID' : hasFingerprint ? 'Touch ID' : 'Passcode');
     })();
   }, []);
 
   // ── Biometric fast login ────────────────────────────────────────────────────
   const handleBiometricLogin = async () => {
+    const enabled = await SecureStore.getItemAsync('gogood_biometric');
+    if (enabled !== 'enabled') {
+      setError('Sign in with your email first to activate Face ID');
+      return;
+    }
+    setScanning(true);
+    Animated.sequence([
+      Animated.spring(scanPulse, { toValue: 0.96, speed: 60, bounciness: 0, useNativeDriver: true }),
+      Animated.spring(scanPulse, { toValue: 1,    speed: 30, bounciness: 5, useNativeDriver: true }),
+    ]).start();
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Sign in to Go Good',
-      fallbackLabel: 'Use password',
-      disableDeviceFallback: false,
+      disableDeviceFallback: true,
     });
+    setScanning(false);
     if (result.success) {
       router.replace('/(tabs)' as any);
     } else {
-      setError('Biometric authentication failed');
+      setError('Face ID failed — try again or use password');
     }
   };
 
@@ -61,6 +80,10 @@ export default function LoginScreen() {
         : err.message);
       return;
     }
+    await AsyncStorage.setItem('gogood_profile', JSON.stringify({
+      photo: null, dietary: [], household: 1, username: '', name: '',
+      email: email.trim().toLowerCase(),
+    }));
     await promptBiometric();
     router.replace('/(tabs)' as any);
   };
@@ -73,17 +96,21 @@ export default function LoginScreen() {
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!hasHw || !enrolled) return;
     const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-    const hasFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-    const label = hasFace ? 'Face ID' : 'Fingerprint';
+    const hasFace        = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+    const hasFingerprint = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+    const label = hasFace ? 'Face ID' : hasFingerprint ? 'Touch ID' : 'Passcode';
     await new Promise<void>(resolve => {
       Alert.alert(
         `Enable ${label}?`,
-        `Sign in instantly next time using ${label} — no password needed.`,
+        `Sign in instantly next time using ${label}. iOS will ask for your passcode once to authorize this — that's normal and only happens on first setup.`,
         [
           { text: 'Not now', style: 'cancel', onPress: () => resolve() },
           {
             text: `Enable ${label}`, onPress: async () => {
-              const result = await LocalAuthentication.authenticateAsync({ promptMessage: `Verify ${label}` });
+              const result = await LocalAuthentication.authenticateAsync({
+                promptMessage: `Verify ${label}`,
+                disableDeviceFallback: false,
+              });
               if (result.success) await SecureStore.setItemAsync('gogood_biometric', 'enabled');
               resolve();
             },
@@ -103,26 +130,23 @@ export default function LoginScreen() {
     else setResetSent(true);
   };
 
-  // ── Apple ───────────────────────────────────────────────────────────────────
-  const handleApple = async () => {
+
+  // ── Forgot username ─────────────────────────────────────────────────────────
+  const handleForgotUsername = async () => {
+    if (!email.trim()) { setError('Enter your email address above first'); return; }
+    setLoading(true); setError('');
     try {
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
+      const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/forgot-username`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY! },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-      setLoading(true); setError('');
-      const name = [credential.fullName?.givenName, credential.fullName?.familyName]
-        .filter(Boolean).join(' ') || null;
-      const { error: err } = await signInWithApple(credential.identityToken!, name);
-      setLoading(false);
-      if (err) { setError(err.message); return; }
-      await promptBiometric();
-      router.replace('/(tabs)' as any);
-    } catch (e: any) {
-      if (e.code !== 'ERR_REQUEST_CANCELED') setError('Apple sign in failed');
+      if (!res.ok) throw new Error('request failed');
+    } catch {
+      // Silently succeed to avoid email enumeration
     }
+    setLoading(false);
+    setUsernameSent(true);
   };
 
   // ── Forgot password screen ──────────────────────────────────────────────────
@@ -175,10 +199,64 @@ export default function LoginScreen() {
     );
   }
 
+  // ── Forgot username screen ──────────────────────────────────────────────────
+  if (forgotUsernameMode) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar style="light" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => { setForgotUsernameMode(false); setUsernameSent(false); setError(''); }} style={styles.backBtn}>
+            <Text style={styles.backText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Forgot username</Text>
+          <View style={{ width: 36 }} />
+        </View>
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+          <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
+          {usernameSent ? (
+            <View style={styles.successBox}>
+              <Text style={styles.confirmIcon}>📬</Text>
+              <Text style={styles.successTitle}>Check your inbox</Text>
+              <Text style={styles.successText}>If a Go Good account exists for{'\n'}<Text style={{ color: '#5DCAA5', fontWeight: '600' }}>{email}</Text>{'\n'}we've sent your username there.</Text>
+              <TouchableOpacity onPress={() => { setForgotUsernameMode(false); setUsernameSent(false); }} style={styles.btnPrimary}>
+                <Text style={styles.btnPrimaryText}>back to sign in →</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.subtitle}>Enter your email and we'll send your username</Text>
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Email address</Text>
+                <TextInput
+                  style={[styles.input, error ? styles.inputError : null]}
+                  placeholder="you@example.com"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={email}
+                  onChangeText={v => { setEmail(v); setError(''); }}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoFocus
+                />
+                {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              </View>
+              <TouchableOpacity style={styles.btnPrimary} onPress={handleForgotUsername} disabled={loading}>
+                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>send my username →</Text>}
+              </TouchableOpacity>
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   // ── Main login screen ───────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
+      <Animated.View style={[{ flex: 1 }, {
+        opacity: enterAnim,
+        transform: [{ translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+      }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
@@ -193,12 +271,18 @@ export default function LoginScreen() {
 
         {/* Face ID fast login */}
         {biometricLabel && (
-          <TouchableOpacity style={styles.biometricBtn} onPress={handleBiometricLogin}>
-            <Text style={styles.biometricIcon}>{biometricLabel === 'Face ID' ? '🔐' : '👆'}</Text>
-            <View>
-              <Text style={styles.biometricTitle}>Sign in with {biometricLabel}</Text>
-              <Text style={styles.biometricSub}>Tap to unlock instantly</Text>
-            </View>
+          <TouchableOpacity onPress={handleBiometricLogin} disabled={scanning} activeOpacity={0.85}>
+            <Animated.View style={[styles.biometricBtn, { transform: [{ scale: scanPulse }] }]}>
+              <Text style={styles.biometricIcon}>{biometricLabel === 'Face ID' ? '🔐' : biometricLabel === 'Touch ID' ? '👆' : '🔑'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.biometricTitle}>
+                  {scanning ? 'Scanning...' : `Sign in with ${biometricLabel}`}
+                </Text>
+                <Text style={styles.biometricSub}>
+                  {scanning ? `Verifying your ${biometricLabel}` : 'Tap to unlock instantly'}
+                </Text>
+              </View>
+            </Animated.View>
           </TouchableOpacity>
         )}
 
@@ -219,48 +303,37 @@ export default function LoginScreen() {
 
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Password</Text>
-          <TextInput
-            style={[styles.input, error ? styles.inputError : null]}
-            placeholder="Your password"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            value={password}
-            onChangeText={v => { setPassword(v); setError(''); }}
-            secureTextEntry
-            returnKeyType="done"
-            onSubmitEditing={handleLogin}
-            textContentType="password"
-          />
+          <View style={{ position: 'relative' }}>
+            <TextInput
+              style={[styles.input, error ? styles.inputError : null, { paddingRight: 56 }]}
+              placeholder="Your password"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={password}
+              onChangeText={v => { setPassword(v); setError(''); }}
+              secureTextEntry={!showPassword}
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+              textContentType="password"
+            />
+            <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPassword(p => !p)}>
+              <Text style={styles.eyeText}>{showPassword ? 'hide' : 'show'}</Text>
+            </TouchableOpacity>
+          </View>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
-        <TouchableOpacity onPress={() => setForgotMode(true)} style={{ alignSelf: 'flex-end', marginTop: -6 }}>
-          <Text style={styles.forgotText}>forgot password?</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: -6 }}>
+          <TouchableOpacity onPress={() => setForgotUsernameMode(true)}>
+            <Text style={styles.forgotText}>forgot username?</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setForgotMode(true)}>
+            <Text style={styles.forgotText}>forgot password?</Text>
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity style={styles.btnPrimary} onPress={handleLogin} disabled={loading}>
           {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>sign in →</Text>}
         </TouchableOpacity>
-
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or sign in with</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <View style={styles.socialRow}>
-          {Platform.OS === 'ios' && (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-              cornerRadius={12}
-              style={styles.appleBtn}
-              onPress={handleApple}
-            />
-          )}
-          <TouchableOpacity style={styles.socialBtn} onPress={() => Alert.alert('Coming soon', 'Google sign in is coming in the next update.')}>
-            <Text style={styles.socialText}>G  Google</Text>
-          </TouchableOpacity>
-        </View>
 
         <View style={styles.switchRow}>
           <Text style={styles.switchText}>don't have an account? </Text>
@@ -269,6 +342,7 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -294,15 +368,10 @@ const styles = StyleSheet.create({
   inputError:     { borderColor: '#FF6B6B' },
   errorText:      { fontSize: 11, color: '#FF8A8A', marginTop: 2 },
   forgotText:     { fontSize: 12, color: '#5DCAA5', fontWeight: '500' },
+  eyeBtn:         { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
+  eyeText:        { fontSize: 12, color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
   btnPrimary:     { backgroundColor: '#1D9E75', padding: 16, borderRadius: 14, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
   btnPrimaryText: { color: 'white', fontSize: 15, fontWeight: '600' },
-  dividerRow:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dividerLine:    { flex: 1, height: 0.5, backgroundColor: 'rgba(255,255,255,0.15)' },
-  dividerText:    { fontSize: 11, color: 'rgba(255,255,255,0.3)' },
-  socialRow:      { flexDirection: 'row', gap: 10 },
-  appleBtn:       { flex: 1, height: 48 },
-  socialBtn:      { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 14, alignItems: 'center', justifyContent: 'center' },
-  socialText:     { fontSize: 13, fontWeight: '500', color: 'white' },
   switchRow:      { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   switchText:     { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
   switchLink:     { fontSize: 13, color: '#5DCAA5', fontWeight: '600' },

@@ -7,33 +7,51 @@ import { Accelerometer } from 'expo-sensors';
 export default function WelcomeScreen() {
   const router = useRouter();
 
+  // Floating bubble animations
   const bubble1Y = useRef(new Animated.Value(0)).current;
   const bubble2Y = useRef(new Animated.Value(0)).current;
   const bubble3Y = useRef(new Animated.Value(0)).current;
   const bubble1X = useRef(new Animated.Value(0)).current;
   const bubble2X = useRef(new Animated.Value(0)).current;
   const bubble3X = useRef(new Animated.Value(0)).current;
+  const tiltX    = useRef(new Animated.Value(0)).current;
+  const tiltY    = useRef(new Animated.Value(0)).current;
 
-  // Gyro tilt offsets — each bubble uses a different multiplier for parallax depth
-  const tiltX = useRef(new Animated.Value(0)).current;
-  const tiltY = useRef(new Animated.Value(0)).current;
+  // Entrance animations (0 = invisible/offset → 1 = final position)
+  const logoAnim  = useRef(new Animated.Value(0)).current;
+  const pill1Anim = useRef(new Animated.Value(0)).current;
+  const pill2Anim = useRef(new Animated.Value(0)).current;
+  const pill3Anim = useRef(new Animated.Value(0)).current;
+  const btnsAnim  = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Staggered spring entrances
+    const spring = (a: Animated.Value, delay: number) =>
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.spring(a, { toValue: 1, tension: 52, friction: 9, useNativeDriver: true }),
+      ]);
+    Animated.parallel([
+      spring(logoAnim,  80),
+      spring(pill1Anim, 280),
+      spring(pill2Anim, 420),
+      spring(pill3Anim, 560),
+      spring(btnsAnim,  660),
+    ]).start();
+
+    // Floating bubble loops
     const floatBubble = (
-      animY: Animated.Value,
-      animX: Animated.Value,
-      duration: number,
-      rangeY: number,
-      rangeX: number
+      animY: Animated.Value, animX: Animated.Value,
+      duration: number, rangeY: number, rangeX: number
     ) => {
       Animated.loop(
         Animated.sequence([
           Animated.parallel([
             Animated.timing(animY, { toValue: -rangeY, duration, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
-            Animated.timing(animX, { toValue: rangeX, duration: duration * 0.9, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+            Animated.timing(animX, { toValue:  rangeX, duration: duration * 0.9, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
           ]),
           Animated.parallel([
-            Animated.timing(animY, { toValue: rangeY, duration, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+            Animated.timing(animY, { toValue:  rangeY, duration, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
             Animated.timing(animX, { toValue: -rangeX, duration: duration * 0.9, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
           ]),
           Animated.parallel([
@@ -48,20 +66,26 @@ export default function WelcomeScreen() {
     floatBubble(bubble2Y, bubble2X, 5500, 55, 30);
     floatBubble(bubble3Y, bubble3X, 3500, 30, 20);
 
-    // Accelerometer: phone in portrait has y≈-1 (gravity). Normalise to 0 by adding 1.
+    // Gyroscope parallax
     Accelerometer.setUpdateInterval(40);
     const sub = Accelerometer.addListener(({ x, y }) => {
-      Animated.spring(tiltX, { toValue: x, damping: 18, stiffness: 65, useNativeDriver: true }).start();
+      Animated.spring(tiltX, { toValue: x,     damping: 18, stiffness: 65, useNativeDriver: true }).start();
       Animated.spring(tiltY, { toValue: y + 1, damping: 18, stiffness: 65, useNativeDriver: true }).start();
     });
     return () => sub.remove();
   }, []);
 
+  // Shared helper: 0→1 value drives both opacity and a slide-up
+  const pillStyle = (anim: Animated.Value) => ({
+    opacity: anim,
+    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }],
+  });
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
 
-      {/* Circles — float animation + gyro tilt with per-bubble parallax multipliers */}
+      {/* Floating circles with gyro parallax */}
       <Animated.View style={[styles.circle1, { transform: [
         { translateY: bubble1Y },
         { translateX: bubble1X },
@@ -84,26 +108,35 @@ export default function WelcomeScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
 
-          <View style={styles.logoSection}>
+          {/* Logo slides down from slightly above */}
+          <Animated.View style={[styles.logoSection, {
+            opacity: logoAnim,
+            transform: [{ translateY: logoAnim.interpolate({ inputRange: [0, 1], outputRange: [-22, 0] }) }],
+          }]}>
             <Text style={styles.logo}>go<Text style={styles.logoTeal}>good</Text></Text>
-          </View>
+          </Animated.View>
 
+          {/* Feature pills stagger in from below */}
           <View style={styles.pills}>
-            <View style={styles.pill}>
+            <Animated.View style={[styles.pill, pillStyle(pill1Anim)]}>
               <Text style={styles.pillIcon}>📷</Text>
               <Text style={styles.pillText}>Scan your fridge & track what's <Text style={styles.pillBold}>expiring first</Text></Text>
-            </View>
-            <View style={styles.pill}>
+            </Animated.View>
+            <Animated.View style={[styles.pill, pillStyle(pill2Anim)]}>
               <Text style={styles.pillIcon}>🤖</Text>
               <Text style={styles.pillText}><Text style={styles.pillBold}>Good Bot</Text> builds recipes before anything goes to waste</Text>
-            </View>
-            <View style={styles.pill}>
+            </Animated.View>
+            <Animated.View style={[styles.pill, pillStyle(pill3Anim)]}>
               <Text style={styles.pillIcon}>💰</Text>
               <Text style={styles.pillText}>Watch your money <Text style={styles.pillBold}>go good</Text> instead of in the trash</Text>
-            </View>
+            </Animated.View>
           </View>
 
-          <View style={styles.buttons}>
+          {/* Buttons rise up last */}
+          <Animated.View style={[styles.buttons, {
+            opacity: btnsAnim,
+            transform: [{ translateY: btnsAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+          }]}>
             <TouchableOpacity
               style={styles.btnPrimary}
               onPress={() => router.navigate('/auth/signup' as any)}
@@ -121,7 +154,7 @@ export default function WelcomeScreen() {
             </TouchableOpacity>
 
             <Text style={styles.hint}>free to join · no spam · cancel anytime</Text>
-          </View>
+          </Animated.View>
 
         </View>
       </SafeAreaView>
@@ -144,7 +177,7 @@ const styles = StyleSheet.create({
   pillIcon:         { fontSize: 22 },
   pillText:         { flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 20 },
   pillBold:         { color: 'white', fontWeight: '600' },
-  buttons:          { gap: 12, backgroundColor: '#085041' },
+  buttons:          { gap: 12 },
   btnPrimary:       { backgroundColor: '#1D9E75', padding: 16, borderRadius: 14, alignItems: 'center' },
   btnPrimaryText:   { color: 'white', fontSize: 15, fontWeight: '600' },
   btnSecondary:     { backgroundColor: '#085041', padding: 15, borderRadius: 14, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' },

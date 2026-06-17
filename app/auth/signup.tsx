@@ -1,13 +1,14 @@
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, SafeAreaView, ScrollView,
+  ActivityIndicator, Alert, Animated, Easing, SafeAreaView, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
+import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/auth';
 
 // ── Password strength ────────────────────────────────────────────────────────
@@ -45,7 +46,6 @@ function getStrength(pw: string): StrengthResult {
 
 function StrengthBar({ password }: { password: string }) {
   const s = useMemo(() => getStrength(password), [password]);
-  if (!password) return null;
   return (
     <View style={{ gap: 8, marginTop: 6 }}>
       {/* Bar */}
@@ -60,17 +60,17 @@ function StrengthBar({ password }: { password: string }) {
           />
         ))}
         <Text style={{ fontSize: 11, color: s.color, fontWeight: '600', minWidth: 52, textAlign: 'right' }}>
-          {s.label}
+          {password ? s.label : ''}
         </Text>
       </View>
       {/* Requirements checklist */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
         {[
-          { key: 'length',    label: '8+ chars'   },
-          { key: 'longLength',label: '12+ chars'  },
-          { key: 'uppercase', label: 'A–Z'        },
-          { key: 'number',    label: '0–9'        },
-          { key: 'special',   label: '!@#…'       },
+          { key: 'length',    label: '8+ characters'           },
+          { key: 'longLength',label: '12+ characters'          },
+          { key: 'uppercase', label: 'Uppercase letter'        },
+          { key: 'number',    label: 'Number (0–9)'            },
+          { key: 'special',   label: 'Special character (!@#...)'  },
         ].map(({ key, label }) => {
           const met = s.checks[key as keyof typeof s.checks];
           return (
@@ -89,66 +89,87 @@ function StrengthBar({ password }: { password: string }) {
 
 export default function SignupScreen() {
   const router = useRouter();
-  const { signUp, signInWithApple } = useAuth();
+  const { signUp } = useAuth();
 
   const [name, setName]         = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm,  setShowConfirm]  = useState(false);
+  const [confirm, setConfirm]           = useState('');
+  const enterAnim  = useRef(new Animated.Value(0)).current;
+  const shakeAnim  = useRef(new Animated.Value(0)).current;
+  const btnScale   = useRef(new Animated.Value(1)).current;
+  const fieldAnims = useRef([0,1,2,3,4].map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.timing(enterAnim, { toValue: 1, duration: 480, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    Animated.stagger(70, fieldAnims.map(a =>
+      Animated.spring(a, { toValue: 1, damping: 22, stiffness: 180, useNativeDriver: true })
+    )).start();
+  }, []);
+
+  const shake = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    shakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue:  9, duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -9, duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue:  6, duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -6, duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue:  0, duration: 45, useNativeDriver: true }),
+    ]).start();
+  };
 
   const strength = useMemo(() => getStrength(password), [password]);
 
   const validate = () => {
-    if (!name.trim())               { setError('Enter your full name'); return false; }
-    if (!email.trim())              { setError('Enter your email address'); return false; }
-    if (!/\S+@\S+\.\S+/.test(email)) { setError('Enter a valid email address'); return false; }
-    if (!strength.checks.length)    { setError('Password must be at least 8 characters'); return false; }
+    if (!name.trim())               { setError('Enter your full name'); shake(); return false; }
+    if (!username.trim())           { setError('Enter a username'); shake(); return false; }
+    if (!email.trim())              { setError('Enter your email address'); shake(); return false; }
+    if (!/\S+@\S+\.\S+/.test(email)) { setError('Enter a valid email address'); shake(); return false; }
+    if (!strength.checks.length)    { setError('Password must be at least 8 characters'); shake(); return false; }
+    if (password !== confirm)        { setError("Passwords don't match"); shake(); return false; }
     return true;
   };
 
   const handleSignup = async () => {
     if (!validate()) return;
     setLoading(true); setError('');
-    const { error: err } = await signUp(email.trim().toLowerCase(), password, name.trim());
+    const { error: err } = await signUp(email.trim().toLowerCase(), password, name.trim(), username.trim());
     setLoading(false);
     if (err) {
+      shake();
       setError(err.message.includes('already registered')
         ? 'An account with this email already exists'
         : err.message);
     } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await AsyncStorage.setItem('gogood_profile', JSON.stringify({
+        name: name.trim(),
+        username: username.trim(),
+        email: email.trim().toLowerCase(),
+        photo: null,
+        dietary: [],
+        household: 1,
+      }));
       setConfirming(true);
     }
   };
 
-  const handleApple = async () => {
-    try {
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      setLoading(true); setError('');
-      const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
-        .filter(Boolean).join(' ') || null;
-      const { error: err } = await signInWithApple(credential.identityToken!, fullName);
-      setLoading(false);
-      if (err) { setError(err.message); }
-      else { await promptBiometric(); router.replace('/(tabs)' as any); }
-    } catch (e: any) {
-      if (e.code !== 'ERR_REQUEST_CANCELED') setError('Apple sign in failed');
-    }
-  };
 
   const promptBiometric = async () => {
     const hasHw  = await LocalAuthentication.hasHardwareAsync();
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!hasHw || !enrolled) return;
     const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-    const hasFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-    const label = hasFace ? 'Face ID' : 'Fingerprint';
+    const hasFace        = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+    const hasFingerprint = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+    const label = hasFace ? 'Face ID' : hasFingerprint ? 'Touch ID' : 'Passcode';
     Alert.alert(
       `Enable ${label}?`,
       `Sign in instantly next time using ${label}`,
@@ -190,6 +211,10 @@ export default function SignupScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
+      <Animated.View style={[{ flex: 1 }, {
+        opacity: enterAnim,
+        transform: [{ translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+      }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
@@ -203,7 +228,10 @@ export default function SignupScreen() {
         <Text style={styles.subtitle}>Join thousands rescuing food from the trash 🌱</Text>
 
         {/* Name */}
-        <View style={styles.field}>
+        <Animated.View style={[styles.field, {
+          opacity: fieldAnims[0],
+          transform: [{ translateY: fieldAnims[0].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }]}>
           <Text style={styles.fieldLabel}>Full name</Text>
           <TextInput
             style={styles.input}
@@ -215,10 +243,33 @@ export default function SignupScreen() {
             textContentType="name"
             autoComplete="name"
           />
-        </View>
+        </Animated.View>
+
+        {/* Username */}
+        <Animated.View style={[styles.field, {
+          opacity: fieldAnims[1],
+          transform: [{ translateY: fieldAnims[1].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }]}>
+          <Text style={styles.fieldLabel}>Username</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="@username"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            value={username}
+            onChangeText={v => { setUsername(v); setError(''); }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="next"
+            textContentType="username"
+            autoComplete="username"
+          />
+        </Animated.View>
 
         {/* Email */}
-        <View style={styles.field}>
+        <Animated.View style={[styles.field, {
+          opacity: fieldAnims[2],
+          transform: [{ translateY: fieldAnims[2].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }]}>
           <Text style={styles.fieldLabel}>Email address</Text>
           <TextInput
             style={styles.input}
@@ -232,57 +283,78 @@ export default function SignupScreen() {
             textContentType="emailAddress"
             autoComplete="email"
           />
-        </View>
+        </Animated.View>
 
         {/* Password + strength bar */}
-        <View style={styles.field}>
+        <Animated.View style={[styles.field, {
+          opacity: fieldAnims[3],
+          transform: [{ translateY: fieldAnims[3].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }]}>
           <Text style={styles.fieldLabel}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Create a strong password"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            value={password}
-            onChangeText={v => { setPassword(v); setError(''); }}
-            secureTextEntry
-            returnKeyType="done"
-            onSubmitEditing={handleSignup}
-            textContentType="newPassword"
-            autoComplete="new-password"
-          />
-          <StrengthBar password={password} />
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.btnPrimary, strength.score < 2 && password.length > 0 && { opacity: 0.6 }]}
-          onPress={handleSignup}
-          disabled={loading}
-        >
-          {loading
-            ? <ActivityIndicator color="white" />
-            : <Text style={styles.btnPrimaryText}>let's go good →</Text>}
-        </TouchableOpacity>
-
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or sign up with</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <View style={styles.socialRow}>
-          {Platform.OS === 'ios' && (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-              cornerRadius={12}
-              style={styles.appleBtn}
-              onPress={handleApple}
+          <View style={{ position: 'relative' }}>
+            <TextInput
+              style={[styles.input, { paddingRight: 56 }]}
+              placeholder="Create a strong password"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={password}
+              onChangeText={v => { setPassword(v); setError(''); }}
+              secureTextEntry={!showPassword}
+              returnKeyType="next"
+              textContentType="newPassword"
+              autoComplete="new-password"
             />
+            <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPassword(p => !p)}>
+              <Text style={styles.eyeText}>{showPassword ? 'hide' : 'show'}</Text>
+            </TouchableOpacity>
+          </View>
+          <StrengthBar password={password} />
+        </Animated.View>
+
+        {/* Confirm password */}
+        <Animated.View style={[styles.field, {
+          opacity: fieldAnims[4],
+          transform: [{ translateY: fieldAnims[4].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }]}>
+          <Text style={styles.fieldLabel}>Confirm password</Text>
+          <View style={{ position: 'relative' }}>
+            <TextInput
+              style={[styles.input, { paddingRight: 56 }]}
+              placeholder="Repeat your password"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={confirm}
+              onChangeText={v => { setConfirm(v); setError(''); }}
+              secureTextEntry={!showConfirm}
+              returnKeyType="done"
+              onSubmitEditing={handleSignup}
+              textContentType="none"
+              autoComplete="off"
+            />
+            <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowConfirm(p => !p)}>
+              <Text style={styles.eyeText}>{showConfirm ? 'hide' : 'show'}</Text>
+            </TouchableOpacity>
+          </View>
+          {confirm.length > 0 && confirm !== password && (
+            <Text style={styles.errorText}>Passwords don't match</Text>
           )}
-          <TouchableOpacity style={styles.socialBtn} onPress={() => Alert.alert('Coming soon', 'Google sign in is coming in the next update.')}>
-            <Text style={styles.socialText}>G  Google</Text>
+          {confirm.length > 0 && confirm === password && (
+            <Text style={styles.matchText}>✓ Passwords match</Text>
+          )}
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        </Animated.View>
+
+        <Animated.View style={{ transform: [{ translateX: shakeAnim }, { scale: btnScale }] }}>
+          <TouchableOpacity
+            style={[styles.btnPrimary, strength.score < 2 && password.length > 0 && { opacity: 0.6 }]}
+            onPress={handleSignup}
+            onPressIn={() => Animated.spring(btnScale, { toValue: 0.96, damping: 18, stiffness: 400, useNativeDriver: true }).start()}
+            onPressOut={() => Animated.spring(btnScale, { toValue: 1,    damping: 14, stiffness: 250, useNativeDriver: true }).start()}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="white" />
+              : <Text style={styles.btnPrimaryText}>let's go good →</Text>}
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         <Text style={styles.terms}>
           By creating an account you agree to our{' '}
@@ -297,6 +369,7 @@ export default function SignupScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -316,15 +389,11 @@ const styles = StyleSheet.create({
   fieldLabel:    { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 1 },
   input:         { backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 14, fontSize: 14, color: 'white' },
   errorText:     { fontSize: 11, color: '#FF8A8A', marginTop: 4 },
+  matchText:     { fontSize: 11, color: '#1D9E75', marginTop: 4 },
+  eyeBtn:        { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
+  eyeText:       { fontSize: 12, color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
   btnPrimary:    { backgroundColor: '#1D9E75', padding: 16, borderRadius: 14, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
   btnPrimaryText:{ color: 'white', fontSize: 15, fontWeight: '600' },
-  dividerRow:    { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dividerLine:   { flex: 1, height: 0.5, backgroundColor: 'rgba(255,255,255,0.15)' },
-  dividerText:   { fontSize: 11, color: 'rgba(255,255,255,0.3)' },
-  socialRow:     { flexDirection: 'row', gap: 10 },
-  appleBtn:      { flex: 1, height: 48 },
-  socialBtn:     { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 14, alignItems: 'center', justifyContent: 'center' },
-  socialText:    { fontSize: 13, fontWeight: '500', color: 'white' },
   terms:         { fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center', lineHeight: 18 },
   termsLink:     { color: '#5DCAA5' },
   switchRow:     { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },

@@ -1,12 +1,41 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User, AuthError } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+
+const USER_STORAGE_KEYS = [
+  'gogood_profile',
+  'gogood_items',
+  'gogood_stats',
+  'gogood_gone_good',
+  'gogood_gone_bad',
+  'gogood_seed_v3',
+  'gogood_opened_sections',
+  'gogood_notifs',
+  'gogood_goal_week',
+  'gogood_goal_month',
+  'gogood_household_nudge_dismissed',
+  'gogood_paywall_demo',
+  'gogood_household_id',
+  'gogood_household_name',
+  'gogood_household_joined_at',
+  'gogood_household_role',
+  'gogood_shopping_list',
+  'gogood_collections',
+  'gogood_saved_recipes',
+  'gogood_collections_migrated',
+  'gogood_item_history',
+];
+
+async function clearLocalUserData() {
+  await AsyncStorage.multiRemove(USER_STORAGE_KEYS);
+}
 
 interface AuthCtx {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  signUp: (email: string, password: string, name: string) => Promise<{ error: AuthError | null }>;
+  signUp: (email: string, password: string, name: string, username: string) => Promise<{ error: AuthError | null }>;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signInWithApple: (identityToken: string, name?: string | null) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
@@ -39,11 +68,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, name: string) => {
+  const signUp = async (email: string, password: string, name: string, username: string) => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: name } },
+      options: {
+        data: { full_name: name, username },
+        emailRedirectTo: 'gogood://auth/confirm',
+      },
     });
     return { error };
   };
@@ -63,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    await clearLocalUserData();
     await supabase.auth.signOut();
   };
 

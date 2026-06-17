@@ -22,6 +22,14 @@ export interface ThemeColors {
   drawerBg: string;
   chatInputBg: string;
   onlineDotBorder: string;
+  btnPrimary: string;
+  btnPrimaryText: string;
+  chipBg: string;
+  chipText: string;
+  goneGoodBg: string;
+  goneGoodText: string;
+  goneBadBg: string;
+  goneBadText: string;
 }
 
 export const LIGHT: ThemeColors = {
@@ -33,9 +41,9 @@ export const LIGHT: ThemeColors = {
   textMuted:       '#aaa',
   border:          'rgba(0,0,0,0.07)',
   borderStrong:    'rgba(0,0,0,0.12)',
-  brand:           '#085041',
-  teal:            '#1D9E75',
-  tealLight:       '#5DCAA5',
+  brand:           '#0F7855',
+  teal:            '#23B385',
+  tealLight:       '#6DD4B0',
   statusBar:       'dark',
   tabBarBg:        '#FFFFFF',
   inputBg:         '#FFFFFF',
@@ -45,48 +53,62 @@ export const LIGHT: ThemeColors = {
   drawerBg:        '#FFFFFF',
   chatInputBg:     '#EFECE6',
   onlineDotBorder: '#FAF8F3',
+  btnPrimary:      '#0F7855',
+  btnPrimaryText:  '#FFFFFF',
+  chipBg:          '#E8F5F0',
+  chipText:        '#0F7855',
+  goneGoodBg:      '#E1F5EE',
+  goneGoodText:    '#0F7855',
+  goneBadBg:       '#FEEBEB',
+  goneBadText:     '#A52020',
 };
 
 export const DARK: ThemeColors = {
-  bg:              '#0E1B17',
-  surface:         '#162922',
-  surfaceAlt:      '#1C3530',
-  text:            '#EEF9F5',
-  textSub:         'rgba(238,249,245,0.55)',
-  textMuted:       'rgba(238,249,245,0.3)',
+  bg:              '#141414',
+  surface:         '#1E1E1E',
+  surfaceAlt:      '#262626',
+  text:            '#E8E4DC',
+  textSub:         'rgba(232,228,220,0.62)',
+  textMuted:       'rgba(232,228,220,0.36)',
   border:          'rgba(255,255,255,0.08)',
-  borderStrong:    'rgba(255,255,255,0.14)',
-  brand:           '#085041',
-  teal:            '#1D9E75',
-  tealLight:       '#5DCAA5',
+  borderStrong:    'rgba(255,255,255,0.16)',
+  brand:           '#E8E4DC',
+  teal:            '#4F7861',
+  tealLight:       '#6B9878',
   statusBar:       'light',
-  tabBarBg:        '#0A1F1A',
-  inputBg:         'rgba(255,255,255,0.1)',
-  inputBorder:     'rgba(255,255,255,0.15)',
-  inputText:       '#EEF9F5',
-  placeholder:     'rgba(238,249,245,0.35)',
-  drawerBg:        '#162922',
-  chatInputBg:     '#1C3530',
-  onlineDotBorder: '#0E1B17',
+  tabBarBg:        '#0E0E0E',
+  inputBg:         'rgba(255,255,255,0.08)',
+  inputBorder:     'rgba(255,255,255,0.14)',
+  inputText:       '#E8E4DC',
+  placeholder:     'rgba(232,228,220,0.36)',
+  drawerBg:        '#1E1E1E',
+  chatInputBg:     '#262626',
+  onlineDotBorder: '#141414',
+  btnPrimary:      '#4F7861',
+  btnPrimaryText:  '#E8E4DC',
+  chipBg:          'rgba(79,120,97,0.16)',
+  chipText:        '#E8E4DC',
+  goneGoodBg:      'rgba(79,120,97,0.18)',
+  goneGoodText:    '#4F7861',
+  goneBadBg:       'rgba(240,100,80,0.18)',
+  goneBadText:     '#F5A090',
 };
 
 interface ThemeCtx {
   colors: ThemeColors;
   isDark: boolean;
   toggleTheme: () => void;
+  listDensity: 'compact';
 }
 
-const ThemeContext = createContext<ThemeCtx>({ colors: LIGHT, isDark: false, toggleTheme: () => {} });
+const ThemeContext = createContext<ThemeCtx>({ colors: LIGHT, isDark: false, toggleTheme: () => {}, listDensity: 'compact' });
 
 export const useTheme = () => useContext(ThemeContext);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [isDark, setIsDark] = useState(false);
-
   useEffect(() => {
-    AsyncStorage.getItem('gogood_theme').then(v => {
-      if (v === 'dark') setIsDark(true);
-    });
+    AsyncStorage.getItem('gogood_theme').then(v => { if (v === 'dark') setIsDark(true); });
   }, []);
 
   const toggleTheme = () => {
@@ -98,7 +120,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <ThemeContext.Provider value={{ colors: isDark ? DARK : LIGHT, isDark, toggleTheme }}>
+    <ThemeContext.Provider value={{ colors: isDark ? DARK : LIGHT, isDark, toggleTheme, listDensity: 'compact' }}>
       {children}
     </ThemeContext.Provider>
   );

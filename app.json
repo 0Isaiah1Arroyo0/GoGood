@@ -10,17 +10,27 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.gogood"
+      "bundleIdentifier": "com.gogood.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F5F2EC",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
+      "package": "com.gogood.app"
     },
     "web": {
       "output": "static",
@@ -30,6 +40,19 @@
       "expo-router",
       "expo-apple-authentication",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Go Good needs camera access to scan barcodes and read food label expiry dates"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Go Good needs camera access to photograph food labels and read expiry dates",
+          "photosPermission": "Go Good needs photo library access to use existing food photos"
+        }
+      ],
+      [
         "expo-local-authentication",
         {
           "faceIDPermission": "Go Good uses Face ID to sign you in securely"
@@ -38,12 +61,9 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#FAF8F3",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#141414"
           }
         }
       ],
@@ -53,6 +73,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1850809f-3bec-4268-8130-0749c708d824"
+      }
+    },
+    "owner": "arroyoi"
   }
 }

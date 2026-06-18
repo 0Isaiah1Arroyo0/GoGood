@@ -3,6 +3,7 @@ import {
   Modal, TextInput, ScrollView, Switch, Platform, KeyboardAvoidingView,
   LayoutAnimation, UIManager, Linking,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { useRef, useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -421,7 +422,7 @@ export function useAppDrawer() {
               <TouchableOpacity style={sharedStyles.logoutBtn} onPress={handleLogout}>
                 <Text style={sharedStyles.logoutText}>Log out</Text>
               </TouchableOpacity>
-              <Text style={[sharedStyles.version, { color: colors.textMuted }]}>Go Good v0.1 · made with 🌱 in NC</Text>
+              <Text style={[sharedStyles.version, { color: colors.textMuted }]}>Go Good v{Constants.expoConfig?.version ?? '1.0'} · made with 🌱 in NC</Text>
 
             </ScrollView>
           </Animated.View>

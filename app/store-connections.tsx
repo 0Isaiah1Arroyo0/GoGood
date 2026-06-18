@@ -27,11 +27,12 @@ interface StoreConnection {
 }
 
 const STORE_INFO: Record<string, { name: string; emoji: string; apiNote: string; supported: boolean }> = {
-  kroger:    { name: 'Kroger',     emoji: '🛒', apiNote: 'Connect account to auto-import purchases',          supported: true },
-  walmart:   { name: 'Walmart',    emoji: '🏪', apiNote: 'Use receipt scanning — no official purchase API',   supported: false },
-  publix:    { name: 'Publix',     emoji: '🛍️', apiNote: 'Use receipt scanning — no official purchase API',  supported: false },
-  sams_club: { name: "Sam's Club", emoji: '📦', apiNote: 'Use receipt scanning — no official purchase API',   supported: false },
-  costco:    { name: 'Costco',     emoji: '🏬', apiNote: 'Use receipt scanning — no official purchase API',   supported: false },
+  kroger:     { name: 'Kroger',      emoji: '🛒', apiNote: 'Connect account to auto-import purchases',         supported: true },
+  food_lion:  { name: 'Food Lion',   emoji: '🦁', apiNote: 'API integration coming soon — use receipt scanning', supported: false },
+  walmart:    { name: 'Walmart',     emoji: '🏪', apiNote: 'Use receipt scanning — no official purchase API',  supported: false },
+  publix:     { name: 'Publix',      emoji: '🛍️', apiNote: 'Use receipt scanning — no official purchase API', supported: false },
+  sams_club:  { name: "Sam's Club",  emoji: '📦', apiNote: 'Use receipt scanning — no official purchase API',  supported: false },
+  costco:     { name: 'Costco',      emoji: '🏬', apiNote: 'Use receipt scanning — no official purchase API',  supported: false },
 };
 
 export default function StoreConnectionsScreen() {
@@ -77,7 +78,7 @@ export default function StoreConnectionsScreen() {
 
   const connectKroger = async () => {
     if (!KROGER_CLIENT_ID) {
-      Alert.alert('Not configured', 'Kroger API credentials not set. Add EXPO_PUBLIC_KROGER_CLIENT_ID to your .env file.');
+      Alert.alert('Coming Soon', 'Kroger account sync is being set up. In the meantime, use receipt scanning — it works with any store!');
       return;
     }
     setConnecting(true);

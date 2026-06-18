@@ -28,7 +28,7 @@ interface SubscriptionCtx {
 }
 
 const SubscriptionContext = createContext<SubscriptionCtx>({
-  isPremium: true,
+  isPremium: false,
   isAnnual: false,
   isHouseholdJoiner: false,
   isLoading: true,
@@ -63,12 +63,14 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const [paywallDemoMode,   setPaywallDemoModeState] = useState(false);
   const [packages,          setPackages]           = useState<PurchasesPackage[]>([]);
 
-  // When demo mode is off everyone is treated as premium/annual; only enable the
-  // paywall gate when the user explicitly turns on demo mode.
-  const isPremium = paywallDemoMode ? rcIsPremium : true;
-  const isAnnual  = paywallDemoMode ? rcIsAnnual  : true;
+  // In __DEV__, demo mode forces free-tier so you can test the paywall UI.
+  // In production, always use the actual RevenueCat subscription status.
+  const isPremium = __DEV__ && paywallDemoMode ? false : rcIsPremium;
+  const isAnnual  = __DEV__ && paywallDemoMode ? false : rcIsAnnual;
 
+  // Only restore demo mode flag in development builds — never in production.
   useEffect(() => {
+    if (!__DEV__) return;
     AsyncStorage.getItem('gogood_paywall_demo').then(v => {
       if (v === 'true') setPaywallDemoModeState(true);
     });
@@ -81,6 +83,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   }, [user?.id]);
 
   const setPaywallDemoMode = useCallback((v: boolean) => {
+    if (!__DEV__) return; // no-op in production
     setPaywallDemoModeState(v);
     AsyncStorage.setItem('gogood_paywall_demo', v ? 'true' : 'false');
   }, []);
@@ -88,29 +91,33 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     const apiKey = Platform.OS === 'ios' ? RC_IOS_KEY : RC_ANDROID_KEY;
     if (!apiKey) {
+      if (__DEV__) console.warn('[RevenueCat] Missing API key — subscriptions disabled');
       setIsLoading(false);
       return;
     }
 
     Purchases.configure({ apiKey });
-    if (user?.id) Purchases.logIn(user.id).catch(() => {});
+    if (user?.id) Purchases.logIn(user.id).catch(e => console.error('[RC] logIn failed', e));
 
     Purchases.addCustomerInfoUpdateListener(info => {
       setRcIsPremium(isEntitled(info));
       setRcIsAnnual(isAnnualPlan(info));
     });
 
+    // 6-second timeout so isLoading never hangs indefinitely on slow networks.
+    const timeout = setTimeout(() => setIsLoading(false), 6000);
+
     Purchases.getCustomerInfo()
       .then(info => {
         setRcIsPremium(isEntitled(info));
         setRcIsAnnual(isAnnualPlan(info));
       })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+      .catch(e => console.error('[RC] getCustomerInfo failed', e))
+      .finally(() => { clearTimeout(timeout); setIsLoading(false); });
 
     Purchases.getOfferings()
       .then(o => { if (o.current?.availablePackages.length) setPackages(o.current.availablePackages); })
-      .catch(() => {});
+      .catch(e => console.error('[RC] getOfferings failed', e));
   }, [user?.id]);
 
   const purchase = useCallback(async (pkg: PurchasesPackage): Promise<boolean> => {
@@ -136,7 +143,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setRcIsPremium(ok);
       setRcIsAnnual(annual);
       return ok;
-    } catch {
+    } catch (e) {
+      console.error('[RC] restorePurchases failed', e);
       return false;
     }
   }, []);

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User, AuthError } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { registerForPushNotificationsAsync } from '../lib/notifications';
 
 const USER_STORAGE_KEYS = [
   'gogood_profile',
@@ -63,10 +64,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session?.user) storePushToken(session.user.id);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  async function storePushToken(userId: string) {
+    const token = await registerForPushNotificationsAsync();
+    if (!token) return;
+    await supabase.from('profiles').upsert({ id: userId, expo_push_token: token }, { onConflict: 'id' });
+  }
 
   const signUp = async (email: string, password: string, name: string, username: string) => {
     const { error } = await supabase.auth.signUp({

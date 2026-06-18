@@ -89,7 +89,7 @@ export async function pushItems(items: SyncItem[], userId: string, householdId?:
         }
       }
     }
-  } catch { /* network error — local state is source of truth */ }
+  } catch (e) { console.error('[sync] pushItems failed', e); }
 }
 
 // Pull items from Supabase. Returns null if fetch fails (keep local data).

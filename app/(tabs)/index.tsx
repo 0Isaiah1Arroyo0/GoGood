@@ -2064,7 +2064,7 @@ export default function FridgeScreen() {
         }),
       });
       const data = await res.json();
-      if (data._debug) console.log('[scan-receipt debug]', JSON.stringify(data._debug, null, 2));
+      if (__DEV__ && data._debug) console.log('[scan-receipt debug]', JSON.stringify(data._debug, null, 2));
       if (!data.sessionId) {
         Alert.alert(
           'Receipt Not Recognized',

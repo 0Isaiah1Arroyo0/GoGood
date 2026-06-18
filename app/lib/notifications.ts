@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -22,6 +23,35 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return status === 'granted';
 }
 
+// Register for Expo push notifications and return the token string.
+// Returns null on simulators, web, or when permission is denied.
+export async function registerForPushNotificationsAsync(): Promise<string | null> {
+  try {
+    if (Platform.OS === 'web') return null;
+
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return null;
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) {
+      if (__DEV__) console.warn('[Push] No EAS projectId found — push token skipped');
+      return null;
+    }
+
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return token ?? null;
+  } catch (e) {
+    // Simulators throw here — swallow silently in dev, log in prod
+    if (!__DEV__) console.error('[Push] registerForPushNotificationsAsync failed', e);
+    return null;
+  }
+}
+
 export interface NotifItem {
   id: number;
   name: string;
@@ -34,7 +64,6 @@ export async function rescheduleExpiryNotifications(
   items: NotifItem[],
   enabled: boolean
 ) {
-  // Always cancel existing ones first
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const n of scheduled) {
     if ((n.content.data as any)?.type === 'expiry') {
@@ -51,12 +80,11 @@ export async function rescheduleExpiryNotifications(
     const expiry = new Date(item.expiryDate);
     const daysLeft = Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
 
-    // Notify at 8 AM on the day that is (daysLeft - 3) from now
     const notifyDate = new Date(expiry);
     notifyDate.setDate(notifyDate.getDate() - 3);
     notifyDate.setHours(8, 0, 0, 0);
 
-    if (notifyDate <= new Date()) continue; // already past
+    if (notifyDate <= new Date()) continue;
 
     await Notifications.scheduleNotificationAsync({
       content: {

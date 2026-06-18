@@ -83,7 +83,7 @@ export async function pushCollections(cols: Collection[], userId: string): Promi
         await supabase.from('recipe_collections').delete().eq('user_id', userId).in('client_id', toDelete);
       }
     }
-  } catch { /* network error — local state is source of truth */ }
+  } catch (e) { console.error('[sync] pushCollections failed', e); }
 }
 
 // ── Push saved recipes to Supabase ────────────────────────────────────────────
@@ -122,7 +122,7 @@ export async function pushSavedRecipes(recipes: SavedRecipe[], userId: string, h
         await supabase.from('saved_recipes').delete().eq('user_id', userId).in('client_id', toDelete);
       }
     }
-  } catch { /* network error — local state is source of truth */ }
+  } catch (e) { console.error('[sync] pushSavedRecipes failed', e); }
 }
 
 // ── Share a recipe with the household ────────────────────────────────────────

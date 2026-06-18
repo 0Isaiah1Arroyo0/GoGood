@@ -1043,12 +1043,12 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   headerTitleGreen:   { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   headerSub:          { fontSize: 12, color: c.teal, marginTop: 2 },
   // Alert
-  alertCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF8E6', borderBottomWidth: 0.5, borderBottomColor: '#F5C842', paddingHorizontal: 16, paddingVertical: 10, gap: 10, marginTop: 8, shadowColor: '#F5C842', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 4 },
+  alertCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? 'rgba(245,200,66,0.08)' : '#FFF8E6', borderBottomWidth: 0.5, borderBottomColor: isDark ? 'rgba(245,200,66,0.2)' : '#F5C842', paddingHorizontal: 16, paddingVertical: 10, gap: 10, marginTop: 8, shadowColor: '#F5C842', shadowOffset: { width: 0, height: 4 }, shadowOpacity: isDark ? 0.15 : 0.35, shadowRadius: 10, elevation: 4 },
   alertLeft:          { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  alertTitle:         { fontSize: 12, fontWeight: '600', color: '#8A5C00' },
-  alertSub:           { fontSize: 11, color: '#6B6860', marginTop: 2 },
-  rescueBtn:          { backgroundColor: 'rgba(245,200,66,0.25)', borderWidth: 1, borderColor: '#F5C842', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
-  rescueBtnText:      { fontSize: 11, fontWeight: '600', color: '#8A5C00' },
+  alertTitle:         { fontSize: 12, fontWeight: '600', color: isDark ? '#F5D090' : '#8A5C00' },
+  alertSub:           { fontSize: 11, color: c.textSub, marginTop: 2 },
+  rescueBtn:          { backgroundColor: isDark ? 'rgba(245,200,66,0.12)' : 'rgba(245,200,66,0.25)', borderWidth: 1, borderColor: isDark ? 'rgba(245,200,66,0.3)' : '#F5C842', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
+  rescueBtnText:      { fontSize: 11, fontWeight: '600', color: isDark ? '#F5D090' : '#8A5C00' },
 
   // Chat
   chat:               { flex: 1 },

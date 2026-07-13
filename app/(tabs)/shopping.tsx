@@ -65,15 +65,11 @@ export default function ShoppingScreen() {
   const [newQty, setNewQty]           = useState('');
   const [newUnit, setNewUnit]         = useState('');
 
-  // Share card
-  const [shareVisible, setShareVisible] = useState(false);
-  const [shareMounted, setShareMounted] = useState(false);
+  // Share — a single full-screen, opaque flow. `null` closed; otherwise which
+  // page is showing. No bottom sheet / pass-through backdrop over the list.
+  const [shareView, setShareView] = useState<null | 'menu' | 'image' | 'text'>(null);
   const [capturing, setCapturing] = useState(false);
-  const [imageFull, setImageFull] = useState(false);   // full-screen image-card preview
-  const [textFull, setTextFull]   = useState(false);   // full-screen checklist-text preview
   const previewRef       = useRef<View>(null);
-  const shareOverlayAnim = useRef(new Animated.Value(0)).current;
-  const shareSheetAnim   = useRef(new Animated.Value(700)).current;
 
   const screenFade      = useRef(new Animated.Value(0)).current;
   const screenSlide     = useRef(new Animated.Value(24)).current;
@@ -103,23 +99,6 @@ export default function ShoppingScreen() {
       setItems(loaded);
     });
   }, []));
-
-  useEffect(() => {
-    if (shareVisible) {
-      setShareMounted(true);
-      shareOverlayAnim.setValue(0);
-      shareSheetAnim.setValue(700);
-      Animated.parallel([
-        Animated.timing(shareOverlayAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
-        Animated.spring(shareSheetAnim,   { toValue: 0, damping: 22, stiffness: 180, useNativeDriver: true }),
-      ]).start();
-    } else if (shareMounted) {
-      Animated.parallel([
-        Animated.timing(shareOverlayAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
-        Animated.timing(shareSheetAnim,   { toValue: 700, duration: 220, useNativeDriver: true }),
-      ]).start(() => setShareMounted(false));
-    }
-  }, [shareVisible]);
 
   // ── Household realtime subscription ──────────────────────────────────────
 
@@ -166,8 +145,7 @@ export default function ShoppingScreen() {
         dialogTitle: 'Share shopping list 🛒',
         UTI: 'public.png',
       });
-      setImageFull(false);
-      setShareVisible(false);
+      setShareView(null);
     } catch {
       // user cancelled or share unavailable — leave the preview open so they can retry
     } finally {
@@ -178,8 +156,7 @@ export default function ShoppingScreen() {
   const shareAsChecklist = async () => {
     try {
       await Share.share({ message: buildShareText(items) });
-      setTextFull(false);
-      setShareVisible(false);
+      setShareView(null);
     } catch { /* user cancelled — leave the preview open */ }
   };
 
@@ -385,7 +362,7 @@ export default function ShoppingScreen() {
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
               <TouchableOpacity
                 style={[styles.footerBtn, { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary, flex: 1 }]}
-                onPress={() => setShareVisible(true)}
+                onPress={() => setShareView('menu')}
                 activeOpacity={0.8}
               >
                 <Text style={{ fontSize: 13, color: 'white', fontWeight: '700' }}>🛒  Share list</Text>
@@ -476,33 +453,55 @@ export default function ShoppingScreen() {
         </View>
       </View>
 
-      {/* ── Share Card Sheet ── */}
-      {shareMounted && (
-        <Modal visible={shareMounted} transparent animationType="none" onRequestClose={() => setShareVisible(false)}>
-          <View style={{ flex: 1 }}>
-            <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)', opacity: shareOverlayAnim }]} />
-            <TouchableOpacity style={{ flex: 1 }} onPress={() => setShareVisible(false)} activeOpacity={1} />
+      {/* ── Full-screen share flow (opaque; no pass-through backdrop) ── */}
+      <Modal
+        visible={shareView !== null}
+        animationType="slide"
+        onRequestClose={() => setShareView(v => (v === 'image' || v === 'text') ? 'menu' : null)}
+      >
+        <View style={[styles.fullScreen, { backgroundColor: colors.bg }]}>
+          {/* Header: back (from a preview) / title / close */}
+          <View style={[styles.fullHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
+            {shareView === 'menu' ? (
+              <View style={styles.fullClose} />
+            ) : (
+              <TouchableOpacity
+                onPress={() => setShareView('menu')}
+                style={[styles.fullClose, { backgroundColor: colors.chipBg }]}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={[styles.fullCloseText, { color: colors.text }]}>‹</Text>
+              </TouchableOpacity>
+            )}
+            <Text style={[styles.fullTitle, { color: colors.text }]} numberOfLines={1}>
+              {shareView === 'image' ? 'Share as image' : shareView === 'text' ? 'Share as text' : 'Share your list'}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setShareView(null)}
+              style={[styles.fullClose, { backgroundColor: colors.chipBg }]}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.fullCloseText, { color: colors.text }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
 
-            <Animated.View style={[styles.shareSheet, { backgroundColor: colors.surface, transform: [{ translateY: shareSheetAnim }] }]}>
-              <View style={{ width: 36, height: 4, backgroundColor: colors.border, borderRadius: 999, alignSelf: 'center', marginBottom: 12 }} />
+          {/* Body */}
+          <ScrollView contentContainerStyle={styles.fullBody} showsVerticalScrollIndicator={false}>
+            {shareView === 'text' ? (
+              <View style={[styles.textPreview, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.textPreviewText, { color: colors.text }]}>{buildShareText(items)}</Text>
+              </View>
+            ) : (
+              <View style={styles.shareCard}>
+                {renderShareCard()}
+              </View>
+            )}
 
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16, paddingBottom: 44 }}>
-
-                {/* ── Card preview ── */}
-                <View style={styles.shareCard}>
-                  {renderShareCard()}
-                </View>
-
-                {/* ── Actions ── */}
-                <Text style={[styles.shareTitle, { color: colors.text }]}>Share your list 🛒</Text>
-                <Text style={[styles.shareSub, { color: colors.textMuted }]}>
-                  Preview full-screen, then send to Messages, Notes, or any app.
-                </Text>
-
-                {/* Share as image → full-screen preview */}
+            {shareView === 'menu' && (
+              <View style={{ gap: 12, marginTop: 22 }}>
                 <TouchableOpacity
                   style={[styles.shareActionBtn, { backgroundColor: colors.btnPrimary }]}
-                  onPress={() => { setShareVisible(false); setTimeout(() => setImageFull(true), 260); }}
+                  onPress={() => setShareView('image')}
                   activeOpacity={0.85}
                 >
                   <Text style={{ fontSize: 20 }}>📸</Text>
@@ -510,12 +509,12 @@ export default function ShoppingScreen() {
                     <Text style={styles.shareActionTitle}>Share as image card</Text>
                     <Text style={styles.shareActionSub}>Messages, Instagram, Notes, Mail + more</Text>
                   </View>
+                  <Text style={styles.shareActionChevron}>›</Text>
                 </TouchableOpacity>
 
-                {/* Share as checklist text → full-screen preview */}
                 <TouchableOpacity
                   style={[styles.shareActionBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.teal }]}
-                  onPress={() => { setShareVisible(false); setTimeout(() => setTextFull(true), 260); }}
+                  onPress={() => setShareView('text')}
                   activeOpacity={0.85}
                 >
                   <Text style={{ fontSize: 20 }}>📋</Text>
@@ -525,79 +524,27 @@ export default function ShoppingScreen() {
                       ☐ checkbox format → Messages, Notes, Reminders
                     </Text>
                   </View>
+                  <Text style={[styles.shareActionChevron, { color: colors.textMuted }]}>›</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => setShareVisible(false)} style={{ alignItems: 'center', paddingVertical: 4 }}>
-                  <Text style={{ color: colors.textMuted, fontSize: 13 }}>cancel</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </Animated.View>
-          </View>
-        </Modal>
-      )}
-
-      {/* ── Full-screen: Share as image card ── */}
-      <Modal visible={imageFull} animationType="slide" onRequestClose={() => setImageFull(false)}>
-        <View style={[styles.fullScreen, { backgroundColor: colors.bg }]}>
-          <View style={[styles.fullHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-            <Text style={[styles.fullTitle, { color: colors.text }]}>Share as image</Text>
-            <TouchableOpacity
-              onPress={() => setImageFull(false)}
-              style={[styles.fullClose, { backgroundColor: colors.chipBg }]}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={[styles.fullCloseText, { color: colors.text }]}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView contentContainerStyle={styles.fullBody} showsVerticalScrollIndicator={false}>
-            <View style={styles.shareCard}>
-              {renderShareCard()}
-            </View>
+              </View>
+            )}
           </ScrollView>
 
-          <View style={[styles.fullFooter, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border }]}>
-            <TouchableOpacity
-              style={[styles.fullShareBtn, { backgroundColor: colors.btnPrimary, opacity: capturing ? 0.6 : 1 }]}
-              onPress={captureAndShare}
-              disabled={capturing}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.fullShareBtnText}>{capturing ? 'Preparing…' : '📸  Share image'}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Full-screen: Share as checklist text ── */}
-      <Modal visible={textFull} animationType="slide" onRequestClose={() => setTextFull(false)}>
-        <View style={[styles.fullScreen, { backgroundColor: colors.bg }]}>
-          <View style={[styles.fullHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-            <Text style={[styles.fullTitle, { color: colors.text }]}>Share as text</Text>
-            <TouchableOpacity
-              onPress={() => setTextFull(false)}
-              style={[styles.fullClose, { backgroundColor: colors.chipBg }]}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={[styles.fullCloseText, { color: colors.text }]}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView contentContainerStyle={styles.fullBody} showsVerticalScrollIndicator={false}>
-            <View style={[styles.textPreview, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[styles.textPreviewText, { color: colors.text }]}>{buildShareText(items)}</Text>
+          {/* Footer share action — only on a preview page */}
+          {shareView !== 'menu' && shareView !== null && (
+            <View style={[styles.fullFooter, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.fullShareBtn, { backgroundColor: colors.btnPrimary, opacity: capturing ? 0.6 : 1 }]}
+                onPress={shareView === 'image' ? captureAndShare : shareAsChecklist}
+                disabled={capturing}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.fullShareBtnText}>
+                  {shareView === 'image' ? (capturing ? 'Preparing…' : '📸  Share image') : '📋  Share text'}
+                </Text>
+              </TouchableOpacity>
             </View>
-          </ScrollView>
-
-          <View style={[styles.fullFooter, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border }]}>
-            <TouchableOpacity
-              style={[styles.fullShareBtn, { backgroundColor: colors.btnPrimary }]}
-              onPress={shareAsChecklist}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.fullShareBtnText}>📋  Share text</Text>
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
       </Modal>
     </View>
@@ -654,13 +601,14 @@ function createStyles(c: ThemeColors, isDark = false) {
     shareActionBtn:  { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 16, padding: 16 },
     shareActionTitle:{ fontSize: 14, fontWeight: '700', color: 'white' },
     shareActionSub:  { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
+    shareActionChevron: { fontSize: 22, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
 
     // Full-screen share previews
     fullScreen:    { flex: 1 },
     fullHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 0.5 },
-    fullTitle:     { fontSize: 18, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
+    fullTitle:     { flex: 1, textAlign: 'center', marginHorizontal: 8, fontSize: 18, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
     fullClose:     { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-    fullCloseText: { fontSize: 15, fontWeight: '700' },
+    fullCloseText: { fontSize: 17, fontWeight: '700', lineHeight: 20 },
     fullBody:      { flexGrow: 1, justifyContent: 'center', padding: 20, paddingBottom: 32 },
     fullFooter:    { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 0.5 },
     fullShareBtn:  { borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },

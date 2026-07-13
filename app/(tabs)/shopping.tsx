@@ -270,7 +270,10 @@ export default function ShoppingScreen() {
   return (
     <View style={styles.safe}>
       <StatusBar style={colors.statusBar} backgroundColor={colors.bg} />
-      <Animated.View style={[styles.container, { opacity: screenFade, transform: [{ translateY: screenSlide }] }]}>
+      <Animated.View
+        style={[styles.container, { opacity: screenFade, transform: [{ translateY: screenSlide }] }]}
+        pointerEvents={shareView !== null ? 'none' : 'auto'}
+      >
 
         {/* Header */}
         <Animated.View style={{ transform: [{ scale: heroScale }] }}>

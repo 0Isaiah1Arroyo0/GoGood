@@ -114,7 +114,11 @@ Create a `.env` file in the project root:
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 EXPO_PUBLIC_ANTHROPIC_API_KEY=your-anthropic-key
+EXPO_PUBLIC_REVENUECAT_IOS_KEY=appl_your-ios-public-sdk-key
+EXPO_PUBLIC_REVENUECAT_ANDROID_KEY=goog_your-android-public-sdk-key
 ```
+
+> Use the RevenueCat **public SDK keys** (`appl_…` / `goog_…`), not the secret API key. Without these, `Purchases.configure` never runs and the paywall is disabled.
 
 ### Install & Run
 
@@ -171,12 +175,49 @@ gogood://auth/reset
 
 ## Subscriptions
 
-Subscriptions are managed via RevenueCat. To set up:
+Subscriptions are managed via RevenueCat. The app assumes a specific dashboard
+configuration — each of the following must match exactly or the paywall falls
+back to placeholder prices with a disabled Subscribe button.
 
-1. Create a project at [app.revenuecat.com](https://app.revenuecat.com)
-2. Add your iOS app with bundle ID `com.gogood.app`
-3. Configure products and entitlements in RevenueCat
-4. Add your public SDK key to the app's subscription context
+**Plans & pricing**
+
+| Plan | Price | Notes |
+|---|---|---|
+| Free | $0 | 10-item inventory |
+| Monthly | $4.99 / mo | |
+| Annual | $45.99 / yr | "Save 2 months" vs monthly |
+
+**1. Create store products**
+
+- **App Store Connect** → app (`com.gogood.app`) → Subscriptions → create a
+  subscription group with two auto-renewing products:
+  - Monthly — e.g. `gogood_premium_monthly`, $4.99
+  - Annual — e.g. `gogood_premium_annual`, $45.99. The product ID **must contain
+    `annual` or `year`** — the app detects the annual plan by that substring
+    (`app/context/subscription.tsx`).
+- (Android) Create the equivalent subscriptions in Google Play Console.
+
+**2. Configure RevenueCat** ([app.revenuecat.com](https://app.revenuecat.com))
+
+1. Create a project; add the iOS app (bundle ID `com.gogood.app`) and Android app.
+2. **Products** → import both store subscriptions.
+3. **Entitlements** → create one with the identifier exactly **`premium`**
+   (lowercase) and attach both products.
+4. **Offerings** → create an offering and mark it **Current**. Place the monthly
+   product in the built-in **Monthly** package slot and the annual product in the
+   **Annual** slot (the app finds them by `MONTHLY` / `ANNUAL` package type).
+
+**3. Add keys**
+
+- Copy the **public SDK keys** from RevenueCat → API keys into
+  `EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY` (see
+  [Environment Variables](#environment-variables)) and your EAS build secrets.
+
+**4. Test**
+
+- Build a real device build (`eas build`) — purchases don't work in Expo Go.
+- Use an App Store **Sandbox tester** to confirm real prices load, the Subscribe
+  button enables, purchasing flips the user to premium, and Restore Purchases works.
 
 ---
 

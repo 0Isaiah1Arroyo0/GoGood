@@ -69,6 +69,8 @@ export default function ShoppingScreen() {
   const [shareVisible, setShareVisible] = useState(false);
   const [shareMounted, setShareMounted] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [imageFull, setImageFull] = useState(false);   // full-screen image-card preview
+  const [textFull, setTextFull]   = useState(false);   // full-screen checklist-text preview
   const previewRef       = useRef<View>(null);
   const shareOverlayAnim = useRef(new Animated.Value(0)).current;
   const shareSheetAnim   = useRef(new Animated.Value(700)).current;
@@ -164,10 +166,10 @@ export default function ShoppingScreen() {
         dialogTitle: 'Share shopping list 🛒',
         UTI: 'public.png',
       });
+      setImageFull(false);
       setShareVisible(false);
     } catch {
-      // user cancelled or share unavailable — just close the sheet
-      setShareVisible(false);
+      // user cancelled or share unavailable — leave the preview open so they can retry
     } finally {
       setCapturing(false);
     }
@@ -176,7 +178,9 @@ export default function ShoppingScreen() {
   const shareAsChecklist = async () => {
     try {
       await Share.share({ message: buildShareText(items) });
-    } catch { /* user cancelled */ }
+      setTextFull(false);
+      setShareVisible(false);
+    } catch { /* user cancelled — leave the preview open */ }
   };
 
   // ── List actions ─────────────────────────────────────────────────────────
@@ -244,6 +248,45 @@ export default function ShoppingScreen() {
   const cardItems   = unchecked.slice(0, CARD_MAX);
   const cardOverflow = Math.max(0, unchecked.length - CARD_MAX);
   const dateStr     = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  // Shared card contents — rendered inside the off-screen capture target, the
+  // chooser sheet preview, and the full-screen image preview.
+  const renderShareCard = () => (
+    <>
+      <View style={styles.cardBlob1} />
+      <View style={styles.cardBlob2} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <Text style={styles.cardBrand}>go<Text style={{ color: '#5DCAA5' }}>good</Text></Text>
+        <View style={styles.cardDatePill}>
+          <Text style={styles.cardDatePillText}>{dateStr.toUpperCase()}</Text>
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <Text style={{ fontSize: 22 }}>🛒</Text>
+        <View>
+          <Text style={styles.cardTitle}>Shopping List</Text>
+          <Text style={styles.cardSub}>{unchecked.length} item{unchecked.length !== 1 ? 's' : ''} to grab</Text>
+        </View>
+      </View>
+      <View style={styles.cardItemsContainer}>
+        {cardItems.map((item, i) => (
+          <View key={item.id} style={[styles.cardItemRow, i > 0 && styles.cardItemRowBorder]}>
+            <View style={styles.cardCheckbox} />
+            <Text style={styles.cardItemName} numberOfLines={1}>
+              {item.name}
+              {item.quantity ? <Text style={styles.cardItemQty}>  {item.quantity}{item.unit ? ` ${item.unit}` : ''}</Text> : null}
+            </Text>
+          </View>
+        ))}
+        {cardOverflow > 0 && (
+          <View style={[styles.cardItemRow, styles.cardItemRowBorder]}>
+            <Text style={styles.cardOverflow}>+ {cardOverflow} more item{cardOverflow !== 1 ? 's' : ''}</Text>
+          </View>
+        )}
+      </View>
+      <Text style={styles.cardFooter}>shared from GoGood · reduce food waste 🌱</Text>
+    </>
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -429,38 +472,7 @@ export default function ShoppingScreen() {
         style={{ position: 'absolute', left: -4000, top: 0, width: 340 }}
       >
         <View style={[styles.shareCard, { minHeight: undefined }]}>
-          <View style={styles.cardBlob1} />
-          <View style={styles.cardBlob2} />
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <Text style={styles.cardBrand}>go<Text style={{ color: '#5DCAA5' }}>good</Text></Text>
-            <View style={styles.cardDatePill}>
-              <Text style={styles.cardDatePillText}>{dateStr.toUpperCase()}</Text>
-            </View>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-            <Text style={{ fontSize: 22 }}>🛒</Text>
-            <View>
-              <Text style={styles.cardTitle}>Shopping List</Text>
-              <Text style={styles.cardSub}>{unchecked.length} item{unchecked.length !== 1 ? 's' : ''} to grab</Text>
-            </View>
-          </View>
-          <View style={styles.cardItemsContainer}>
-            {cardItems.map((item, i) => (
-              <View key={item.id} style={[styles.cardItemRow, i > 0 && styles.cardItemRowBorder]}>
-                <View style={styles.cardCheckbox} />
-                <Text style={styles.cardItemName} numberOfLines={1}>
-                  {item.name}
-                  {item.quantity ? <Text style={styles.cardItemQty}>  {item.quantity}{item.unit ? ` ${item.unit}` : ''}</Text> : null}
-                </Text>
-              </View>
-            ))}
-            {cardOverflow > 0 && (
-              <View style={[styles.cardItemRow, styles.cardItemRowBorder]}>
-                <Text style={styles.cardOverflow}>+ {cardOverflow} more item{cardOverflow !== 1 ? 's' : ''}</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.cardFooter}>shared from GoGood · reduce food waste 🌱</Text>
+          {renderShareCard()}
         </View>
       </View>
 
@@ -477,61 +489,20 @@ export default function ShoppingScreen() {
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16, paddingBottom: 44 }}>
 
                 {/* ── Card preview ── */}
-                <View ref={previewRef} style={styles.shareCard} collapsable={false}>
-                  {/* Decorative blobs */}
-                  <View style={styles.cardBlob1} />
-                  <View style={styles.cardBlob2} />
-
-                  {/* Header */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                    <Text style={styles.cardBrand}>go<Text style={{ color: '#5DCAA5' }}>good</Text></Text>
-                    <View style={styles.cardDatePill}>
-                      <Text style={styles.cardDatePillText}>{dateStr.toUpperCase()}</Text>
-                    </View>
-                  </View>
-
-                  {/* Title */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <Text style={{ fontSize: 22 }}>🛒</Text>
-                    <View>
-                      <Text style={styles.cardTitle}>Shopping List</Text>
-                      <Text style={styles.cardSub}>{unchecked.length} item{unchecked.length !== 1 ? 's' : ''} to grab</Text>
-                    </View>
-                  </View>
-
-                  {/* Items */}
-                  <View style={styles.cardItemsContainer}>
-                    {cardItems.map((item, i) => (
-                      <View key={item.id} style={[styles.cardItemRow, i > 0 && styles.cardItemRowBorder]}>
-                        <View style={styles.cardCheckbox} />
-                        <Text style={styles.cardItemName} numberOfLines={1}>
-                          {item.name}
-                          {item.quantity ? <Text style={styles.cardItemQty}>  {item.quantity}{item.unit ? ` ${item.unit}` : ''}</Text> : null}
-                        </Text>
-                      </View>
-                    ))}
-                    {cardOverflow > 0 && (
-                      <View style={[styles.cardItemRow, styles.cardItemRowBorder]}>
-                        <Text style={styles.cardOverflow}>+ {cardOverflow} more item{cardOverflow !== 1 ? 's' : ''}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Footer */}
-                  <Text style={styles.cardFooter}>shared from GoGood · reduce food waste 🌱</Text>
+                <View style={styles.shareCard}>
+                  {renderShareCard()}
                 </View>
 
                 {/* ── Actions ── */}
                 <Text style={[styles.shareTitle, { color: colors.text }]}>Share your list 🛒</Text>
                 <Text style={[styles.shareSub, { color: colors.textMuted }]}>
-                  Send as an image card to Messages, Notes, or any app.
+                  Preview full-screen, then send to Messages, Notes, or any app.
                 </Text>
 
-                {/* Share as image */}
+                {/* Share as image → full-screen preview */}
                 <TouchableOpacity
-                  style={[styles.shareActionBtn, { backgroundColor: colors.btnPrimary, opacity: capturing ? 0.6 : 1 }]}
-                  onPress={captureAndShare}
-                  disabled={capturing}
+                  style={[styles.shareActionBtn, { backgroundColor: colors.btnPrimary }]}
+                  onPress={() => { setShareVisible(false); setTimeout(() => setImageFull(true), 260); }}
                   activeOpacity={0.85}
                 >
                   <Text style={{ fontSize: 20 }}>📸</Text>
@@ -539,13 +510,12 @@ export default function ShoppingScreen() {
                     <Text style={styles.shareActionTitle}>Share as image card</Text>
                     <Text style={styles.shareActionSub}>Messages, Instagram, Notes, Mail + more</Text>
                   </View>
-                  {capturing && <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>capturing…</Text>}
                 </TouchableOpacity>
 
-                {/* Share as checklist text */}
+                {/* Share as checklist text → full-screen preview */}
                 <TouchableOpacity
                   style={[styles.shareActionBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.teal }]}
-                  onPress={shareAsChecklist}
+                  onPress={() => { setShareVisible(false); setTimeout(() => setTextFull(true), 260); }}
                   activeOpacity={0.85}
                 >
                   <Text style={{ fontSize: 20 }}>📋</Text>
@@ -565,6 +535,71 @@ export default function ShoppingScreen() {
           </View>
         </Modal>
       )}
+
+      {/* ── Full-screen: Share as image card ── */}
+      <Modal visible={imageFull} animationType="slide" onRequestClose={() => setImageFull(false)}>
+        <View style={[styles.fullScreen, { backgroundColor: colors.bg }]}>
+          <View style={[styles.fullHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
+            <Text style={[styles.fullTitle, { color: colors.text }]}>Share as image</Text>
+            <TouchableOpacity
+              onPress={() => setImageFull(false)}
+              style={[styles.fullClose, { backgroundColor: colors.chipBg }]}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.fullCloseText, { color: colors.text }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.fullBody} showsVerticalScrollIndicator={false}>
+            <View style={styles.shareCard}>
+              {renderShareCard()}
+            </View>
+          </ScrollView>
+
+          <View style={[styles.fullFooter, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border }]}>
+            <TouchableOpacity
+              style={[styles.fullShareBtn, { backgroundColor: colors.btnPrimary, opacity: capturing ? 0.6 : 1 }]}
+              onPress={captureAndShare}
+              disabled={capturing}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.fullShareBtnText}>{capturing ? 'Preparing…' : '📸  Share image'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Full-screen: Share as checklist text ── */}
+      <Modal visible={textFull} animationType="slide" onRequestClose={() => setTextFull(false)}>
+        <View style={[styles.fullScreen, { backgroundColor: colors.bg }]}>
+          <View style={[styles.fullHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
+            <Text style={[styles.fullTitle, { color: colors.text }]}>Share as text</Text>
+            <TouchableOpacity
+              onPress={() => setTextFull(false)}
+              style={[styles.fullClose, { backgroundColor: colors.chipBg }]}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.fullCloseText, { color: colors.text }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.fullBody} showsVerticalScrollIndicator={false}>
+            <View style={[styles.textPreview, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.textPreviewText, { color: colors.text }]}>{buildShareText(items)}</Text>
+            </View>
+          </ScrollView>
+
+          <View style={[styles.fullFooter, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border }]}>
+            <TouchableOpacity
+              style={[styles.fullShareBtn, { backgroundColor: colors.btnPrimary }]}
+              onPress={shareAsChecklist}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.fullShareBtnText}>📋  Share text</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -619,6 +654,19 @@ function createStyles(c: ThemeColors, isDark = false) {
     shareActionBtn:  { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 16, padding: 16 },
     shareActionTitle:{ fontSize: 14, fontWeight: '700', color: 'white' },
     shareActionSub:  { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
+
+    // Full-screen share previews
+    fullScreen:    { flex: 1 },
+    fullHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 0.5 },
+    fullTitle:     { fontSize: 18, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
+    fullClose:     { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+    fullCloseText: { fontSize: 15, fontWeight: '700' },
+    fullBody:      { flexGrow: 1, justifyContent: 'center', padding: 20, paddingBottom: 32 },
+    fullFooter:    { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 0.5 },
+    fullShareBtn:  { borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+    fullShareBtnText: { fontSize: 15, fontWeight: '700', color: 'white' },
+    textPreview:     { borderRadius: 16, borderWidth: 1, padding: 18 },
+    textPreviewText: { fontSize: 15, lineHeight: 26, fontWeight: '500' },
 
     // Share card (always dark green for branding)
     shareCard: {

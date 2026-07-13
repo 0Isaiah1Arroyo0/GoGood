@@ -155,15 +155,44 @@ export function useAppDrawer() {
       AsyncStorage.getItem('gogood_items'),
     ]);
     const stored: Partial<Profile> = profileVal ? JSON.parse(profileVal) : {};
-    const authEmail = user?.email ?? '';
-    const authName  = (user?.user_metadata?.full_name as string) ?? '';
+    const authEmail    = user?.email ?? '';
+    const authName     = (user?.user_metadata?.full_name as string) ?? '';
+    const authUsername = (user?.user_metadata?.username  as string) ?? '';
+
+    // Logging out clears the local copy, so when it's missing (a fresh login)
+    // restore the saved profile from Supabase instead of losing it.
+    let remote: Partial<Profile> = {};
+    if (!profileVal) {
+      try {
+        const uid = user?.id ?? (await supabase.auth.getUser()).data.user?.id;
+        if (uid) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('display_name, username, photo_url, dietary_preferences, household_size')
+            .eq('id', uid)
+            .maybeSingle();
+          if (!error && data) {
+            if (data.display_name) remote.name     = data.display_name;
+            if (data.username)     remote.username = data.username;
+            if (data.photo_url)    remote.photo    = data.photo_url;
+            if (Array.isArray(data.dietary_preferences)) remote.dietary = data.dietary_preferences as string[];
+            if (typeof data.household_size === 'number') remote.household = data.household_size;
+          }
+        }
+      } catch { /* offline / columns not migrated yet — fall back to local + auth */ }
+    }
+
     const p: Profile = {
       ...EMPTY_PROFILE,
+      ...remote,
       ...stored,
-      email: stored.email || authEmail,
-      name:  stored.name  || authName,
+      email:    stored.email    || authEmail,
+      name:     stored.name     || remote.name     || authName,
+      username: stored.username || remote.username || authUsername,
     };
     setProfile(p); setEditProfile(p);
+    // Cache the restored profile locally so it loads instantly next time.
+    if (Object.keys(remote).length) await AsyncStorage.setItem('gogood_profile', JSON.stringify(p));
     if (statsVal)  setStats(JSON.parse(statsVal));
     if (notifsVal) { const n = { ...EMPTY_NOTIFS, ...JSON.parse(notifsVal) }; setNotifs(n); setEditNotifs(n); }
     setBiometricEnabled(bioVal === 'enabled');
@@ -256,15 +285,29 @@ export function useAppDrawer() {
       Alert.alert('Name required', 'Please enter your name before saving.');
       return;
     }
-    await AsyncStorage.setItem('gogood_profile', JSON.stringify(editProfile));
-    setProfile(editProfile);
-    // Async sync to Supabase — fire and forget
-    supabase.from('profiles').update({
-      display_name:         editProfile.name.trim(),
-      dietary_preferences:  editProfile.dietary,
-      household_size:       editProfile.household,
-      updated_at:           new Date().toISOString(),
-    }).eq('id', (await supabase.auth.getUser()).data.user?.id ?? '').catch(() => {});
+    const cleaned: Profile = {
+      ...editProfile,
+      name:     editProfile.name.trim(),
+      username: editProfile.username.trim(),
+    };
+    await AsyncStorage.setItem('gogood_profile', JSON.stringify(cleaned));
+    setProfile(cleaned);
+    setEditProfile(cleaned);
+    // Persist every field to Supabase so the profile survives logout and is
+    // restored on the next login (upsert in case the row doesn't exist yet).
+    const uid = user?.id ?? (await supabase.auth.getUser()).data.user?.id;
+    if (uid) {
+      const { error } = await supabase.from('profiles').upsert({
+        id:                  uid,
+        display_name:        cleaned.name,
+        username:            cleaned.username || null,
+        photo_url:           cleaned.photo,
+        dietary_preferences: cleaned.dietary,
+        household_size:      cleaned.household,
+        updated_at:          new Date().toISOString(),
+      }, { onConflict: 'id' });
+      if (error) console.warn('[profile] Supabase sync failed:', error.message);
+    }
     setShowProfile(false);
   };
 

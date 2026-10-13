@@ -50,7 +50,7 @@ function packageLabel(pkg: PurchasesPackage): { period: string; price: string; n
   return {
     period: id === 'ANNUAL' ? 'Annual' : id === 'MONTHLY' ? 'Monthly' : pkg.product.title ?? id,
     price:  pkg.product.priceString,
-    note:   id === 'ANNUAL' ? '33% off' : id === 'MONTHLY' ? 'monthly' : undefined,
+    note:   id === 'ANNUAL' ? 'Save 2 months' : id === 'MONTHLY' ? 'monthly' : undefined,
   };
 }
 
@@ -217,7 +217,7 @@ export default function PaywallModal() {
               </Animated.View>
               <Text style={[styles.planCardName, selected === 'annual' && { color: '#FFD166' }]}>Annual</Text>
               <Text style={[styles.planCardPrice, selected === 'annual' && { color: '#FFD166' }]}>{annualPrice}</Text>
-              <Text style={[styles.planCardSub, selected === 'annual' && { color: 'rgba(255,209,102,0.65)' }]}>per year</Text>
+              <Text style={[styles.planCardSub, selected === 'annual' && { color: 'rgba(255,209,102,0.65)' }]}>Save 2 months</Text>
             </TouchableOpacity>
           </View>
 

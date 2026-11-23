@@ -2,11 +2,16 @@ import React, { useRef, useEffect, useState } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, ScrollView,
   Animated, ActivityIndicator, StyleSheet, Dimensions,
-  Alert, Easing,
+  Alert, Easing, Linking, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type PurchasesPackage } from 'react-native-purchases';
 import { useSubscription } from '../context/subscription';
+import { TERMS_URL, PRIVACY_URL } from '../../constants/legal';
+
+const STORE = Platform.OS === 'android'
+  ? { account: 'Google Play account', settings: 'Google Play subscription settings' }
+  : { account: 'Apple ID',            settings: 'App Store account settings' };
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
@@ -147,14 +152,34 @@ export default function PaywallModal() {
   const dismiss = () => hidePaywall();
 
   const handlePurchase = async () => {
-    if (!selectedPkg) return;
+    if (!selectedPkg) {
+      Alert.alert(
+        noPackages ? "Plans couldn't load" : 'Plan unavailable',
+        noPackages
+          ? 'Subscription plans could not be loaded. Check your connection and try again in a moment.'
+          : `The ${selected} plan isn't available right now. Please choose the other plan.`,
+      );
+      return;
+    }
     Animated.sequence([
       Animated.spring(ctaScale, { toValue: 0.95, damping: 8, stiffness: 500, useNativeDriver: true }),
       Animated.spring(ctaScale, { toValue: 1,    damping: 10, stiffness: 300, useNativeDriver: true }),
     ]).start();
     setPurchasing(true);
-    try { await purchase(selectedPkg); } catch { Alert.alert('Purchase failed', 'Please try again.'); }
-    setPurchasing(false);
+    try {
+      const ok = await purchase(selectedPkg);
+      if (!ok && __DEV__) {
+        // Purchase finished (or was cancelled) but the "premium" entitlement isn't active.
+        Alert.alert(
+          'Not unlocked',
+          'No premium access came back. If you completed the purchase, check that both products are attached to your entitlement in RevenueCat (Product catalog → Entitlements).',
+        );
+      }
+    } catch (e: any) {
+      Alert.alert('Purchase failed', e?.message ? String(e.message) : 'Please try again.');
+    } finally {
+      setPurchasing(false);
+    }
   };
 
   const handleRestore = async () => {
@@ -259,7 +284,7 @@ export default function PaywallModal() {
             <TouchableOpacity
               style={[styles.cta, (purchasing || noPackages) && { opacity: 0.6 }, selected === 'annual' && styles.ctaGold]}
               onPress={handlePurchase}
-              disabled={purchasing || noPackages}
+              disabled={purchasing}
             >
               {purchasing ? <ActivityIndicator color={selected === 'annual' ? '#085041' : '#fff'} /> : (
                 <Text style={[styles.ctaTxt, selected === 'annual' && { color: '#085041' }]}>
@@ -277,8 +302,23 @@ export default function PaywallModal() {
                 : <Text style={styles.footerLink}>Restore Purchases</Text>}
             </TouchableOpacity>
             <Text style={styles.footerDot}>·</Text>
-            <Text style={styles.footerNote}>Auto-renews. Cancel anytime.</Text>
+            <TouchableOpacity onPress={() => Linking.openURL(TERMS_URL)}>
+              <Text style={styles.footerLink}>Terms of Use</Text>
+            </TouchableOpacity>
+            <Text style={styles.footerDot}>·</Text>
+            <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
+              <Text style={styles.footerLink}>Privacy Policy</Text>
+            </TouchableOpacity>
           </View>
+
+          {/* Required auto-renew disclosure (App Store Guideline 3.1.2) */}
+          <Text style={styles.legal}>
+            Go Good Premium is an auto-renewing subscription ({monthlyPrice}/month or {annualPrice}/year).
+            Payment is charged to your {STORE.account} at confirmation of purchase. Your subscription renews
+            automatically unless cancelled at least 24 hours before the end of the current period, and
+            your account is charged for renewal within 24 hours prior to the end of the period. Manage or
+            cancel anytime in your {STORE.settings}.
+          </Text>
 
           <TouchableOpacity style={styles.closeBtn} onPress={dismiss} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <Text style={styles.closeTxt}>✕</Text>
@@ -380,8 +420,9 @@ const styles = StyleSheet.create({
   ctaGold: { backgroundColor: '#FFD166' },
   ctaTxt:  { fontSize: 15, fontWeight: '800', color: '#085041' },
 
-  footer:     { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 4 },
+  footer:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 4 },
   footerLink: { fontSize: 12, color: '#1D9E75', fontWeight: '600' },
   footerDot:  { fontSize: 12, color: 'rgba(255,255,255,0.2)' },
   footerNote: { fontSize: 11, color: 'rgba(255,255,255,0.3)' },
+  legal:      { fontSize: 9, lineHeight: 13, color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: 6, marginBottom: 4, paddingHorizontal: 4 },
 });

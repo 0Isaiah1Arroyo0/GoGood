@@ -1,3 +1,4 @@
+import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Modal, Animated, Easing, TextInput,
@@ -321,6 +322,7 @@ function ActivityChart({ goodData, badData, labels, todayIdx, colors }: {
 export default function FoodReportScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const router = useRouter();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const { menuBtn, drawerEl } = useAppDrawer();
@@ -604,7 +606,13 @@ export default function FoodReportScreen() {
     const existing = itemsVal ? JSON.parse(itemsVal) : [];
 
     const name       = restoreName.trim() || restoreEntry.name;
-    const expiryDate = restoreEntry.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    // If the old expiry date has already passed, give it a fresh week — otherwise the
+    // inventory would immediately move it straight back to "gone bad".
+    const freshExpiry = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const oldExpiry   = restoreEntry.expiryDate ? restoreEntry.expiryDate.slice(0, 10) : '';
+    const expiryDate  = oldExpiry && new Date(oldExpiry).getTime() > new Date(new Date().toDateString()).getTime() - 86400000
+      ? oldExpiry
+      : freshExpiry;
     const ms         = new Date(expiryDate).getTime() - new Date(new Date().toDateString()).getTime();
     const days       = Math.round(ms / 86400000);
     const badge      = days < 0 ? 'black' : restoreLoc === 'freezer' ? 'blue' : days === 0 ? 'red' : days <= 5 ? 'amber' : 'green';
@@ -955,7 +963,7 @@ export default function FoodReportScreen() {
 
         <Animated.ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
+          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: tabSpace + 24 }}
           style={{ opacity: contentFade, transform: [{ translateY: contentSlide }] }}
         >
 

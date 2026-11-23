@@ -1,8 +1,11 @@
 import {
   View, Text, TouchableOpacity, Animated, StyleSheet, Alert, Image,
   Modal, TextInput, ScrollView, Switch, Platform, KeyboardAvoidingView,
-  LayoutAnimation, UIManager, Linking,
+  LayoutAnimation, UIManager, Linking, Keyboard, Dimensions,
 } from 'react-native';
+
+// The side menu slides in and fills the whole screen width.
+const DRAWER_WIDTH = Dimensions.get('window').width;
 import Constants from 'expo-constants';
 import { useRef, useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
@@ -111,13 +114,13 @@ function SectionHeader({ label, open, onToggle, colors }: {
 
 export function useAppDrawer() {
   const router = useRouter();
-  const { signOut, user } = useAuth();
+  const { signOut, deleteAccount, user } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
   const { showPaywall, paywallDemoMode, setPaywallDemoMode } = useSubscription();
 
   // ── Drawer animation state ──────────────────────────────────────────────────
   const [visible, setVisible]   = useState(false);
-  const drawerAnim  = useRef(new Animated.Value(-280)).current;
+  const drawerAnim  = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const menuAnim    = useRef(new Animated.Value(0)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
@@ -174,7 +177,8 @@ export function useAppDrawer() {
           if (!error && data) {
             if (data.display_name) remote.name     = data.display_name;
             if (data.username)     remote.username = data.username;
-            if (data.photo_url)    remote.photo    = data.photo_url;
+            // Older versions saved a temporary file path from one phone — skip those.
+            if (data.photo_url && /^(data:|https?:)/.test(data.photo_url)) remote.photo = data.photo_url;
             if (Array.isArray(data.dietary_preferences)) remote.dietary = data.dietary_preferences as string[];
             if (typeof data.household_size === 'number') remote.household = data.household_size;
           }
@@ -203,6 +207,7 @@ export function useAppDrawer() {
 
   // ── Drawer open/close ────────────────────────────────────────────────────────
   const open = () => {
+    Keyboard.dismiss(); // close any open keyboard (e.g. GoodBot's input) before showing the menu
     loadData();
     setVisible(true);
     Animated.parallel([
@@ -214,7 +219,7 @@ export function useAppDrawer() {
 
   const close = () => {
     Animated.parallel([
-      Animated.timing(drawerAnim,  { toValue: -280, duration: 230, useNativeDriver: true }),
+      Animated.timing(drawerAnim,  { toValue: -DRAWER_WIDTH, duration: 260, useNativeDriver: true }),
       Animated.timing(menuAnim,    { toValue: 0,    duration: 210, useNativeDriver: true }),
       Animated.timing(overlayAnim, { toValue: 0,    duration: 200, useNativeDriver: true }),
     ]).start(() => setVisible(false));
@@ -222,7 +227,7 @@ export function useAppDrawer() {
 
   const openModal = (setter: (v: boolean) => void) => {
     close();
-    setTimeout(() => setter(true), 260);
+    setTimeout(() => setter(true), 400); // wait for the menu Modal to finish closing (iOS)
   };
 
   // ── Section toggle ───────────────────────────────────────────────────────────
@@ -271,13 +276,52 @@ export function useAppDrawer() {
     ]);
   };
 
+  // ── Delete account (App Store Guideline 5.1.1(v)) ────────────────────────────
+  const [deleting, setDeleting] = useState(false);
+
+  const runDeleteAccount = async () => {
+    setDeleting(true);
+    const { error } = await deleteAccount();
+    setDeleting(false);
+    if (error) { Alert.alert('Deletion failed', error); return; }
+    await SecureStore.deleteItemAsync('gogood_biometric').catch(() => {});
+    close();
+    router.replace('/auth/welcome' as any);
+    Alert.alert('Account deleted', 'Your Go Good account and data have been permanently deleted.');
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your account, inventory, recipes, and collections. ' +
+      'If you own a household, ownership passes to another member.\n\n' +
+      'Deleting your account does not cancel an App Store subscription — manage that in Settings → Apple ID → Subscriptions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue', style: 'destructive', onPress: () =>
+            Alert.alert('Are you absolutely sure?', 'This cannot be undone.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete forever', style: 'destructive', onPress: runDeleteAccount },
+            ]),
+        },
+      ],
+    );
+  };
+
   // ── Profile ──────────────────────────────────────────────────────────────────
   const pickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true, aspect: [1, 1], quality: 0.7,
+      allowsEditing: true, aspect: [1, 1], quality: 0.2,
+      base64: true,
     });
-    if (!result.canceled) setEditProfile(p => ({ ...p, photo: result.assets[0].uri }));
+    if (result.canceled) return;
+    // Save the image itself (not a path to a temporary file on this phone), so the
+    // photo survives sign-out and shows up again on any device after signing in.
+    const asset = result.assets[0];
+    const photo = asset.base64 ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}` : asset.uri;
+    setEditProfile(p => ({ ...p, photo }));
   };
 
   const saveProfile = async () => {
@@ -345,18 +389,19 @@ export function useAppDrawer() {
   const drawerEl = (
     <>
       {/* ── Sliding panel + overlay ── */}
-      {visible && (
+      {/* Rendered in a Modal so the overlay covers the bottom tab bar too */}
+      <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={close}>
         <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={close}>
             <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: overlayAnim }]} />
           </TouchableOpacity>
 
-          <Animated.View style={[sharedStyles.drawer, { backgroundColor: colors.drawerBg, transform: [{ translateX: drawerAnim }] }]}>
+          <Animated.View style={[sharedStyles.drawer, { width: DRAWER_WIDTH, backgroundColor: colors.drawerBg, transform: [{ translateX: drawerAnim }] }]}>
             <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
               {/* Header */}
               <View style={sharedStyles.drawerHeader}>
-                <Text style={[sharedStyles.drawerLogo, { color: colors.text }]}>go<Text style={{ color: '#5DCAA5' }}>good</Text></Text>
+                <Text style={[sharedStyles.drawerLogo, { color: colors.brand }]}>go<Text style={{ color: colors.teal, fontFamily: 'Fraunces_600SemiBold' }}>good</Text></Text>
                 <TouchableOpacity onPress={close} style={[sharedStyles.closeBtn, { backgroundColor: colors.surfaceAlt }]}>
                   <Text style={[sharedStyles.closeText, { color: colors.textMuted }]}>✕</Text>
                 </TouchableOpacity>
@@ -418,7 +463,7 @@ export function useAppDrawer() {
                     <Text style={[sharedStyles.itemText, { color: colors.text }]}>Notifications</Text>
                     <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => { close(); setTimeout(showPaywall, 260); }}>
+                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => { close(); setTimeout(showPaywall, 400); }}>
                     <Text style={sharedStyles.itemIcon}>🌱</Text>
                     <Text style={[sharedStyles.itemText, { color: colors.text }]}>Go Good Pro</Text>
                     <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
@@ -465,12 +510,17 @@ export function useAppDrawer() {
               <TouchableOpacity style={sharedStyles.logoutBtn} onPress={handleLogout}>
                 <Text style={sharedStyles.logoutText}>Log out</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={sharedStyles.deleteBtn} onPress={handleDeleteAccount} disabled={deleting}>
+                <Text style={[sharedStyles.deleteText, { color: colors.textMuted }]}>
+                  {deleting ? 'Deleting account…' : 'Delete account'}
+                </Text>
+              </TouchableOpacity>
               <Text style={[sharedStyles.version, { color: colors.textMuted }]}>Go Good v{Constants.expoConfig?.version ?? '1.0'} · made with 🌱 in NC</Text>
 
             </ScrollView>
           </Animated.View>
         </View>
-      )}
+      </Modal>
 
       {/* ── Profile modal ── */}
       <Sheet visible={showProfile} onClose={() => setShowProfile(false)} colors={colors}>
@@ -721,6 +771,8 @@ const sharedStyles = StyleSheet.create({
   // Logout + version
   logoutBtn:    { marginHorizontal: 24, marginTop: 24, paddingVertical: 13, borderRadius: 12, backgroundColor: 'rgba(232,117,106,0.15)', alignItems: 'center' },
   logoutText:   { color: '#E8756A', fontWeight: '600', fontSize: 14 },
+  deleteBtn:    { alignSelf: 'center', marginTop: 12, paddingVertical: 6, paddingHorizontal: 12 },
+  deleteText:   { fontSize: 12, textDecorationLine: 'underline' },
   version:      { fontSize: 10, textAlign: 'center', marginTop: 16 },
 
   // Modal shared

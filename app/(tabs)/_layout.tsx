@@ -1,9 +1,10 @@
 import { Tabs } from 'expo-router';
-import { Text, View, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, Animated, Easing, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
+import { TAB_BAR_MINI_H, TAB_BAR_GAP, tabBarBottomOffset } from '@/components/tab-bar-space';
 import { useTheme } from '../context/theme';
 import { useSubscription } from '../context/subscription';
 
@@ -16,39 +17,76 @@ const TABS = [
   { name: 'household',   emoji: '🏠', label: 'Household' },
 ];
 
-const DOCK_H      = 58;
-const DOCK_BOTTOM = 16;
-const DOCK_TOP    = 10;
-const DOCK_H_SIDE = 20;
+// Soft fade drawn just above the tab bar so screen content dissolves into the
+// background instead of being cut off — applies to every tab screen.
+const BOTTOM_FADE_H = 40;
+function bottomFadeGradient(hex: string): string {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map(ch => ch + ch).join('') : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  // Ease from clear (top) to solid at ~60%, then stay solid behind the bar.
+  const stops = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1].map(t => {
+    const k = Math.min(1, t / 0.6);
+    const alpha = k * k * (3 - 2 * k);
+    return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)}) ${Math.round(t * 100)}%`;
+  }).join(', ');
+  return `linear-gradient(to bottom, ${stops})`;
+}
 
+const DOCK_H       = 66;   // full bar height (icon + label)
+const MINI_H       = TAB_BAR_MINI_H; // shrunk bar height (icons only)
+const DOCK_H_SIDE  = 12;   // full bar inset from the screen edges
+const MINI_WIDTH   = 0.62; // shrunk bar width, as a fraction of the full bar
+const AUTO_HIDE_MS   = 7000; // bar opened from the small bar, nothing picked
+const AFTER_SWITCH_MS = 3000; // after switching screens
+const ON_LAUNCH_MS   = 4000; // first time the app opens
+
+// Bottom navigation that shrinks into a smaller version of itself (icons only)
+// when you're settled on a screen. Tap the small bar to grow it back; pick a tab
+// and it shrinks again.
 function FloatingDock({ state, navigation }: BottomTabBarProps) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
 
   const scales = useRef(TABS.map(() => new Animated.Value(1))).current;
-  // initialise the starting tab's glow to 1 so the pill shows on first render
-  const glows  = useRef(TABS.map((_, i) => new Animated.Value(i === state.index ? 1 : 0))).current;
   const prevIndex = useRef(state.index);
+
+  // 1 = full size, 0 = shrunk. Starts full so people see where navigation lives.
+  const [open, setOpen] = useState(true);
+  const openAnim = useRef(new Animated.Value(1)).current;
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleHide = (ms: number) => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setOpen(false), ms);
+  };
+
+  useEffect(() => {
+    // Layout properties (width/height) animate on the JS thread, so useNativeDriver is off.
+    Animated.timing(openAnim, {
+      toValue: open ? 1 : 0,
+      duration: open ? 300 : 360,
+      easing: Easing.inOut(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [open]);
+
+  // First launch: show the full bar briefly, then shrink it.
+  useEffect(() => {
+    scheduleHide(ON_LAUNCH_MS);
+    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
+  }, []);
 
   useEffect(() => {
     const idx = state.index;
     if (idx === prevIndex.current) return;
-
-    const prev = prevIndex.current;
-
-    // fade out the old tab's pill
-    Animated.timing(glows[prev], { toValue: 0, duration: 160, useNativeDriver: true }).start();
-
-    // bounce the newly selected tab
+    // gentle bounce on the newly selected tab's icon
     Animated.sequence([
-      Animated.spring(scales[idx], { toValue: 1.2, damping: 8, stiffness: 340, useNativeDriver: true }),
-      Animated.spring(scales[idx], { toValue: 1,   damping: 14, stiffness: 240, useNativeDriver: true }),
+      Animated.spring(scales[idx], { toValue: 1.18, damping: 8, stiffness: 340, useNativeDriver: false }),
+      Animated.spring(scales[idx], { toValue: 1,   damping: 14, stiffness: 240, useNativeDriver: false }),
     ]).start();
-
-    // fade in new tab's pill
-    glows[idx].setValue(0);
-    Animated.timing(glows[idx], { toValue: 1, duration: 180, useNativeDriver: true }).start();
-
     prevIndex.current = idx;
   }, [state.index]);
 
@@ -56,104 +94,110 @@ function FloatingDock({ state, navigation }: BottomTabBarProps) {
   const dockBorder = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)';
   const activeText = colors.teal;
   const mutedText  = isDark ? 'rgba(232,228,220,0.38)' : 'rgba(0,0,0,0.32)';
-  const activePill = isDark ? 'rgba(141,184,154,0.22)' : 'rgba(29,158,117,0.13)';
   const shadowColor = isDark ? '#000' : '#085041';
 
-  const spacerH = DOCK_TOP + DOCK_H + DOCK_BOTTOM + Math.max(insets.bottom, 10);
+  const dockBottom = tabBarBottomOffset(insets.bottom);
+  // The bar floats over the screens; they add bottom padding via useTabBarSpace().
+  const areaH = TAB_BAR_GAP + MINI_H + dockBottom;
+
+  const fullW = screenW - DOCK_H_SIDE * 2;
+  const miniW = fullW * MINI_WIDTH;
+
+  const barWidth  = openAnim.interpolate({ inputRange: [0, 1], outputRange: [miniW, fullW] });
+  const barHeight = openAnim.interpolate({ inputRange: [0, 1], outputRange: [MINI_H, DOCK_H] });
+  const radius    = openAnim.interpolate({ inputRange: [0, 1], outputRange: [MINI_H / 2, 24] });
+  const iconScale = openAnim.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] });
+  // Labels fade out first when shrinking and fade in last when growing.
+  const labelOpacity = openAnim.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0, 0, 1] });
+  const labelHeight  = openAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 15] });
 
   return (
-    <View style={{ height: spacerH, backgroundColor: colors.bg }} pointerEvents="box-none">
+    <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: areaH }} pointerEvents="box-none">
+      {/* Content scrolling down behind the bar dissolves into the background */}
       <View
+        pointerEvents="none"
         style={{
-          position: 'absolute',
-          bottom: Math.max(insets.bottom, 10) + DOCK_BOTTOM,
-          left: DOCK_H_SIDE,
-          right: DOCK_H_SIDE,
-          height: DOCK_H,
-          borderRadius: DOCK_H / 2,
-          backgroundColor: dockBg,
-          borderWidth: 1,
-          borderColor: dockBorder,
-          flexDirection: 'row',
-          alignItems: 'center',
-          // iOS shadow
-          shadowColor,
-          shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: isDark ? 0.22 : 0.13,
-          shadowRadius: 22,
-          // Android elevation
-          elevation: 16,
+          position: 'absolute', left: 0, right: 0, bottom: 0, height: areaH + BOTTOM_FADE_H,
+          experimental_backgroundImage: bottomFadeGradient(colors.bg),
         }}
-      >
-        {TABS.map((tab, i) => {
-          const route = state.routes.find(r => r.name === tab.name);
-          const isFocused = state.index === state.routes.indexOf(route!);
+      />
 
-          const onPress = () => {
-            if (!route) return;
-            Haptics.selectionAsync();
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-            });
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name, route.params);
-            }
-          };
+      <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: dockBottom, alignItems: 'center' }}>
+        <Animated.View
+          style={{
+            width: barWidth,
+            height: barHeight,
+            borderRadius: radius,
+            paddingHorizontal: 4,
+            backgroundColor: dockBg,
+            borderWidth: 1,
+            borderColor: dockBorder,
+            flexDirection: 'row',
+            alignItems: 'center',
+            shadowColor, shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: isDark ? 0.22 : 0.13, shadowRadius: 22, elevation: 16,
+          }}
+        >
+          {TABS.map((tab, i) => {
+            const route = state.routes.find(r => r.name === tab.name);
+            const isFocused = state.index === state.routes.indexOf(route!);
 
-          return (
-            <TouchableOpacity
-              key={tab.name}
-              onPress={onPress}
-              activeOpacity={0.8}
-              style={{
-                flex: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-                paddingVertical: 8,
-              }}
-            >
-              {/* Active pill — opacity driven purely by animated value */}
-              <Animated.View
-                style={{
-                  position: 'absolute',
-                  top: 6, left: 4, right: 4, bottom: 6,
-                  borderRadius: 18,
-                  backgroundColor: activePill,
-                  opacity: glows[i],
-                }}
-              />
+            const onPress = () => {
+              if (!route) return;
+              // Small bar: the first tap just grows it back to full size.
+              if (!open) {
+                Haptics.selectionAsync();
+                setOpen(true);
+                scheduleHide(AUTO_HIDE_MS);
+                return;
+              }
+              Haptics.selectionAsync();
+              const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+              if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
+              // Shrink again once they've picked where to go.
+              scheduleHide(isFocused ? 0 : AFTER_SWITCH_MS);
+            };
 
-              {/* Icon */}
-              <Animated.Text
-                style={{
-                  fontSize: 20,
-                  transform: [{ scale: scales[i] }],
-                  opacity: isFocused ? 1 : 0.45,
-                }}
+            return (
+              <TouchableOpacity
+                key={tab.name}
+                onPress={onPress}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={open ? tab.label : 'Show navigation'}
+                style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 }}
               >
-                {tab.emoji}
-              </Animated.Text>
+                <Animated.Text
+                  style={{
+                    fontSize: 21,
+                    lineHeight: 26,
+                    opacity: isFocused ? 1 : 0.5,
+                    transform: [{ scale: Animated.multiply(scales[i], iconScale) }],
+                  }}
+                >
+                  {tab.emoji}
+                </Animated.Text>
 
-              {/* Label */}
-              <Text
-                style={{
-                  fontSize: 7,
-                  fontWeight: isFocused ? '700' : '500',
-                  marginTop: 2,
-                  letterSpacing: 0.1,
-                  color: isFocused ? activeText : mutedText,
-                }}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.75}
-              >
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+                {/* Label — green + bold shows which screen you're on; hidden on the small bar */}
+                <Animated.View style={{ height: labelHeight, opacity: labelOpacity, overflow: 'hidden', justifyContent: 'flex-end' }}>
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: isFocused ? '700' : '500',
+                      letterSpacing: 0.1,
+                      color: isFocused ? activeText : mutedText,
+                    }}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                  >
+                    {tab.label}
+                  </Text>
+                </Animated.View>
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
       </View>
     </View>
   );

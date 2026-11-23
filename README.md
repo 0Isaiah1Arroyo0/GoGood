@@ -189,7 +189,7 @@ back to placeholder prices with a disabled Subscribe button.
 
 **1. Create store products**
 
-- **App Store Connect** → app (`com.gogood.app`) → Subscriptions → create a
+- **App Store Connect** → app (`com.isaiaharroyo.gogood`) → Subscriptions → create a
   subscription group with two auto-renewing products:
   - Monthly — e.g. `gogood_premium_monthly`, $4.99
   - Annual — e.g. `gogood_premium_annual`, $45.99. The product ID **must contain
@@ -199,7 +199,7 @@ back to placeholder prices with a disabled Subscribe button.
 
 **2. Configure RevenueCat** ([app.revenuecat.com](https://app.revenuecat.com))
 
-1. Create a project; add the iOS app (bundle ID `com.gogood.app`) and Android app.
+1. Create a project; add the iOS app (bundle ID `com.isaiaharroyo.gogood`) and Android app.
 2. **Products** → import both store subscriptions.
 3. **Entitlements** → create one with the identifier exactly **`premium`**
    (lowercase) and attach both products.

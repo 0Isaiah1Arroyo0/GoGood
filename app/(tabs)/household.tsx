@@ -1,3 +1,4 @@
+import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Modal, Animated, Easing,
@@ -155,6 +156,7 @@ function LavaLampHeroCard({ colors, isDark, children }: {
 export default function HouseholdScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const { user } = useAuth();
   const { menuBtn, drawerEl } = useAppDrawer();
   const { isPremium, showPaywall } = useSubscription();
@@ -394,7 +396,7 @@ export default function HouseholdScreen() {
       ) : (
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
+          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: tabSpace + 24 }}
         >
 
           {household ? (

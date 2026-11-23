@@ -1,3 +1,4 @@
+import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Animated, Platform, KeyboardAvoidingView, Modal,
@@ -10,6 +11,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAppDrawer } from '../components/AppDrawer';
+import HeaderAddButton from '@/components/header-add-button';
 import { useSubscription } from '../context/subscription';
 import { useAuth } from '../context/auth';
 import { HOUSEHOLD_KEY } from '../lib/household';
@@ -809,6 +811,7 @@ function CollectionModal({ visible, onClose, onSave, renaming, colors }: {
 
 export default function CollectionsScreen() {
   const { colors, isDark } = useTheme();
+  const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const { menuBtn, drawerEl } = useAppDrawer();
@@ -1288,9 +1291,10 @@ export default function CollectionsScreen() {
               recipe<Text style={styles.headerLogoGreen}>collections</Text>
             </Text>
           </View>
-          <TouchableOpacity style={styles.newBtn} onPress={() => { if (!isPremium) { showPaywall(); return; } setRenamingCol(null); setModalVisible(true); }}>
-            <Text style={styles.newBtnText}>+ new</Text>
-          </TouchableOpacity>
+          <HeaderAddButton
+            accessibilityLabel="New collection"
+            onPress={() => { if (!isPremium) { showPaywall(); return; } setRenamingCol(null); setModalVisible(true); }}
+          />
         </View>
         </Animated.View>
 
@@ -1312,7 +1316,7 @@ export default function CollectionsScreen() {
           />
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: tabSpace + 24 }} showsVerticalScrollIndicator={false}>
 
           {/* ── Global search results ── */}
           {q ? (
@@ -1499,8 +1503,6 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   headerLogoGreen: { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   headerTitle:   { fontSize: 16, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   backBtn:       { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
-  newBtn:        { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, backgroundColor: c.chipBg, borderWidth: 1, borderColor: c.teal },
-  newBtnText:    { fontSize: 12, color: c.chipText, fontWeight: '700' },
 
   searchBar:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginVertical: 10, backgroundColor: c.surfaceAlt, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 0.5, borderColor: c.border },
 

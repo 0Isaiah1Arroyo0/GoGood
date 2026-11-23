@@ -40,6 +40,7 @@ interface AuthCtx {
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signInWithApple: (identityToken: string, name?: string | null) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
 }
 
@@ -49,6 +50,7 @@ const AuthContext = createContext<AuthCtx>({
   signIn: async () => ({ error: null }),
   signInWithApple: async () => ({ error: null }),
   signOut: async () => {},
+  deleteAccount: async () => ({ error: null }),
   resetPassword: async () => ({ error: null }),
 });
 
@@ -107,6 +109,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  // Permanently deletes the account server-side, then clears this device.
+  const deleteAccount = async (): Promise<{ error: string | null }> => {
+    const { data, error } = await supabase.functions.invoke('delete-account', { method: 'POST' });
+    if (error || !data?.ok) {
+      let message = data?.error ?? 'Could not delete your account. Please try again.';
+      try { message = (await (error as any)?.context?.json())?.error ?? message; } catch {}
+      return { error: message };
+    }
+    await clearLocalUserData();
+    // The user no longer exists server-side, so only drop the local session.
+    await supabase.auth.signOut({ scope: 'local' });
+    return { error: null };
+  };
+
   const resetPassword = async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: 'gogood://auth/reset',
@@ -117,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{
       session, user: session?.user ?? null, loading,
-      signUp, signIn, signInWithApple, signOut, resetPassword,
+      signUp, signIn, signInWithApple, signOut, deleteAccount, resetPassword,
     }}>
       {children}
     </AuthContext.Provider>

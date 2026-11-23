@@ -42,12 +42,20 @@ const SubscriptionContext = createContext<SubscriptionCtx>({
   restorePurchases: async () => false,
 });
 
+// GoGood has a single paid tier, so any active entitlement counts as premium.
+// Prefer the one named ENTITLEMENT if it exists; otherwise use whichever is active
+// (e.g. one named "Go Good Pro" in the RevenueCat dashboard).
+function activeEntitlement(info: CustomerInfo) {
+  const active = info.entitlements.active;
+  return active[ENTITLEMENT] ?? Object.values(active)[0];
+}
+
 function isEntitled(info: CustomerInfo): boolean {
-  return !!info.entitlements.active[ENTITLEMENT];
+  return !!activeEntitlement(info);
 }
 
 function isAnnualPlan(info: CustomerInfo): boolean {
-  const entitlement = info.entitlements.active[ENTITLEMENT];
+  const entitlement = activeEntitlement(info);
   if (!entitlement) return false;
   const productId = entitlement.productIdentifier?.toLowerCase() ?? '';
   return productId.includes('annual') || productId.includes('yearly') || productId.includes('year');
@@ -130,8 +138,9 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       if (ok) setPaywallVisible(false);
       return ok;
     } catch (e: any) {
-      if (!e.userCancelled) console.warn('Purchase error', e);
-      return false;
+      if (e?.userCancelled) return false;
+      console.warn('Purchase error', e);
+      throw e; // let the paywall show the reason
     }
   }, []);
 

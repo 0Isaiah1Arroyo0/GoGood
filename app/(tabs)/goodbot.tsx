@@ -1,7 +1,7 @@
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, TextInput, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Animated, Modal, Alert,
+  Platform, ActivityIndicator, Animated, Modal, Alert, LayoutAnimation,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,8 @@ import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAppDrawer } from '../components/AppDrawer';
+import EdgeFade from '@/components/edge-fade';
+import { useTabBarSpace } from '@/components/tab-bar-space';
 import { useSubscription } from '../context/subscription';
 import { useAuth } from '../context/auth';
 import { HOUSEHOLD_KEY } from '../lib/household';
@@ -141,31 +143,65 @@ function Markdown({ text, style, boldStyle }: { text: string; style: any; boldSt
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-function getQuickActions(hasExpiring: boolean) {
+type Suggestion = { key: string; label: string; prompt: string };
+type SuggestionGroup = { key: string; title: string; items: Suggestion[] };
+
+const RECIPE_DETAIL = 'full ingredient list with exact quantities, numbered steps, prep & cook time, and per-serving nutritional info.';
+
+// What GoodBot offers under "what sounds good?" — shown as a tappable list.
+function getSuggestionGroups(hasExpiring: boolean): SuggestionGroup[] {
   return [
     {
-      key: 'rescue',
-      icon: hasExpiring ? '🕐' : '🍽️',
-      label: hasExpiring ? 'Use expiring items' : 'Best recipe now',
-      prompt: "Give me a complete full recipe using my most urgent items — include exact ingredient quantities, numbered steps, prep & cook time, and per-serving nutritional info.",
+      key: 'cook',
+      title: 'Cook with what I have',
+      items: [
+        { key: 'rescue', label: hasExpiring ? 'Use my expiring items' : 'Best recipe right now',
+          prompt: `Give me a complete recipe using my most urgent items — ${RECIPE_DETAIL}` },
+        { key: 'quick',     label: 'Something quick (15 minutes)', prompt: `Give me a recipe I can make in 15 minutes or less from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'dinner',    label: 'Dinner tonight',               prompt: `What should I make for dinner tonight with what I have? Give me a complete recipe — ${RECIPE_DETAIL}` },
+        { key: 'mealprep',  label: 'Meal prep for the week',       prompt: `Suggest a meal-prep friendly recipe I can batch cook from my inventory — ${RECIPE_DETAIL} Include portion and storage tips.` },
+        { key: 'protein',   label: 'High-protein meal',            prompt: `Give me a high-protein recipe from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'light',     label: 'Something healthy and light',  prompt: `Give me a healthy, lighter recipe from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'breakfast', label: 'Breakfast idea',               prompt: `Give me a breakfast recipe from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'lunch',     label: 'Easy lunch',                   prompt: `Give me an easy lunch recipe from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'onepan',    label: 'One-pan or one-pot meal',      prompt: `Give me a one-pan or one-pot recipe from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'snack',     label: 'Snack',                        prompt: `Give me a simple snack I can make from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'dessert',   label: 'Dessert',                      prompt: `Give me a dessert I can make from my inventory — ${RECIPE_DETAIL}` },
+        { key: 'kids',      label: 'Kid-friendly meal',            prompt: `Give me a kid-friendly recipe from my inventory — ${RECIPE_DETAIL}` },
+      ],
     },
     {
-      key: 'mealprep',
-      icon: '🍱',
-      label: 'Meal prep',
-      prompt: "Suggest a meal-prep friendly full recipe I can batch cook from my inventory — complete ingredient list, numbered steps, portion info, and storage tips.",
+      key: 'cuisine',
+      title: 'Pick a cuisine',
+      items: [
+        { key: 'italian',       label: 'Italian',        prompt: `Give me a complete Italian recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'mexican',       label: 'Mexican',        prompt: `Give me a complete Mexican recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'asian',         label: 'Asian',          prompt: `Give me a complete Asian-inspired recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'mediterranean', label: 'Mediterranean',  prompt: `Give me a complete Mediterranean recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'indian',        label: 'Indian',         prompt: `Give me a complete Indian-inspired recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'thai',          label: 'Thai',           prompt: `Give me a complete Thai-inspired recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'american',      label: 'American classic', prompt: `Give me a classic American recipe using my inventory — ${RECIPE_DETAIL}` },
+        { key: 'comfort',       label: 'Comfort food',   prompt: `Give me a hearty, satisfying comfort food recipe using my inventory — ${RECIPE_DETAIL}` },
+      ],
+    },
+    {
+      key: 'ask',
+      title: 'Questions to ask',
+      items: [
+        { key: 'q-first',    label: 'What should I use up first?',              prompt: 'What should I use up first, and why?' },
+        { key: 'q-freeze',   label: 'What can I freeze before it goes bad?',    prompt: 'Which of my items can I freeze before they go bad, and how should I freeze each one?' },
+        { key: 'q-plan',     label: 'Plan my meals for the next 3 days',        prompt: 'Plan my meals for the next 3 days using what I have, prioritizing items that expire soonest.' },
+        { key: 'q-last',     label: 'How do I make my produce last longer?',    prompt: 'How can I store the produce I have so it lasts as long as possible?' },
+        { key: 'q-list',     label: 'Build a shopping list for this week',      prompt: "Build me a shopping list for this week's meals that works with what I already have." },
+        { key: 'q-bad',      label: 'How do I tell if food has gone bad?',      prompt: 'How can I tell if the items I have have gone bad? Give quick signs for each type.' },
+        { key: 'q-balanced', label: 'Is my kitchen stocked for balanced meals?', prompt: "Look at my inventory — am I stocked for balanced meals? What's missing?" },
+        { key: 'q-leftover', label: 'How long do leftovers last?',              prompt: 'How long do cooked leftovers last in the fridge and freezer, and how should I store them?' },
+      ],
     },
   ];
 }
 
-const CUISINE_CHIPS = [
-  { key: 'italian',       icon: '🇮🇹', label: 'Italian',       prompt: "Give me a complete Italian recipe using my inventory — full ingredient list with exact quantities, numbered steps, and nutritional info." },
-  { key: 'asian',         icon: '🥢',  label: 'Asian',         prompt: "Give me a complete Asian-inspired recipe using my inventory — full ingredient list with exact quantities, numbered steps, and nutritional info." },
-  { key: 'mexican',       icon: '🌮',  label: 'Mexican',       prompt: "Give me a complete Mexican recipe using my inventory — full ingredient list with exact quantities, numbered steps, and nutritional info." },
-  { key: 'mediterranean', icon: '🥙',  label: 'Mediterranean', prompt: "Give me a complete Mediterranean recipe using my inventory — full ingredient list with exact quantities, numbered steps, and nutritional info." },
-  { key: 'indian',        icon: '🍛',  label: 'Indian',        prompt: "Give me a complete Indian-inspired recipe using my inventory — full ingredient list with exact quantities, numbered steps, and nutritional info." },
-  { key: 'comfort',       icon: '🥘',  label: 'Comfort food',  prompt: "Give me a complete comfort food recipe using my inventory — something hearty and satisfying, with full ingredient list, numbered steps, and nutritional info." },
-];
+const SUGGESTIONS_PER_GROUP = 4; // show this many per group until "show more" is tapped
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -175,6 +211,7 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 export default function GoodBotScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const { menuBtn, drawerEl } = useAppDrawer();
   const { isPremium, showPaywall } = useSubscription();
@@ -297,7 +334,7 @@ export default function GoodBotScreen() {
     name: string,
   ) => {
     const first = name ? name.split(' ')[0] : '';
-    const hi    = first ? `Hey ${first}! 👋` : 'Hey! 👋';
+    const hi    = first ? `Hey ${first}!` : 'Hey!';
 
     let content: string;
     let showSuggestions = false;
@@ -312,7 +349,7 @@ export default function GoodBotScreen() {
     } else {
       const todayItems = soon.filter(i => i.days <= 0);
       const urgency = todayItems.length > 0
-        ? `⚠️ ${todayItems.map(i => `**${i.baseName}**`).join(', ')} expire${todayItems.length === 1 ? 's' : ''} today! `
+        ? `${todayItems.map(i => `**${i.baseName}**`).join(', ')} expire${todayItems.length === 1 ? 's' : ''} today! `
         : '';
       content = `${hi} ${urgency}${soon.length} item${soon.length !== 1 ? 's' : ''} expiring soon — let's put them to good use before they go bad. What sounds good?`;
       welcomeChips = soon.slice(0, 6).map(i => ({ icon: i.icon || '🥘', name: i.baseName, days: i.days }));
@@ -331,7 +368,7 @@ export default function GoodBotScreen() {
     const all = allItemsRef.current;
 
     const fmt = (i: StoredItem & { days: number }) => {
-      const loc = i.category === 'freezer' ? '❄️' : i.category === 'pantry' ? '🥫' : '🥗';
+      const loc = i.category === 'freezer' ? '[freezer]' : i.category === 'pantry' ? '[pantry]' : '[fridge]';
       const exp = i.days < 0 ? 'EXPIRED' : i.days === 0 ? 'expires TODAY' : `${i.days}d left`;
       const qty = i.qtyNum ?? 1;
       const parts: string[] = [];
@@ -356,13 +393,13 @@ export default function GoodBotScreen() {
       items.length ? `${title}\n${items.map(fmt).join('\n')}` : '';
 
     const inventory = [
-      section('🚨 EXPIRED (use or discard now):', overdue),
-      section('⏰ EXPIRES TODAY:', today),
-      section('🔴 EXPIRING IN 1–3 DAYS:', urgent),
-      section('🟡 EXPIRING IN 4–7 DAYS:', soon),
-      section('✅ FRESH (8+ days):', fresh),
-      section('❄️ FROZEN:', frozen),
-      section('🥫 PANTRY:', pantry),
+      section('EXPIRED (use or discard now):', overdue),
+      section('EXPIRES TODAY:', today),
+      section('EXPIRING IN 1–3 DAYS:', urgent),
+      section('EXPIRING IN 4–7 DAYS:', soon),
+      section('FRESH (8+ days):', fresh),
+      section('FROZEN:', frozen),
+      section('PANTRY:', pantry),
     ].filter(Boolean).join('\n\n');
 
     const dietary = dietaryRef.current.length ? dietaryRef.current.join(', ') : 'none specified';
@@ -377,6 +414,9 @@ Dietary preferences: ${dietary}
 
 CURRENT INVENTORY (${all.length} items)
 ${inventory || 'No items in inventory yet.'}
+
+STYLE
+- Do not use emojis anywhere in your replies.
 
 INGREDIENT GUIDELINES
 - Always prioritise and build recipes around what the user already has, especially expiring items.
@@ -426,7 +466,7 @@ DIETARY PERSONALISATION (when the user requests a diet-specific recipe)
 
 SERVING SIZE CONFIRMATION (required for every recipe that uses inventory items with known macros)
 Before the RECIPE_MACROS block, add one line like this (only for items that have [per unit] macros listed above):
-"📊 **Macro sources:** [item]: [X cal] per [unit/serving] × [qty used in recipe] — let me know if your portion size differs and I'll recalculate."
+"**Macro sources:** [item]: [X cal] per [unit/serving] × [qty used in recipe] — let me know if your portion size differs and I'll recalculate."
 This confirms to the user exactly what serving size was assumed. If an item's unit is ambiguous (e.g. "banana" with no gram weight, or "sausage" where size varies), note it: "(assumed standard size — confirm if yours is larger/smaller)".
 
 RECIPE MACROS (full recipes only — not tips or conversational replies)
@@ -446,7 +486,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
 
   const callClaude = async (userMsg: string): Promise<string> => {
     if (!SUPABASE_URL || SUPABASE_URL === 'your_supabase_project_url') {
-      return "Good Bot isn't connected yet — add your Supabase URL and anon key to .env 🔑";
+      return "Good Bot isn't connected yet — add your Supabase URL and anon key to .env";
     }
     const res = await fetch(`${SUPABASE_URL}/functions/v1/goodbot`, {
       method: 'POST',
@@ -464,7 +504,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
     const data = await res.json();
     if (data.error) {
       if (data.error.type === 'authentication_error') {
-        return "Good Bot's API key needs to be updated — please contact support 🔑";
+        return "Good Bot's API key needs to be updated — please contact support";
       }
       throw new Error(data.error.message || 'API error');
     }
@@ -519,6 +559,8 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
 
     setLoading(false);
   };
+
+  const [openSuggestGroups, setOpenSuggestGroups] = useState<Set<string>>(new Set());
 
   const chooseSuggestion = (prompt: string) => {
     if (!isPremium) { showPaywall(); return; }
@@ -629,13 +671,11 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
     }
     setShoppingAddedIds(prev => new Set(prev).add(msg.id));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert('Added to shopping list 🛒', `${missing.length} missing ingredient${missing.length !== 1 ? 's' : ''} added to your list.`);
+    Alert.alert('Added to shopping list', `${missing.length} missing ingredient${missing.length !== 1 ? 's' : ''} added to your list.`);
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
-  const urgentNames = expiring.slice(0, 3).map(i => i.baseName).join(' · ');
-  const todayCount  = expiring.filter(i => i.days <= 0).length;
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -653,57 +693,33 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                 <Text style={styles.headerTitle}>
                   good<Text style={styles.headerTitleGreen}>bot</Text>
                 </Text>
-                <Text style={styles.headerSub}>always here to help 🌱</Text>
+                <Text style={styles.headerSub}>always here to help</Text>
               </View>
-              <View style={styles.avatarWrap}>
-                <View style={styles.avatarCircle}>
-                  <Text style={{ fontSize: 22 }}>🤖</Text>
-                </View>
-                <View style={styles.onlineDot} />
-              </View>
+              <View style={{ width: 36 }} />
             </View>
           </Animated.View>
 
           <Animated.View style={{ flex: 1, opacity: chatOpacity, transform: [{ translateY: chatSlide }] }}>
           <>
-              {/* ── Alert card ── */}
-              {expiring.length > 0 && (
-                <View style={styles.alertCard}>
-                  <View style={styles.alertLeft}>
-                    <Text style={{ fontSize: 18 }}>⏰</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.alertTitle}>
-                        {todayCount > 0
-                          ? `${todayCount} item${todayCount !== 1 ? 's' : ''} expiring today`
-                          : `${expiring.length} item${expiring.length !== 1 ? 's' : ''} expiring soon`}
-                      </Text>
-                      <Text style={styles.alertSub} numberOfLines={1}>
-                        {urgentNames}{expiring.length > 3 ? ` +${expiring.length - 3} more` : ''}
-                      </Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.rescueBtn}
-                    onPress={() => send(`What's the best thing I can make right now to use up ${urgentNames}?`)}
-                  >
-                    <Text style={styles.rescueBtnText}>rescue →</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
               {/* ── Chat ── */}
+              <View style={styles.chat}>
               <ScrollView
                 ref={scrollRef}
-                style={styles.chat}
+                style={{ flex: 1 }}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ padding: 16, paddingBottom: 8, gap: 16 }}
+                contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 30, paddingBottom: 30, gap: 16 }}
               >
                 {messages.map(msg => {
                   const { op, y } = getMsgAnim(msg.id);
                   return (
                   <Animated.View key={msg.id} style={{ opacity: op, transform: [{ translateY: y }] }} onLayout={e => msgLayouts.current.set(msg.id, e.nativeEvent.layout.y)}>
                     {msg.role === 'assistant' ? (
-                      <View style={styles.botMsgWrap}>
+                      <View style={styles.botRow}>
+                        <View style={styles.botAvatar}>
+                          <Text style={{ fontSize: 13 }}>🤖</Text>
+                          <View style={styles.botAvatarDot} />
+                        </View>
+                      <View style={[styles.botMsgWrap, { flex: 1 }]}>
                         <View style={styles.botBubble}>
                           <Markdown
                             text={msg.content}
@@ -747,12 +763,12 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                         {(msg.recipeMacros || looksLikeRecipe(msg.content)) && (
                           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                             <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.tealLight + '33', borderColor: colors.teal }]} onPress={() => setCookSheetMsg(msg)}>
-                              <Text style={styles.saveBtnText}>🍳  Cook This</Text>
+                              <Text style={styles.saveBtnText}>Cook This</Text>
                             </TouchableOpacity>
                             {savedMsgIds.has(msg.id)
-                              ? <Text style={styles.savedBadge}>✓ Saved to Recipes</Text>
+                              ? <Text style={styles.savedBadge}>Saved to Recipes</Text>
                               : <TouchableOpacity style={styles.saveBtn} onPress={() => { setSaveSheetMsg(msg); setCreatingCol(false); setNewColName(''); }}>
-                                  <Text style={styles.saveBtnText}>💾  Save to Recipes</Text>
+                                  <Text style={styles.saveBtnText}>Save to Recipes</Text>
                                 </TouchableOpacity>
                             }
                           </View>
@@ -762,36 +778,59 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                           const missing = parseMissingIngredients(msg.content);
                           if (!missing.length) return null;
                           return shoppingAddedIds.has(msg.id)
-                            ? <Text style={styles.savedBadge}>✓ Added {missing.length} item{missing.length !== 1 ? 's' : ''} to shopping list</Text>
+                            ? <Text style={styles.savedBadge}>Added {missing.length} item{missing.length !== 1 ? 's' : ''} to shopping list</Text>
                             : (
                               <TouchableOpacity
                                 style={[styles.saveBtn, { borderColor: '#F5A623', backgroundColor: '#FFF8E620' }]}
                                 onPress={() => addMissingToList(msg)}
                               >
-                                <Text style={styles.saveBtnText}>🛒  Add {missing.length} missing item{missing.length !== 1 ? 's' : ''} to list</Text>
+                                <Text style={styles.saveBtnText}>Add {missing.length} missing item{missing.length !== 1 ? 's' : ''} to list</Text>
                               </TouchableOpacity>
                             );
                         })()}
 
                         {msg.showSuggestions && !suggestionChosen && (
                           <View style={styles.suggestCard}>
-                            {/* Quick action chips */}
                             <Text style={styles.suggestLabel}>what sounds good?</Text>
-                            <ScrollView
-                              horizontal
-                              showsHorizontalScrollIndicator={false}
-                              contentContainerStyle={styles.suggestScrollContent}
-                            >
-                              {[...getQuickActions(!!(msg.welcomeChips?.length)), ...CUISINE_CHIPS].map(s => (
-                                <TouchableOpacity key={s.key} style={styles.suggestChip} onPress={() => chooseSuggestion(s.prompt)}>
-                                  <Text style={styles.suggestChipIcon}>{s.icon}</Text>
-                                  <Text style={styles.suggestChipLabel}>{s.label}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-                            <Text style={styles.orType}>or type your own question below ↓</Text>
+                            {getSuggestionGroups(!!(msg.welcomeChips?.length)).map(group => {
+                              const showAll = openSuggestGroups.has(group.key);
+                              const visible = showAll ? group.items : group.items.slice(0, SUGGESTIONS_PER_GROUP);
+                              const hidden = group.items.length - visible.length;
+                              return (
+                                <View key={group.key} style={styles.suggestGroup}>
+                                  <Text style={styles.suggestGroupTitle}>{group.title}</Text>
+                                  {visible.map(sug => (
+                                    <TouchableOpacity
+                                      key={sug.key}
+                                      style={styles.suggestRow}
+                                      onPress={() => chooseSuggestion(sug.prompt)}
+                                      activeOpacity={0.6}
+                                    >
+                                      <Text style={styles.suggestRowText}>{sug.label}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                  {(hidden > 0 || showAll) && (
+                                    <TouchableOpacity
+                                      style={styles.suggestMore}
+                                      onPress={() => {
+                                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                        setOpenSuggestGroups(prev => {
+                                          const n = new Set(prev);
+                                          n.has(group.key) ? n.delete(group.key) : n.add(group.key);
+                                          return n;
+                                        });
+                                      }}
+                                    >
+                                      <Text style={styles.suggestMoreText}>{showAll ? 'Show less' : `Show ${hidden} more`}</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              );
+                            })}
+                            <Text style={styles.orType}>or type your own question below</Text>
                           </View>
                         )}
+                      </View>
                       </View>
                     ) : (
                       <View style={styles.userMsgWrap}>
@@ -806,20 +845,30 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                 })}
 
                 {loading && (
-                  <View style={styles.botMsgWrap}>
-                    <View style={[styles.botBubble, { paddingVertical: 14 }]}>
-                      <ActivityIndicator size="small" color={colors.teal} />
+                  <View style={styles.botRow}>
+                    <View style={styles.botAvatar}>
+                          <Text style={{ fontSize: 13 }}>🤖</Text>
+                          <View style={styles.botAvatarDot} />
+                        </View>
+                    <View style={[styles.botMsgWrap, { flex: 1 }]}>
+                      <View style={[styles.botBubble, { paddingVertical: 14, alignSelf: 'flex-start' }]}>
+                        <ActivityIndicator size="small" color={colors.teal} />
+                      </View>
                     </View>
                   </View>
                 )}
               </ScrollView>
+              {/* Messages dissolve under the header and above the message box */}
+              <EdgeFade color={colors.bg} edge="top" height={36} />
+              <EdgeFade color={colors.bg} edge="bottom" height={36} />
+              </View>
 
               {/* ── Input ── */}
-              <View style={styles.inputRow}>
+              <View style={[styles.inputRow, { paddingBottom: tabSpace + 8 }]}>
                 <View style={{ flex: 1 }}>
                   <TextInput
                     style={styles.chatInput}
-                    placeholder={isPremium ? 'ask Good Bot anything...' : '🔒 Upgrade to chat with Good Bot'}
+                    placeholder={isPremium ? 'ask Good Bot anything...' : 'Upgrade to chat with Good Bot'}
                     placeholderTextColor={colors.textMuted}
                     value={input}
                     onChangeText={setInput}
@@ -871,14 +920,12 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
             <ScrollView style={{ maxHeight: 280 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
               {/* Uncategorized */}
               <TouchableOpacity style={styles.colOption} onPress={() => confirmSave('')}>
-                <Text style={{ fontSize: 22, marginRight: 12 }}>📌</Text>
                 <Text style={styles.colOptionText}>No Collection</Text>
               </TouchableOpacity>
 
               {/* Existing collections */}
               {collections.map(col => (
                 <TouchableOpacity key={col.id} style={styles.colOption} onPress={() => confirmSave(col.id)}>
-                  <Text style={{ fontSize: 22, marginRight: 12 }}>{col.emoji}</Text>
                   <Text style={styles.colOptionText}>{col.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -905,8 +952,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                 </View>
               ) : (
                 <TouchableOpacity style={[styles.colOption, { borderStyle: 'dashed' }]} onPress={() => setCreatingCol(true)}>
-                  <Text style={{ fontSize: 22, marginRight: 12 }}>＋</Text>
-                  <Text style={[styles.colOptionText, { color: colors.teal }]}>New Collection</Text>
+                  <Text style={[styles.colOptionText, { color: colors.teal }]}>+ New Collection</Text>
                 </TouchableOpacity>
               )}
             </ScrollView>
@@ -943,7 +989,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
           <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 36, paddingHorizontal: 20 }}>
             <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999, alignSelf: 'center', marginVertical: 12 }} />
             <Text style={{ fontSize: 17, fontWeight: '700', color: colors.brand, marginBottom: 4, fontFamily: 'Fraunces_600SemiBold' }}>
-              Save leftovers to fridge 🍽️
+              Save leftovers to fridge
             </Text>
             <Text style={{ fontSize: 12, color: colors.textSub, marginBottom: 16 }}>
               Track your portions — each serving appears in your fridge inventory and deducts as you eat.
@@ -986,7 +1032,6 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
             {/* Preview pill */}
             {saveDishName.trim() ? (
               <View style={{ backgroundColor: colors.surface, borderRadius: 12, borderWidth: 0.5, borderColor: colors.border, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Text style={{ fontSize: 22 }}>🍽️</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }} numberOfLines={1}>{saveDishName.trim()}</Text>
                   <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
@@ -1005,18 +1050,18 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                 const days = Math.max(1, parseInt(saveDishDays) || 3);
                 await saveDishToFridge(saveDishName.trim(), days, servings, saveDishMsg?.recipeMacros ?? undefined);
                 setSaveDishMsg(null);
-                Alert.alert('Saved to fridge! 🍽️', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
+                Alert.alert('Saved to fridge', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
               }}
             >
               <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 15 }}>
-                Save {parseInt(saveDishServings) > 1 ? `${parseInt(saveDishServings) || 2} servings` : 'to'} fridge 🧊
+                Save {parseInt(saveDishServings) > 1 ? `${parseInt(saveDishServings) || 2} servings` : 'to'} fridge
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={{ alignItems: 'center', paddingVertical: 10 }}
               onPress={() => {
                 setSaveDishMsg(null);
-                Alert.alert('🍳 Enjoy your meal!', 'Inventory updated from recipe.');
+                Alert.alert('Enjoy your meal!', 'Inventory updated from recipe.');
               }}
             >
               <Text style={{ color: colors.textMuted, fontSize: 13 }}>Skip — I'll eat it all now</Text>
@@ -1035,24 +1080,18 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   container:          { flex: 1, backgroundColor: c.bg },
 
   // Header
-  header:             { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: 0.5, borderBottomColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
-  avatarWrap:         { position: 'relative', width: 46, height: 46 },
-  avatarCircle:       { width: 46, height: 46, borderRadius: 23, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.5, shadowRadius: 12, elevation: 6 },
-  onlineDot:          { position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 6, backgroundColor: c.teal, borderWidth: 2, borderColor: c.onlineDotBorder },
+  header:             { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8, backgroundColor: c.bg },
   headerTitle:        { fontSize: 28, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   headerTitleGreen:   { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   headerSub:          { fontSize: 12, color: c.teal, marginTop: 2 },
   // Alert
-  alertCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? 'rgba(245,200,66,0.08)' : '#FFF8E6', borderBottomWidth: 0.5, borderBottomColor: isDark ? 'rgba(245,200,66,0.2)' : '#F5C842', paddingHorizontal: 16, paddingVertical: 10, gap: 10, marginTop: 8, shadowColor: '#F5C842', shadowOffset: { width: 0, height: 4 }, shadowOpacity: isDark ? 0.15 : 0.35, shadowRadius: 10, elevation: 4 },
-  alertLeft:          { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  alertTitle:         { fontSize: 12, fontWeight: '600', color: isDark ? '#F5D090' : '#8A5C00' },
-  alertSub:           { fontSize: 11, color: c.textSub, marginTop: 2 },
-  rescueBtn:          { backgroundColor: isDark ? 'rgba(245,200,66,0.12)' : 'rgba(245,200,66,0.25)', borderWidth: 1, borderColor: isDark ? 'rgba(245,200,66,0.3)' : '#F5C842', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
-  rescueBtnText:      { fontSize: 11, fontWeight: '600', color: isDark ? '#F5D090' : '#8A5C00' },
 
   // Chat
   chat:               { flex: 1 },
   botMsgWrap:         { gap: 6 },
+  botRow:             { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  botAvatar:          { width: 26, height: 26, borderRadius: 13, marginTop: 2, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center' },
+  botAvatarDot:       { position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: 5, backgroundColor: c.teal, borderWidth: 2, borderColor: c.onlineDotBorder },
   botBubble:          { backgroundColor: c.surface, borderRadius: 16, borderTopLeftRadius: 4, padding: 14, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 6 },
   botText:            { fontSize: 14, color: c.text, lineHeight: 21, fontFamily: 'Fraunces_400Regular' },
   botTextBold:        { fontWeight: '700', color: c.text, fontFamily: 'Fraunces_600SemiBold' },
@@ -1073,15 +1112,17 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   macroCardNum:       { fontSize: 18, fontWeight: '700' },
   macroCardLabel:     { fontSize: 8, color: c.textSub, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
 
-  orType:             { fontSize: 11, color: c.textMuted, textAlign: 'center', paddingBottom: 14, paddingTop: 2 },
+  orType:             { fontSize: 12, color: c.textMuted, textAlign: 'center', paddingBottom: 16, paddingTop: 8 },
 
   // Welcome + suggestion card
-  suggestCard:        { backgroundColor: c.surface, borderRadius: 16, borderTopLeftRadius: 4, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 6, overflow: 'hidden' },
+  suggestCard:        { marginLeft: -32, backgroundColor: c.surface, borderRadius: 16, borderTopLeftRadius: 4, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 6, overflow: 'hidden' },
   suggestLabel:       { fontSize: 10, fontWeight: '700', color: c.textSub, textTransform: 'uppercase', letterSpacing: 1.1, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 },
-  suggestScrollContent: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4 },
-  suggestChip:        { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.bg, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 9, borderWidth: 1, borderColor: c.border },
-  suggestChipIcon:    { fontSize: 15 },
-  suggestChipLabel:   { fontSize: 13, fontWeight: '600', color: c.text, fontFamily: 'Fraunces_600SemiBold' },
+  suggestGroup:       { paddingHorizontal: 14, paddingBottom: 6 },
+  suggestGroupTitle:  { fontSize: 16, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold', marginTop: 14, marginBottom: 4 },
+  suggestRow:         { paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: c.border },
+  suggestRowText:     { fontSize: 14, color: c.text, fontFamily: 'Fraunces_600SemiBold' },
+  suggestMore:        { alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg },
+  suggestMoreText:    { fontSize: 12, fontWeight: '600', color: c.textSub },
 
   // Expiring-item chips inside welcome card
   chipSection:        { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 },
@@ -1096,7 +1137,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   expiryChipDays:     { fontSize: 10, color: c.textMuted, fontWeight: '500' },
 
   // Input
-  inputRow:           { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12, backgroundColor: c.bg, borderTopWidth: 0, gap: 10 },
+  inputRow:           { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 36, backgroundColor: c.bg, borderTopWidth: 0, gap: 10 },
   chatInput:          { flex: 1, backgroundColor: c.chatInputBg, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: c.text, maxHeight: 100, fontFamily: 'Fraunces_400Regular', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3 },
   sendBtn:            { width: 40, height: 40, borderRadius: 20, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center' },
   sendBtnText:        { color: 'white', fontSize: 18, lineHeight: 22 },

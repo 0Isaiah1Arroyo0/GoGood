@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard, LayoutAnimation, UIManager } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard, LayoutAnimation, UIManager, PanResponder, AppState } from 'react-native';
+import { useTabBarSpace } from '@/components/tab-bar-space';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -15,9 +16,11 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAuth } from '../context/auth';
 import { requestNotificationPermission, rescheduleExpiryNotifications } from '../lib/notifications';
+import * as Notifications from 'expo-notifications';
 import { pushItems, pullItems, fromRow } from '../lib/sync';
 import { HOUSEHOLD_KEY, HOUSEHOLD_NAME_KEY, subscribeToHouseholdItems } from '../lib/household';
 import { useAppDrawer } from '../components/AppDrawer';
+import HeaderAddButton from '@/components/header-add-button';
 import { useSubscription } from '../context/subscription';
 import { seedSampleItems } from '../lib/seed-items';
 
@@ -465,27 +468,6 @@ function getIcon(name: string): string {
   return FOOD_ICONS.default;
 }
 
-// All food & drink emojis, for the manual icon picker in the add/edit sheet.
-const FOOD_EMOJIS: string[] = [
-  // Fruits
-  '🍏','🍎','🍐','🍊','🍋','🍋‍🟩','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝',
-  // Vegetables
-  '🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🫒','🧄','🧅','🥔','🍠','🫘','🥜','🫛','🍄','🍄‍🟫','🫚','🌰','🫜',
-  // Bread, grains & prepared
-  '🍞','🥐','🥖','🫓','🥨','🥯','🥞','🧇','🍳','🧈','🍚','🍘','🍙','🍛','🍜','🍝','🍠','🥣','🥗','🍲','🫕','🥘','🍿','🧆','🥫','🫙','🥟','🥡',
-  // Protein & mains
-  '🍖','🍗','🥩','🥓','🍔','🍟','🍕','🌭','🥪','🌮','🌯','🫔','🥙','🥚','🦴',
-  // Seafood
-  '🦪','🦐','🦞','🦀','🦑','🐙','🐟','🐠','🐡','🍤','🍣','🍱',
-  // Dairy & eggs
-  '🥛','🧀','🥚','🍳','🍦','🍨',
-  // Sweets & desserts
-  '🍧','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍩','🍪','🌰','🍯',
-  // Drinks
-  '🍼','🫗','☕','🫖','🍵','🧃','🥤','🧋','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🧊','💧',
-  // Misc / staples
-  '🧂','🥢','🍴','🥄','🔪','🧊','🌾','🍃',
-];
 
 function getFoodCategory(name: string): string {
   // Strip packing/liquid descriptors so "tuna in water" → "tuna", etc.
@@ -777,8 +759,13 @@ function getStorageWarning(name: string, category: Category): string | null {
 
 // Always re-derives when stored value is 'Other' or missing
 function resolveCategory(item: { foodCategory?: string; baseName?: string; name?: string }): string {
-  if (item.foodCategory && item.foodCategory !== 'Other') return item.foodCategory;
-  return getFoodCategory(item.baseName || item.name || '');
+  // Only trust a saved category if it's one the inventory knows how to display —
+  // scans/AI can return names like "Produce" that would otherwise make items invisible.
+  if (item.foodCategory && item.foodCategory !== 'Other' && CATEGORY_ORDER.includes(item.foodCategory)) {
+    return item.foodCategory;
+  }
+  const guessed = getFoodCategory(item.baseName || item.name || '');
+  return CATEGORY_ORDER.includes(guessed) ? guessed : 'Other';
 }
 
 function categoryFromOffTags(tags: string[]): string {
@@ -858,11 +845,22 @@ const SORT_LABELS: Record<SortBy, string> = {
   category:    'By Category',
 };
 
-const SORT_ICONS: Record<SortBy, string> = {
-  expiry: '⏰', expiryAsc: '🌿', alpha: '🔤', alphaDesc: '🔡',
-  protein: '💪', proteinAsc: '➖', cal: '🔥', calAsc: '🍃',
-  qty: '📦', qtyAsc: '📉', recent: '🕐', oldest: '📅', category: '🗂️',
-};
+
+// Sort options laid out as labeled rows of two in the Sort & Filter sheet.
+const SORT_ROWS: { title: string; options: [SortBy, string][] }[] = [
+  { title: 'Expiry',     options: [['expiry', 'Soonest'],  ['expiryAsc', 'Freshest']] },
+  { title: 'Name',       options: [['alpha', 'A → Z'],     ['alphaDesc', 'Z → A']] },
+  { title: 'Date added', options: [['recent', 'Newest'],   ['oldest', 'Oldest']] },
+  { title: 'Quantity',   options: [['qty', 'Most'],        ['qtyAsc', 'Least']] },
+  { title: 'Protein',    options: [['protein', 'Most'],    ['proteinAsc', 'Least']] },
+  { title: 'Calories',   options: [['cal', 'Most'],        ['calAsc', 'Least']] },
+];
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 const NUTRITION_FILTERS = [
   { key: 'highProtein', label: 'High Protein', desc: '≥ 15g', emoji: '💪' },
@@ -885,12 +883,34 @@ function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose
   const overlay        = useRef(new Animated.Value(0)).current;
   const sheet          = useRef(new Animated.Value(600)).current;
   const kbOffset       = useRef(new Animated.Value(0)).current;
+  const drag           = useRef(new Animated.Value(0)).current; // swipe-down offset
   const measuredSheetH = useRef(0);
   const [mounted, setMounted] = useState(false);
+
+  // Swipe down on the top handle area to close the sheet.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
+    onPanResponderMove: (_, g) => { drag.setValue(Math.max(0, g.dy)); },
+    onPanResponderRelease: (_, g) => {
+      if (g.dy > 100 || g.vy > 0.8) {
+        Keyboard.dismiss();
+        onCloseRef.current();
+      } else {
+        Animated.spring(drag, { toValue: 0, damping: 20, stiffness: 220, useNativeDriver: true }).start();
+      }
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(drag, { toValue: 0, damping: 20, stiffness: 220, useNativeDriver: true }).start();
+    },
+  })).current;
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
+      drag.setValue(0);
       overlay.setValue(0); sheet.setValue(600);
       Animated.parallel([
         Animated.timing(overlay, { toValue: 1, duration: 320, useNativeDriver: true }),
@@ -934,14 +954,53 @@ function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose
             backgroundColor: colors.bg,
             borderTopLeftRadius: 24, borderTopRightRadius: 24,
             padding: 20, maxHeight: SCREEN_H * 0.92,
-            transform: [{ translateY: Animated.add(sheet, kbOffset) }],
+            transform: [{ translateY: Animated.add(Animated.add(sheet, kbOffset), drag) }],
           }}
         >
-          <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999, alignSelf: 'center', marginBottom: 12 }} />
+          {/* Drag handle — the whole top strip is grabbable; swipe down to close */}
+          <View
+            {...panResponder.panHandlers}
+            style={{ marginTop: -20, marginHorizontal: -20, paddingTop: 20, paddingBottom: 12, alignItems: 'center' }}
+          >
+            <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999 }} />
+          </View>
           {children}
         </Animated.View>
       </View>
     </Modal>
+  );
+}
+
+// Soft fade drawn over the top edge of a scroll area, so content dissolves into the
+// background instead of being cut off. Uses React Native's native CSS gradient
+// (New Architecture), so it's one smooth surface — no banding.
+const TOP_FADE_H = 44;
+const INVENTORY_FADE_H = 36; // shorter fade for the main inventory list under the sort bar
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map(ch => ch + ch).join('') : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// Eased stops (smoothstep) so the fade looks natural instead of linear.
+const FADE_STOPS = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1];
+
+function TopFade({ color, height = TOP_FADE_H }: { color: string; height?: number }) {
+  const [r, g, b] = hexToRgb(color);
+  const stops = FADE_STOPS.map(t => {
+    const alpha = 1 - t * t * (3 - 2 * t);
+    return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)}) ${Math.round(t * 100)}%`;
+  }).join(', ');
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height,
+        experimental_backgroundImage: `linear-gradient(to bottom, ${stops})`,
+      }}
+    />
   );
 }
 
@@ -1382,6 +1441,14 @@ function makeSeedItems(): Item[] {
   ].map((item, i) => ({ ...item, id: i + 1 }));
 }
 
+// A sample item always has id N (1-based) and the sample name at position N.
+let seedNamesCache: string[] | null = null;
+function isSeedItem(item: { id: number; baseName?: string; name?: string }): boolean {
+  if (!seedNamesCache) seedNamesCache = makeSeedItems().map(i => i.baseName);
+  const name = item.baseName || item.name;
+  return item.id >= 1 && item.id <= seedNamesCache.length && seedNamesCache[item.id - 1] === name;
+}
+
 export default function FridgeScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme, listDensity } = useTheme();
@@ -1392,6 +1459,7 @@ export default function FridgeScreen() {
     : { red: '#FCEBEB', amber: '#FFF8E6', green: '#E1F5EE', blue: '#E6F1FB', black: '#2C2C2E' };
   const { signOut, user } = useAuth();
   const { menuBtn, drawerEl } = useAppDrawer();
+  const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const { isPremium, isAnnual, isHouseholdJoiner, showPaywall } = useSubscription();
   const styles = useMemo(() => createStyles(colors, listDensity === 'compact', isDark), [colors, listDensity, isDark]);
   const [items, setItems]               = useState<Item[]>([]);
@@ -1401,11 +1469,27 @@ export default function FridgeScreen() {
   const [showAdd, setShowAdd]           = useState(false);
   const [editItem, setEditItem]         = useState<Item | null>(null);
   const [form, setForm]                 = useState(emptyForm());
+  const [formErrors, setFormErrors]     = useState<Record<string, string>>({});
+  // Update a form field and clear its error as soon as the user types in it.
+  const setField = (key: string, value: string) => {
+    setForm(f => ({ ...f, [key]: value }));
+    if (formErrors[key]) setFormErrors(e => { const n = { ...e }; delete n[key]; return n; });
+  };
+  // Also clear errors when a scan (barcode/label/receipt) fills a field in.
+  useEffect(() => {
+    setFormErrors(e => {
+      const keys = Object.keys(e).filter(k => !((form as any)[k] ?? '').toString().trim());
+      return keys.length === Object.keys(e).length ? e : Object.fromEntries(keys.map(k => [k, e[k]]));
+    });
+  }, [form]);
   const [nextId, setNextId]             = useState(100);
   const [sortBy, setSortBy]             = useState<SortBy>('category');
   const [scanning, setScanning]         = useState(false);
   const [searchQuery, setSearchQuery]   = useState('');
   const [showSortFilter, setShowSortFilter]         = useState(false);
+  // Which Sort & Filter sections are open — all collapsed each time the sheet opens.
+  const [openSf, setOpenSf] = useState<Set<string>>(new Set());
+  useEffect(() => { if (showSortFilter) setOpenSf(new Set()); }, [showSortFilter]);
   const [showExpiringDetail, setShowExpiringDetail] = useState(false);
   const [filterFoodCats, setFilterFoodCats]         = useState<string[]>([]);
   const [filterExpiry, setFilterExpiry]             = useState<string[]>([]);
@@ -1428,7 +1512,6 @@ export default function FridgeScreen() {
 
   const listFade    = useRef(new Animated.Value(1)).current;
   const listSlide   = useRef(new Animated.Value(0)).current;
-  const addBtnScale = useRef(new Animated.Value(1)).current;
   const scanPulse   = useRef(new Animated.Value(1)).current;
   const beamAnim    = useRef(new Animated.Value(0)).current;
   const successAnim = useRef(new Animated.Value(0)).current;
@@ -1450,22 +1533,19 @@ export default function FridgeScreen() {
   const [householdName, setHouseholdName] = useState<string | null>(null);
   const loadedHouseholdIdRef = useRef<string | null | undefined>(undefined);
 
+  // True once the first load (local + Supabase merge) has finished. Until then we must
+  // NOT save or sync the item list — the initial empty list would wipe the user's
+  // saved items in Supabase.
+  const hydratedRef = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
+
   useEffect(() => {
+    // New sign-in (or first load): hide the list/empty message until this user's items load.
+    hydratedRef.current = false;
+    setHydrated(false);
     const loadItems = async () => {
       // 1. Load from AsyncStorage immediately (fast, offline-safe)
-      const raw = await AsyncStorage.getItem('gogood_items');
-      // Seed demo data once (version flag prevents re-seeding after user clears items)
-      const seeded = await AsyncStorage.getItem('gogood_seed_v3');
-      const val = !seeded
-        ? (() => {
-            const existing = raw ? JSON.parse(raw) : [];
-            const seed = makeSeedItems();
-            const merged = [...existing, ...seed];
-            AsyncStorage.setItem('gogood_items', JSON.stringify(merged));
-            AsyncStorage.setItem('gogood_seed_v3', '1');
-            return JSON.stringify(merged);
-          })()
-        : raw;
+      const val = await AsyncStorage.getItem('gogood_items');
       let localItems: any[] = [];
       if (val) {
         const parsed = JSON.parse(val);
@@ -1488,6 +1568,8 @@ export default function FridgeScreen() {
       }
 
       // 2. Pull from Supabase and merge (remote wins for newer items)
+      let remote: any[] | null = null;
+      let merged: any[] = localItems;
       if (user?.id) {
         const [hhId, hhName] = await Promise.all([
           AsyncStorage.getItem(HOUSEHOLD_KEY),
@@ -1496,20 +1578,39 @@ export default function FridgeScreen() {
         setHouseholdId(hhId);
         setHouseholdName(hhName);
         loadedHouseholdIdRef.current = hhId;
-        const remote = await pullItems(user.id, hhId ?? undefined);
+        remote = await pullItems(user.id, hhId ?? undefined);
         if (remote && remote.length > 0) {
-          const merged = [...localItems];
+          merged = [...localItems];
           for (const r of remote) {
             const idx = merged.findIndex(l => l.id === r.id);
             if (idx === -1) merged.push(r);
             else if (r.addedAt > merged[idx].addedAt) merged[idx] = r;
           }
-          setItems(merged);
-          const maxId = Math.max(...merged.map(i => i.id), 99);
-          setNextId(maxId + 1);
-          AsyncStorage.setItem('gogood_items', JSON.stringify(merged));
         }
       }
+
+      // 3. Sample items are only for brand-new accounts: nothing on this phone AND
+      //    Supabase confirmed there's nothing saved (null = fetch failed, so don't seed).
+      const seeded = await AsyncStorage.getItem('gogood_seed_v3');
+      if (!seeded && merged.length === 0 && (!user?.id || (remote !== null && remote.length === 0))) {
+        merged = makeSeedItems();
+      }
+      if (merged.length > 0 || localItems.length > 0) AsyncStorage.setItem('gogood_seed_v3', '1');
+
+      // 4. One-time cleanup: remove sample items that were wrongly re-added on top of a
+      //    returning user's real items (only when real items are present too).
+      const cleaned = await AsyncStorage.getItem('gogood_seed_cleanup_v1');
+      if (!cleaned) {
+        const hasReal = merged.some(i => !isSeedItem(i));
+        if (hasReal) merged = merged.filter(i => !isSeedItem(i));
+        AsyncStorage.setItem('gogood_seed_cleanup_v1', '1');
+      }
+
+      setItems([...merged]); // new array so the save/sync/sweep effects always run once
+      setNextId(Math.max(...merged.map((i: any) => i.id), 99) + 1);
+      AsyncStorage.setItem('gogood_items', JSON.stringify(merged));
+      hydratedRef.current = true;
+      setHydrated(true);
     };
     loadItems();
     // Restore which sections the user last had open. Default is all-collapsed —
@@ -1523,13 +1624,18 @@ export default function FridgeScreen() {
     });
   }, [user?.id]);
 
+  // Save + sync item changes. Skipped until the first load finishes, and the Supabase
+  // sync is debounced so rapid taps (+/−, sweeps) send one update instead of dozens.
   useEffect(() => {
+    if (!hydratedRef.current) return;
     AsyncStorage.setItem('gogood_items', JSON.stringify(items));
-    if (user?.id) {
+    if (!user?.id) return;
+    const t = setTimeout(() => {
       AsyncStorage.getItem(HOUSEHOLD_KEY).then(hhId => {
         pushItems(items, user.id!, hhId ?? undefined);
       });
-    }
+    }, 1000);
+    return () => clearTimeout(t);
   }, [items]);
 
   useEffect(() => {
@@ -1553,13 +1659,112 @@ export default function FridgeScreen() {
     AsyncStorage.getItem('gogood_stats').then(v => { if (v) setStats(JSON.parse(v)); });
   }, []);
 
+  // ── Auto "gone bad" ─────────────────────────────────────────────────────────
+  // Items past their expiry date are moved out of the inventory and into the
+  // food report's gone-bad history. Re-checks when the app comes back to the
+  // foreground and once a minute (so it flips over at midnight while open).
+  const [clockTick, setClockTick] = useState(0);
+  const [activeTick, setActiveTick] = useState(0); // bumps each time the app comes to the foreground
+  useEffect(() => {
+    const appSub = AppState.addEventListener('change', s => {
+      if (s === 'active') { setClockTick(t => t + 1); setActiveTick(t => t + 1); }
+    });
+    const timer = setInterval(() => setClockTick(t => t + 1), 60_000);
+    return () => { appSub.remove(); clearInterval(timer); };
+  }, []);
+
+  // ── "Here's what you missed" ────────────────────────────────────────────────
+  // On open, at most once a day, summarize what happened since the last summary —
+  // but only if there's something worth telling the user.
+  const [missedSummary, setMissedSummary] = useState<null | {
+    goneBad: string[]; usedCount: number; expiring: Item[];
+  }>(null);
+  useEffect(() => {
+    if (!hydrated) return;
+    // Small delay so the automatic gone-bad sweep has logged anything new first.
+    const t = setTimeout(async () => {
+      const now = Date.now();
+      const last = Number(await AsyncStorage.getItem('gogood_last_summary_at')) || 0;
+      if (!last) { await AsyncStorage.setItem('gogood_last_summary_at', String(now)); return; } // first run
+      if (now - last < 20 * 3600_000) return;
+
+      const [badRaw, goodRaw] = await Promise.all([
+        AsyncStorage.getItem('gogood_gone_bad'), AsyncStorage.getItem('gogood_gone_good'),
+      ]);
+      const since = (e: any) => new Date(e.date).getTime() > last;
+      const goneBadList: any[] = (badRaw ? JSON.parse(badRaw) : []).filter(since);
+      const usedCount = (goodRaw ? JSON.parse(goodRaw) : []).filter(since).length;
+      const expiring = items
+        .filter(i => { const d = getDaysLeft(i.expiryDate); return d >= 0 && d <= 3; })
+        .sort((a, b) => getDaysLeft(a.expiryDate) - getDaysLeft(b.expiryDate));
+
+      if (goneBadList.length === 0 && usedCount === 0 && expiring.length === 0) return;
+      await AsyncStorage.setItem('gogood_last_summary_at', String(now));
+      setMissedSummary({ goneBad: goneBadList.map(e => e.name), usedCount, expiring });
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [hydrated, activeTick]);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return; // wait until local + Supabase items are merged
+    // In a household, only sweep this user's own items — housemates' devices handle theirs.
+    const expired = items.filter(i =>
+      i.expiryDate && getDaysLeft(i.expiryDate) < 0 &&
+      (!(i as any).ownerId || (i as any).ownerId === user?.id),
+    );
+    if (expired.length === 0) return;
+    const ids = new Set(expired.map(i => i.id));
+    setItems(prev => prev.filter(i => !ids.has(i.id)));
+    if (expanded !== null && ids.has(expanded)) setExpanded(null);
+
+    AsyncStorage.getItem('gogood_gone_bad').then(val => {
+      const prev: any[] = val ? JSON.parse(val) : [];
+      // Skip anything already logged (e.g. re-added by a sync before its delete landed)
+      const fresh = expired.filter(i => !prev.some(p => p.id === i.id && p.expiryDate === i.expiryDate));
+      if (fresh.length === 0) return;
+      const now = new Date().toISOString();
+      const entries = fresh.map(i => ({
+        id: i.id, name: i.baseName, icon: i.icon, date: now, expiryDate: i.expiryDate,
+        category: resolveCategory(i), storageLocation: i.category, daysLeft: getDaysLeft(i.expiryDate), auto: true,
+      }));
+      AsyncStorage.setItem('gogood_gone_bad', JSON.stringify([...entries, ...prev]));
+      setStats(s => {
+        const u = { ...s, goneBad: s.goneBad + fresh.length };
+        AsyncStorage.setItem('gogood_stats', JSON.stringify(u));
+        return u;
+      });
+      showToast(`${fresh.length} item${fresh.length === 1 ? ' has' : 's have'} gone bad — moved to your food report`, true);
+    });
+  }, [items, clockTick]);
+
+  // Tapping a "gone bad" notification opens Expiring Soon so the user can act
+  // on what's next. Also handles the app being launched from the notification.
+  useEffect(() => {
+    const handle = async (resp: Notifications.NotificationResponse | null) => {
+      if (!resp || (resp.notification.request.content.data as any)?.type !== 'gone_bad') return;
+      const id = resp.notification.request.identifier;
+      if ((await AsyncStorage.getItem('gogood_last_notif_handled')) === id) return;
+      await AsyncStorage.setItem('gogood_last_notif_handled', id);
+      router.navigate('/(tabs)' as any);
+      setTimeout(() => setShowExpiringDetail(true), 400);
+    };
+    Notifications.getLastNotificationResponseAsync().then(handle).catch(() => {});
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
+    return () => sub.remove();
+  }, []);
+
   // Keep scheduled notifications in sync with item list
   useEffect(() => {
-    if (items.length === 0) return;
-    AsyncStorage.getItem('gogood_notifs').then(v => {
-      const enabled = v ? JSON.parse(v).expiry !== false : true;
-      rescheduleExpiryNotifications(items, enabled);
-    });
+    // Runs even when the list is empty so stale "gone bad" alerts get cancelled.
+    // Waits for the first load, and is debounced so a burst of changes reschedules once.
+    if (!hydratedRef.current) return;
+    const t = setTimeout(() => {
+      AsyncStorage.getItem('gogood_notifs').then(v => {
+        const enabled = v ? JSON.parse(v).expiry !== false : true;
+        rescheduleExpiryNotifications(items, enabled);
+      });
+    }, 2000);
+    return () => clearTimeout(t);
   }, [items]);
 
   useEffect(() => {
@@ -1653,15 +1858,27 @@ export default function FridgeScreen() {
       Animated.timing(listFade,  { toValue: 0, duration: 110, useNativeDriver: true }),
       Animated.timing(listSlide, { toValue: 10, duration: 110, useNativeDriver: true }),
     ]).start(() => {
+      // Fade back in only after the new tab has rendered (see effect below) — starting
+      // it here could reveal the previous tab's content (e.g. its empty message) for a frame.
+      pendingTabFadeIn.current = true;
       setActiveTab(tab);
       setExpanded(null);
+    });
+  };
+
+  const pendingTabFadeIn = useRef(false);
+  useEffect(() => {
+    if (!pendingTabFadeIn.current) return;
+    pendingTabFadeIn.current = false;
+    // Wait one frame so the new tab's list is on screen before it becomes visible.
+    requestAnimationFrame(() => {
       listSlide.setValue(-10);
       Animated.parallel([
         Animated.timing(listFade,  { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.spring(listSlide, { toValue: 0, damping: 22, stiffness: 280, useNativeDriver: true }),
       ]).start();
     });
-  };
+  }, [activeTab]);
 
   const getRemoveAnim = (id: number) => {
     if (!removeAnims.current.has(id)) {
@@ -1729,7 +1946,9 @@ export default function FridgeScreen() {
 
   const filtered        = getFiltered();
   const allInTab        = activeTab === 'all' ? [...items] : items.filter(i => i.category === activeTab);
-  const allExpiringSoon = items.filter(i => getDaysLeft(i.expiryDate) <= 3);
+  // Expiring soon = still good but within 3 days. Expired items are moved to the
+  // food report's "Gone bad" list automatically, so they never show here.
+  const allExpiringSoon = items.filter(i => { const d = getDaysLeft(i.expiryDate); return d >= 0 && d <= 3; });
   const expiringSoon    = allInTab.filter(i => getDaysLeft(i.expiryDate) <= 3).length;
 
   const availableFoodCats = [...new Set(allInTab.map(i => resolveCategory(i)))].sort();
@@ -1768,11 +1987,30 @@ export default function FridgeScreen() {
     if (bad) setBadVisible(true); else setBlastVisible(true);
   };
 
-  const changeQty = (id: number, delta: number) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, qtyNum: Math.max(0, i.qtyNum + delta) } : i).filter(i => i.qtyNum > 0));
+  const fmtQty = (n: number) => n % 1 === 0 ? String(n) : n.toFixed(1);
+
+  // Record a partial use in the food report ("used 1 lb") and count it as a rescue.
+  const logPortionUsed = (item: Item, amount: number) => {
+    const portionStr = item.unit ? `${fmtQty(amount)} ${item.unit}` : fmtQty(amount);
+    AsyncStorage.getItem('gogood_gone_good').then(val => {
+      const prev = val ? JSON.parse(val) : [];
+      const entry = {
+        id: item.id,
+        name: item.baseName,
+        icon: item.icon,
+        date: new Date().toISOString(),
+        expiryDate: item.expiryDate,
+        category: resolveCategory(item),
+        storageLocation: item.category,
+        daysLeft: item.days,
+        portion: portionStr,
+      };
+      AsyncStorage.setItem('gogood_gone_good', JSON.stringify([entry, ...prev]));
+    });
+    updateStats('goneGood');
+    return portionStr;
   };
 
-  const fmtQty = (n: number) => n % 1 === 0 ? String(n) : n.toFixed(1);
 
   const handleUseAmount = () => {
     if (!useModalItem) return;
@@ -1790,25 +2028,7 @@ export default function FridgeScreen() {
           : i
       ));
       // Log the partial use to gone-good history so it counts in the report
-      const portionStr = useModalItem.unit
-        ? `${fmtQty(amount)} ${useModalItem.unit}`
-        : fmtQty(amount);
-      AsyncStorage.getItem('gogood_gone_good').then(val => {
-        const prev = val ? JSON.parse(val) : [];
-        const entry = {
-          id: useModalItem.id,
-          name: useModalItem.baseName,
-          icon: useModalItem.icon,
-          date: new Date().toISOString(),
-          expiryDate: useModalItem.expiryDate,
-          category: resolveCategory(useModalItem),
-          storageLocation: useModalItem.category,
-          daysLeft: useModalItem.days,
-          portion: portionStr,
-        };
-        AsyncStorage.setItem('gogood_gone_good', JSON.stringify([entry, ...prev]));
-      });
-      updateStats('goneGood');
+      const portionStr = logPortionUsed(useModalItem, amount);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       showToast(`${portionStr} used 🌱`);
       setUseModalItem(null);
@@ -1836,6 +2056,12 @@ export default function FridgeScreen() {
     updateStats('goneGood');
   };
 
+  const removeItem = (id: number) => {
+    setItems(prev => prev.filter(i => i.id !== id));
+    if (expanded === id) setExpanded(null);
+  };
+
+  // Mark an item as gone bad: remove it and log it in the food report.
   const goneBad = (item: Item) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     animateRemove(item.id, -1, () => {
@@ -1843,18 +2069,29 @@ export default function FridgeScreen() {
       if (expanded === item.id) setExpanded(null);
       AsyncStorage.getItem('gogood_gone_bad').then(val => {
         const prev = val ? JSON.parse(val) : [];
-        const entry = { id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(), expiryDate: item.expiryDate, storageLocation: item.category, daysLeft: item.days };
+        const entry = {
+          id: item.id, name: item.baseName, icon: item.icon, date: new Date().toISOString(),
+          expiryDate: item.expiryDate, category: resolveCategory(item), storageLocation: item.category,
+          daysLeft: getDaysLeft(item.expiryDate),
+        };
         AsyncStorage.setItem('gogood_gone_bad', JSON.stringify([entry, ...prev]));
       });
     });
-    triggerBlast(true);
-    setTimeout(() => showToast(`${item.baseName} gone bad 🥀`, true), 700);
+    setTimeout(() => showToast(`${item.baseName} added to your food report as gone bad`, true), 500);
     updateStats('goneBad');
   };
 
-  const removeItem = (id: number) => {
-    setItems(prev => prev.filter(i => i.id !== id));
-    if (expanded === id) setExpanded(null);
+  // Ask why an item is being removed before doing it.
+  const confirmRemove = (item: Item) => {
+    Alert.alert(
+      `Remove ${item.baseName}?`,
+      "Why are you removing it? This can't be undone.",
+      [
+        { text: 'It went bad', style: 'destructive', onPress: () => goneBad(item) },
+        { text: 'I no longer have it', onPress: () => removeItem(item.id) },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
   };
 
   const FREE_ITEM_LIMIT = 10;
@@ -1866,12 +2103,14 @@ export default function FridgeScreen() {
     }
     const defaultCat: Category = activeTab === 'all' ? 'fridge' : activeTab;
     setForm({ ...emptyForm(), category: defaultCat });
+    setFormErrors({});
     setEditItem(null);
     loadHistory();
     setShowAdd(true);
   };
 
   const openEdit = (item: Item) => {
+    setFormErrors({});
     setForm({
       name: item.baseName, qty: String(item.qtyNum), unit: item.unit,
       expiryDate: item.expiryDate, category: item.category,
@@ -2196,7 +2435,23 @@ export default function FridgeScreen() {
   const saveItem = () => {
     const safeName   = (form.name || '').trim();
     const safeExpiry = (form.expiryDate || '').trim();
-    if (!safeName || !safeExpiry) { showToast('Name and expiry date required', true); return; }
+
+    // Every required field gets its own message so the user can see exactly what's missing.
+    const REQUIRED_MSG = 'Make sure to type something here so GoGood can accurately help reduce your food waste.';
+    const errors: Record<string, string> = {};
+    if (!safeName) errors.name = REQUIRED_MSG;
+    if (!(form.qty || '').trim()) errors.qty = REQUIRED_MSG;
+    else if (!(parseFloat(form.qty) > 0)) errors.qty = 'Enter a number above 0 so GoGood knows how much you have.';
+    if (!(form.unit || '').trim()) errors.unit = REQUIRED_MSG;
+    if (!safeExpiry) errors.expiryDate = REQUIRED_MSG;
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(safeExpiry) || isNaN(new Date(safeExpiry).getTime())) {
+      errors.expiryDate = 'Enter a date like 2026-05-15 so GoGood can tell when this will go bad.';
+    }
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
     const days  = getDaysLeft(safeExpiry);
     const badge = getBadge(days, form.category);
     const existing = items.filter(i =>
@@ -2264,13 +2519,19 @@ export default function FridgeScreen() {
     }
   };
 
-  const toggleSection = (key: string) => {
+  // Smooth expand/collapse for category sections: rows fade in/out while the
+  // list below glides into place.
+  const animateSections = () => {
     LayoutAnimation.configureNext({
-      duration: 60,
-      create:  { type: 'linear', property: 'opacity' },
-      update:  { type: 'linear' },
-      delete:  { type: 'linear', property: 'opacity' },
+      duration: 280,
+      create:  { type: 'easeInEaseOut', property: 'opacity' },
+      update:  { type: 'spring', springDamping: 0.85 },
+      delete:  { type: 'easeInEaseOut', property: 'opacity', duration: 180 },
     });
+  };
+
+  const toggleSection = (key: string) => {
+    animateSections();
     setOpenedSections(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
@@ -2353,6 +2614,65 @@ export default function FridgeScreen() {
     return <>{renderCategorySection(filtered)}</>;
   };
 
+  // ── Sort & Filter building blocks ────────────────────────────────────────────
+  // Collapsible section: header shows the title, the current selection, and a chevron.
+  const sfSection = (key: string, title: string, summary: string, body: React.ReactNode) => {
+    const open = openSf.has(key);
+    return (
+      <View key={key} style={[styles.sfSection, { borderColor: colors.border }]}>
+        <TouchableOpacity
+          style={styles.sfSectionHeader}
+          activeOpacity={0.7}
+          onPress={() => {
+            animateSections();
+            setOpenSf(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+          }}
+        >
+          <Text style={[styles.sfSectionTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.sfSectionSummary, { color: colors.teal }]} numberOfLines={1}>{summary}</Text>
+          <Text style={{ fontSize: 14, color: colors.textMuted, marginLeft: 6 }}>{open ? '⌄' : '›'}</Text>
+        </TouchableOpacity>
+        {open && <View style={{ paddingBottom: 12 }}>{body}</View>}
+      </View>
+    );
+  };
+
+  // One row of equal-width option buttons, with an optional label on the left.
+  // `columns` pads short rows so buttons stay the same width as rows above them.
+  const sfOptionRow = (
+    label: string | null,
+    options: { key: string; label: string; sub?: string; selected: boolean; onPress: () => void; selectedBg?: string; selectedText?: string }[],
+    columns = options.length,
+    rowKey?: string,
+  ) => (
+    <View key={rowKey ?? label ?? options.map(o => o.key).join('-')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      {label && <Text style={[styles.sfRowLabel, { color: colors.textSub }]}>{label}</Text>}
+      {options.map(o => (
+        <TouchableOpacity
+          key={o.key}
+          style={[
+            styles.sfChip,
+            { borderColor: colors.border, backgroundColor: colors.surface },
+            o.selected && { backgroundColor: o.selectedBg ?? colors.btnPrimary, borderColor: o.selectedBg ?? colors.btnPrimary },
+          ]}
+          onPress={o.onPress}
+          activeOpacity={0.75}
+        >
+          <Text
+            style={[styles.sfChipText, { color: colors.textSub }, o.selected && { color: o.selectedText ?? 'white' }]}
+            numberOfLines={1}
+          >
+            {o.label}
+          </Text>
+          {o.sub ? (
+            <Text style={{ fontSize: 10, marginTop: 1, color: o.selected ? (o.selectedText ?? 'rgba(255,255,255,0.75)') : colors.textMuted }}>{o.sub}</Text>
+          ) : null}
+        </TouchableOpacity>
+      ))}
+      {Array.from({ length: Math.max(0, columns - options.length) }, (_, i) => <View key={`pad-${i}`} style={{ flex: 1 }} />)}
+    </View>
+  );
+
   const renderItemCard = (item: Item) => {
     const liveDays    = getDaysLeft(item.expiryDate);
     const liveBadge   = getBadge(liveDays, item.category);
@@ -2375,15 +2695,12 @@ export default function FridgeScreen() {
         }}
         activeOpacity={0.7}
       >
-        <View style={[styles.iconWrap, { backgroundColor: iconBg[liveBadge] }]}>
-          <Text style={styles.itemIcon}>{item.icon}</Text>
-        </View>
         <View style={styles.itemInfo}>
           <Text style={[styles.itemName, liveBadge === 'black' && { color: '#6B6860' }]}>
             {item.baseName}
             {item.batch > 1 && <Text style={styles.batchInline}> · batch {item.batch}</Text>}
           </Text>
-          <Text style={styles.itemQty}>{item.unit ? `${item.qtyNum} ${item.unit}` : item.qty || item.qtyNum}</Text>
+          <Text style={styles.itemQty}>{item.unit ? `${fmtQty(item.qtyNum)} ${item.unit}` : item.qty || fmtQty(item.qtyNum)}</Text>
         </View>
         <View style={styles.itemRight}>
           <View style={[styles.badge, { backgroundColor: iconBg[liveBadge] }]}>
@@ -2395,41 +2712,25 @@ export default function FridgeScreen() {
 
       {expanded === item.id && (
         <View style={styles.itemDetail}>
-          <View style={styles.qtyRow}>
-            <Text style={styles.qtyLabel}>quantity</Text>
-            <View style={styles.qtyControls}>
-              <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(item.id, -1)}>
-                <Text style={styles.qtyBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.qtyNum}>{fmtQty(item.qtyNum)} {item.unit}</Text>
-              <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(item.id, 1)}>
-                <Text style={styles.qtyBtnText}>+</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
           {item.servingSize ? (
-            <Text style={{ fontSize: 10, color: colors.textMuted, textAlign: 'center' }}>serving: {item.servingSize}</Text>
+            <Text style={{ fontSize: 10, color: colors.textMuted }}>serving: {item.servingSize}</Text>
           ) : null}
-          <TouchableOpacity
-            onPress={() => { setUseModalItem(item); setUseAmount(''); }}
-            style={{ paddingTop: 4, paddingBottom: 2, alignSelf: 'center' }}
-            activeOpacity={0.6}
-          >
-            <Text style={{ fontSize: 11, color: colors.teal, fontWeight: '600' }}>use a portion →</Text>
-          </TouchableOpacity>
-          <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.actionBtn, styles.actionUsed]} onPress={() => goneGood(item)}>
-              <Text style={styles.actionUsedText}>✓ gone good</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, styles.actionBad]} onPress={() => goneBad(item)}>
-              <Text style={styles.actionBadText}>🥀 gone bad</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, styles.actionEdit]} onPress={() => openEdit(item)}>
-              <Text style={styles.actionEditText}>✏️</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, styles.actionDelete]} onPress={() => removeItem(item.id)}>
-              <Text style={styles.actionDeleteText}>🗑</Text>
-            </TouchableOpacity>
+          {/* One row of three matching buttons */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+            {[
+              { label: 'Use a portion', onPress: () => { setUseModalItem(item); setUseAmount(''); } },
+              { label: 'Edit',          onPress: () => openEdit(item) },
+              { label: 'Remove',        onPress: () => confirmRemove(item) },
+            ].map(b => (
+              <TouchableOpacity
+                key={b.label}
+                style={[styles.sfChip, { minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={b.onPress}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.sfChipText, { color: colors.textSub }]} numberOfLines={1}>{b.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
       )}
@@ -2472,16 +2773,7 @@ export default function FridgeScreen() {
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           {menuBtn}
           <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
-          <Animated.View style={{ transform: [{ scale: addBtnScale }] }}>
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={openAdd}
-              onPressIn={() => Animated.spring(addBtnScale, { toValue: 0.85, useNativeDriver: true }).start()}
-              onPressOut={() => Animated.spring(addBtnScale, { toValue: 1, damping: 10, stiffness: 260, useNativeDriver: true }).start()}
-            >
-              <Text style={styles.addBtnText}>+</Text>
-            </TouchableOpacity>
-          </Animated.View>
+          <HeaderAddButton onPress={openAdd} accessibilityLabel="Add item" />
         </View>
         </Animated.View>
 
@@ -2491,7 +2783,7 @@ export default function FridgeScreen() {
             <Text style={styles.searchIcon}>🔍</Text>
             <TextInput
               style={styles.searchInput}
-              placeholder="search your fridge..."
+              placeholder={activeTab === 'all' ? 'search all your food...' : `search your ${activeTab}...`}
               placeholderTextColor={colors.placeholder}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -2509,7 +2801,7 @@ export default function FridgeScreen() {
           {(['all', 'fridge', 'freezer', 'pantry'] as const).map(tab => (
             <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]} onPress={() => switchTab(tab)}>
               <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                {tab === 'all' ? '🗂️' : tab === 'fridge' ? '❄️' : tab === 'freezer' ? '🧊' : '🥫'} {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
             </TouchableOpacity>
           ))}
@@ -2530,7 +2822,9 @@ export default function FridgeScreen() {
                 const allCollapsed = sectionKeys.length > 0 && sectionKeys.every(k => !openedSections.has(k));
                 return (
                   <TouchableOpacity
+                    style={styles.collapseAllBtn}
                     onPress={() => {
+                      animateSections();
                       if (allCollapsed) {
                         setOpenedSections(prev => { const n = new Set(prev); sectionKeys.forEach(k => n.add(k)); return n; });
                       } else {
@@ -2538,8 +2832,8 @@ export default function FridgeScreen() {
                       }
                     }}
                   >
-                    <Text style={[styles.collapseAllText, { color: colors.teal }]}>
-                      {allCollapsed ? '⊕ expand all' : '⊖ collapse all'}
+                    <Text style={[styles.collapseAllText, { color: colors.textSub }]}>
+                      {allCollapsed ? 'expand all' : 'collapse all'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -2559,19 +2853,21 @@ export default function FridgeScreen() {
                   </Text>
                 </View>
               )}
-              <Text style={styles.sortFilterBtnText}>sort & filter ↕</Text>
+              <Text style={styles.sortFilterBtnText}>sort & filter</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* ── Items ── */}
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 4, paddingBottom: 12 }}>
+        <View style={{ flex: 1 }}>
+        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: INVENTORY_FADE_H - 16, paddingBottom: tabSpace + 12 }}>
           <Animated.View style={{ opacity: listFade, transform: [{ translateY: listSlide }] }}>
-            {filtered.length === 0 ? (
+            {/* Don't show "empty" until items have finished loading */}
+            {filtered.length === 0 && !hydrated ? null : filtered.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyIcon}>{activeTab === 'all' ? '🗂️' : activeTab === 'freezer' ? '🧊' : activeTab === 'pantry' ? '🥫' : '❄️'}</Text>
-                <Text style={styles.emptyTitle}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'No matches' : 'Nothing here yet'}</Text>
-                <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'Try adjusting your search or filters' : 'Tap + to add your first item'}</Text>
+                <Text style={styles.emptyTitle}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'No matches' : activeTab === 'all' ? 'Your kitchen is empty' : `Your ${activeTab} is empty`}</Text>
+                <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'Try adjusting your search or filters' : activeTab === 'all' ? 'Tap + to add your first item' : `Nothing in your ${activeTab} yet. Tap + to add something.`}</Text>
                 {!searchQuery && filterFoodCats.length === 0 && filterExpiry.length === 0 && filterNutrition.length === 0 && items.length === 0 && (
                   <TouchableOpacity
                     onPress={async () => {
@@ -2591,25 +2887,8 @@ export default function FridgeScreen() {
             ) : renderItems()}
           </Animated.View>
         </ScrollView>
-
-        {/* ── Good Bot CTA ── */}
-        <View style={styles.goodBotWrapper}>
-          <TouchableOpacity style={styles.goodBotBtn} onPress={() => {
-            if (items.length === 0) { openAdd(); return; }
-            if (!isPremium) { showPaywall(); return; }
-            router.navigate('/(tabs)/goodbot' as any);
-          }}>
-            <View style={styles.goodBotLeft}>
-              <View style={styles.goodBotAvatarWrap}>
-                <Text style={{ fontSize: 15 }}>🤖</Text>
-              </View>
-              <View>
-                <Text style={styles.goodBotText}>Ask Good Bot what to make</Text>
-                <Text style={styles.goodBotSub}>{goodBotMsg()}</Text>
-              </View>
-            </View>
-            <Text style={styles.goodBotArrow}>→</Text>
-          </TouchableOpacity>
+        {/* Items fade out as they scroll up under the sort bar */}
+        <TopFade color={colors.bg} height={INVENTORY_FADE_H} />
         </View>
 
         </Animated.View>
@@ -2667,7 +2946,7 @@ export default function FridgeScreen() {
             {editItem ? (
               <>
                 <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode, { marginBottom: 6 }]} onPress={openBarcodeScanner}>
-                  <Text style={styles.scanBtnText}>🏷️ Scan barcode to update nutrition</Text>
+                  <Text style={styles.scanBtnText}>Scan barcode to update nutrition</Text>
                 </TouchableOpacity>
                 <Text style={styles.scanHint}>Fills in nutrition, name, and quantity from the product barcode</Text>
               </>
@@ -2675,19 +2954,19 @@ export default function FridgeScreen() {
               <>
                 <View style={styles.scanRow}>
                   <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode]} onPress={openBarcodeScanner}>
-                    <Text style={styles.scanBtnText}>🏷️ Barcode</Text>
+                    <Text style={styles.scanBtnText}>Barcode</Text>
                   </TouchableOpacity>
                   <Animated.View style={{ flex: 1, opacity: scanPulse }}>
                     <TouchableOpacity style={[styles.scanBtn, { width: '100%' }]} onPress={scanLabel} disabled={scanning}>
-                      <Text style={styles.scanBtnText}>{scanning ? '⏳...' : '📷 Label'}</Text>
+                      <Text style={styles.scanBtnText}>{scanning ? 'Scanning…' : 'Label'}</Text>
                     </TouchableOpacity>
                   </Animated.View>
                   <TouchableOpacity
-                    style={[styles.scanBtn, { backgroundColor: colors.brand }]}
+                    style={styles.scanBtn}
                     onPress={scanReceipt}
                     disabled={scanningReceipt}
                   >
-                    <Text style={styles.scanBtnText}>🧾 Receipt</Text>
+                    <Text style={styles.scanBtnText}>Receipt</Text>
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.scanHint}>Barcode · Label · Receipt — all fill the form automatically</Text>
@@ -2703,57 +2982,30 @@ export default function FridgeScreen() {
                       onPress={() => prefillFromHistory(h)}
                       style={{ alignItems: 'center', padding: 8, borderRadius: 12, borderWidth: 0.5, borderColor: colors.border, backgroundColor: colors.surface, minWidth: 60, maxWidth: 84 }}
                     >
-                      <Text style={{ fontSize: 26 }}>{h.icon}</Text>
-                      <Text numberOfLines={2} style={{ fontSize: 9, color: colors.text, fontWeight: '600', marginTop: 3, textAlign: 'center' }}>{h.name}</Text>
+                      <Text numberOfLines={2} style={{ fontSize: 11, color: colors.text, fontWeight: '600', textAlign: 'center' }}>{h.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
               </>
             )}
             <Text style={styles.fieldLabel}>Item name</Text>
-            <TextInput style={styles.input} placeholder="e.g. Ribeye steak" placeholderTextColor={colors.placeholder} value={form.name} onChangeText={v => setForm(f => ({...f, name: v}))} returnKeyType="next" />
-            {(() => {
-              const selectedIcon = form.icon || getIcon(form.name || '');
-              return (
-                <>
-                  <Text style={styles.fieldLabel}>Icon</Text>
-                  <View style={styles.iconPickerRow}>
-                    <View style={styles.iconPickerPreview}>
-                      <Text style={{ fontSize: 26 }}>{selectedIcon}</Text>
-                    </View>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      keyboardShouldPersistTaps="handled"
-                      style={styles.iconPickerScroll}
-                      contentContainerStyle={{ gap: 6, paddingRight: 8 }}
-                    >
-                      {FOOD_EMOJIS.map((emoji, i) => (
-                        <TouchableOpacity
-                          key={`${emoji}-${i}`}
-                          style={[styles.iconChip, selectedIcon === emoji && styles.iconChipActive]}
-                          onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, icon: emoji })); }}
-                        >
-                          <Text style={{ fontSize: 22 }}>{emoji}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                </>
-              );
-            })()}
+            <TextInput style={[styles.input, formErrors.name && styles.inputError]} placeholder="e.g. Ribeye steak" placeholderTextColor={colors.placeholder} value={form.name} onChangeText={v => setField('name', v)} returnKeyType="next" />
+            {formErrors.name ? <Text style={styles.fieldError}>{formErrors.name}</Text> : null}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.fieldLabel}>Quantity</Text>
-                <TextInput style={styles.input} placeholder="1" placeholderTextColor={colors.placeholder} value={form.qty} onChangeText={v => setForm(f => ({...f, qty: v}))} keyboardType="numeric" returnKeyType="next" />
+                <TextInput style={[styles.input, formErrors.qty && styles.inputError]} placeholder="1" placeholderTextColor={colors.placeholder} value={form.qty} onChangeText={v => setField('qty', v)} keyboardType="numeric" returnKeyType="next" />
+                {formErrors.qty ? <Text style={styles.fieldError}>{formErrors.qty}</Text> : null}
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.fieldLabel}>Unit</Text>
-                <TextInput style={styles.input} placeholder="lbs" placeholderTextColor={colors.placeholder} value={form.unit} onChangeText={v => setForm(f => ({...f, unit: v}))} returnKeyType="next" />
+                <TextInput style={[styles.input, formErrors.unit && styles.inputError]} placeholder="lbs" placeholderTextColor={colors.placeholder} value={form.unit} onChangeText={v => setField('unit', v)} returnKeyType="next" />
+                {formErrors.unit ? <Text style={styles.fieldError}>{formErrors.unit}</Text> : null}
               </View>
             </View>
             <Text style={styles.fieldLabel}>Expiry date (YYYY-MM-DD)</Text>
-            <TextInput style={styles.input} placeholder="2026-05-15" placeholderTextColor={colors.placeholder} value={form.expiryDate} onChangeText={v => setForm(f => ({...f, expiryDate: v}))} keyboardType="numbers-and-punctuation" returnKeyType="next" />
+            <TextInput style={[styles.input, formErrors.expiryDate && styles.inputError]} placeholder="2026-05-15" placeholderTextColor={colors.placeholder} value={form.expiryDate} onChangeText={v => setField('expiryDate', v)} keyboardType="numbers-and-punctuation" returnKeyType="next" />
+            {formErrors.expiryDate ? <Text style={styles.fieldError}>{formErrors.expiryDate}</Text> : null}
             <Text style={styles.fieldLabel}>Serving size</Text>
             <TextInput style={styles.input} placeholder="e.g. 1/4 cup, 1 tbsp, 100g" placeholderTextColor={colors.placeholder} value={form.servingSize} onChangeText={v => setForm(f => ({...f, servingSize: v}))} returnKeyType="next" />
             <Text style={styles.fieldLabel}>Macros (per serving)</Text>
@@ -2776,7 +3028,7 @@ export default function FridgeScreen() {
               {(['fridge', 'freezer', 'pantry'] as const).map(cat => (
                 <TouchableOpacity key={cat} style={[styles.categoryBtn, form.category === cat && styles.categoryBtnActive]} onPress={() => setForm(f => ({...f, category: cat}))}>
                   <Text style={[styles.categoryBtnText, form.category === cat && styles.categoryBtnTextActive]}>
-                    {cat === 'fridge' ? '❄️' : cat === 'freezer' ? '🧊' : '🥫'} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -2796,13 +3048,13 @@ export default function FridgeScreen() {
                   onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, foodCategory: cat })); }}
                 >
                   <Text style={[styles.categoryBtnText, form.foodCategory === cat && styles.categoryBtnTextActive]}>
-                    {CATEGORY_ICONS[cat]} {cat}
+                    {cat}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
             <TouchableOpacity style={styles.addConfirmBtn} onPress={saveItem}>
-              <Text style={styles.addConfirmText}>{editItem ? 'Save changes →' : `Add to ${form.category} →`}</Text>
+              <Text style={styles.addConfirmText}>{editItem ? 'Save changes' : `Add to ${form.category}`}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
               <Text style={styles.cancelText}>cancel</Text>
@@ -2814,138 +3066,94 @@ export default function FridgeScreen() {
         {/* ── Sort & Filter ── */}
         <BottomSheet visible={showSortFilter} onClose={() => setShowSortFilter(false)}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={styles.modalTitle}>Sort & Filter</Text>
-              <TouchableOpacity onPress={() => setShowSortFilter(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-            </View>
-            <Text style={styles.fieldLabel}>Sort by</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-              {(Object.entries(SORT_LABELS) as [SortBy, string][]).map(([key, label]) => (
-                <TouchableOpacity
-                  key={key}
-                  style={[
-                    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                    sortBy === key && { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary }
-                  ]}
-                  onPress={() => { Haptics.selectionAsync(); setSortBy(key); }}
-                >
-                  <Text style={{ fontSize: 15 }}>{SORT_ICONS[key]}</Text>
-                  <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '500' }, sortBy === key && { color: 'white' }]}>{label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {/* ── Collapse / Expand All ── */}
-            <Text style={[styles.fieldLabel, { marginTop: 20 }]}>Groups</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+            <Text style={[styles.modalTitle, { textAlign: 'center', marginBottom: 14 }]}>Sort & Filter</Text>
+
+            {/* Category groups: one row of two actions */}
+            <View style={styles.sfGroupRow}>
+              <Text style={[styles.sfRowLabel, { color: colors.textSub }]}>Categories</Text>
               {[
-                { label: 'Collapse All', icon: '⊖', onPress: collapseAll },
-                { label: 'Expand All',   icon: '⊕', onPress: expandAll   },
+                { label: 'Collapse all', onPress: collapseAll },
+                { label: 'Expand all',   onPress: expandAll   },
               ].map(btn => (
                 <TouchableOpacity
                   key={btn.label}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 11, borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: noSections ? colors.border : colors.teal,
-                    backgroundColor: noSections ? colors.surface : 'rgba(29,158,117,0.08)',
-                    opacity: noSections ? 0.4 : 1,
-                  }}
+                  style={[styles.sfChip, { borderColor: colors.border, backgroundColor: colors.surface, opacity: noSections ? 0.4 : 1 }]}
                   disabled={noSections}
-                  onPress={() => { btn.onPress(); setShowSortFilter(false); }}
+                  onPress={() => { animateSections(); btn.onPress(); setShowSortFilter(false); }}
                   activeOpacity={0.75}
                 >
-                  <Text style={{ fontSize: 15, color: noSections ? colors.textMuted : colors.teal }}>{btn.icon}</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: noSections ? colors.textMuted : colors.teal }}>
-                    {btn.label}
-                  </Text>
+                  <Text style={[styles.sfChipText, { color: colors.teal }]}>{btn.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
             {noSections && (
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
-                Switch to "By Category" sort with no filters to use groups.
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: -4, marginBottom: 8 }}>
+                Sort by category with no filters to use these.
               </Text>
             )}
 
-            <Text style={[styles.fieldLabel, { marginTop: 20 }]}>Filter by expiry</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-              {[
-                { key: 'expired', emoji: '💀', label: 'Expired',    bg: iconBg.black, text: badgeSoft.black.text },
-                { key: 'today',   emoji: '🔴', label: 'Today',      bg: iconBg.red,   text: badgeSoft.red.text   },
-                { key: 'soon',    emoji: '🟡', label: '1–3 days',   bg: iconBg.amber, text: badgeSoft.amber.text },
-                { key: 'fresh',   emoji: '🟢', label: 'Fresh (4+)', bg: iconBg.green, text: badgeSoft.green.text },
-              ].map(e => (
-                <TouchableOpacity
-                  key={e.key}
-                  style={[
-                    { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                    filterExpiry.includes(e.key) && { backgroundColor: e.bg, borderColor: 'transparent' }
-                  ]}
-                  onPress={() => setFilterExpiry(prev =>
-                    prev.includes(e.key) ? prev.filter(x => x !== e.key) : [...prev, e.key]
-                  )}
-                >
-                  <Text style={{ fontSize: 9 }}>{e.emoji}</Text>
-                  <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '500' }, filterExpiry.includes(e.key) && { color: e.text }]}>{e.label}</Text>
-                </TouchableOpacity>
-              ))}
+            {/* Sort — rows of two */}
+            {sfSection('sort', 'Sort by', SORT_LABELS[sortBy], (
+              <View style={{ gap: 8 }}>
+                {sfOptionRow(null, [['category', 'By category']].map(([k, l]) => ({
+                  key: k, label: l, selected: sortBy === k,
+                  onPress: () => { Haptics.selectionAsync(); setSortBy(k as SortBy); },
+                })))}
+                {SORT_ROWS.map(row => sfOptionRow(row.title, row.options.map(([k, l]) => ({
+                  key: k, label: l, selected: sortBy === k,
+                  onPress: () => { Haptics.selectionAsync(); setSortBy(k); },
+                }))))}
+              </View>
+            ))}
+
+            {/* Filter by expiry — one row of three */}
+            {sfSection('expiry', 'Expiring', filterExpiry.filter(k => k !== 'expired').length ? `${filterExpiry.filter(k => k !== 'expired').length} selected` : 'Any', (
+              sfOptionRow(null, [
+                { key: 'today', label: 'Today',     bg: iconBg.red,   text: badgeSoft.red.text   },
+                { key: 'soon',  label: '1–3 days',  bg: iconBg.amber, text: badgeSoft.amber.text },
+                { key: 'fresh', label: 'Fresh 4+',  bg: iconBg.green, text: badgeSoft.green.text },
+              ].map(e => ({
+                key: e.key, label: e.label, selected: filterExpiry.includes(e.key),
+                selectedBg: e.bg, selectedText: e.text,
+                onPress: () => setFilterExpiry(prev => prev.includes(e.key) ? prev.filter(x => x !== e.key) : [...prev, e.key]),
+              })))
+            ))}
+
+            {/* Filter by food category — grid, three per row */}
+            {availableFoodCats.length > 0 && sfSection('foodcat', 'Food category', filterFoodCats.length ? `${filterFoodCats.length} selected` : 'All', (
+              <View style={{ gap: 8 }}>
+                {chunk(availableFoodCats, 3).map((rowCats, ri) => sfOptionRow(null, rowCats.map(cat => ({
+                  key: cat, label: cat, selected: filterFoodCats.includes(cat),
+                  onPress: () => setFilterFoodCats(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]),
+                })), 3, `fc-${ri}`))}
+              </View>
+            ))}
+
+            {/* Filter by nutrition — 2 × 2 grid */}
+            {sfSection('nutrition', 'Nutrition', filterNutrition.length ? `${filterNutrition.length} selected` : 'Any', (
+              <View style={{ gap: 8 }}>
+                {chunk([...NUTRITION_FILTERS], 2).map((rowF, ri) => sfOptionRow(null, rowF.map(f => ({
+                  key: f.key, label: f.label, sub: f.desc, selected: filterNutrition.includes(f.key),
+                  onPress: () => setFilterNutrition(prev => prev.includes(f.key) ? prev.filter(x => x !== f.key) : [...prev, f.key]),
+                })), 2, `nf-${ri}`))}
+              </View>
+            ))}
+
+            {/* Reset + Apply side by side */}
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+              <TouchableOpacity
+                style={[styles.sfFooterBtn, { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => { Haptics.selectionAsync(); setFilterExpiry([]); setFilterFoodCats([]); setFilterNutrition([]); setSortBy('category'); }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSub }}>Reset</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sfFooterBtn, { flex: 2, backgroundColor: colors.btnPrimary }]}
+                onPress={() => setShowSortFilter(false)}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '700', color: 'white' }}>Apply</Text>
+              </TouchableOpacity>
             </View>
-
-            {availableFoodCats.length > 0 && (
-              <>
-                <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Filter by food category</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                  {availableFoodCats.map(cat => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[
-                        { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                        filterFoodCats.includes(cat) && { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary }
-                      ]}
-                      onPress={() => setFilterFoodCats(prev =>
-                        prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
-                      )}
-                    >
-                      <Text style={{ fontSize: 13 }}>{CATEGORY_ICONS[cat] || '🥘'}</Text>
-                      <Text style={[{ fontSize: 11, color: colors.textSub, fontWeight: '500' }, filterFoodCats.includes(cat) && { color: 'white' }]}>{cat}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            )}
-
-            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Filter by nutrition</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-              {NUTRITION_FILTERS.map(f => (
-                <TouchableOpacity
-                  key={f.key}
-                  style={[
-                    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-                    filterNutrition.includes(f.key) && { backgroundColor: colors.btnPrimary, borderColor: colors.btnPrimary }
-                  ]}
-                  onPress={() => setFilterNutrition(prev =>
-                    prev.includes(f.key) ? prev.filter(x => x !== f.key) : [...prev, f.key]
-                  )}
-                >
-                  <Text style={{ fontSize: 15 }}>{f.emoji}</Text>
-                  <View>
-                    <Text style={[{ fontSize: 12, color: colors.textSub, fontWeight: '600' }, filterNutrition.includes(f.key) && { color: 'white' }]}>{f.label}</Text>
-                    <Text style={[{ fontSize: 10, color: colors.textMuted }, filterNutrition.includes(f.key) && { color: 'rgba(255,255,255,0.7)' }]}>{f.desc}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity
-              style={{ alignSelf: 'flex-start', marginTop: 14 }}
-              onPress={() => { setFilterExpiry([]); setFilterFoodCats([]); setFilterNutrition([]); }}
-            >
-              <Text style={{ fontSize: 12, color: colors.textMuted }}>clear all filters</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 24 }]} onPress={() => setShowSortFilter(false)}>
-              <Text style={styles.addConfirmText}>Apply →</Text>
-            </TouchableOpacity>
             <View style={{ height: 20 }} />
           </ScrollView>
         </BottomSheet>
@@ -3007,13 +3215,99 @@ export default function FridgeScreen() {
           </View>
         )}
 
+        {/* ── Here's what you missed ── */}
+        <BottomSheet visible={!!missedSummary} onClose={() => setMissedSummary(null)}>
+          {missedSummary && (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={[styles.modalTitle, { textAlign: 'center', fontSize: 18 }]}>Here's what you missed</Text>
+              <Text style={{ fontSize: 12, color: colors.textSub, textAlign: 'center', marginTop: 4, marginBottom: 16 }}>
+                Since your last check-in
+              </Text>
+
+              {/* Three quick stats */}
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+                {[
+                  { n: missedSummary.goneBad.length,  label: 'went bad',      color: colors.goneBadText },
+                  { n: missedSummary.usedCount,       label: 'used up',       color: colors.goneGoodText },
+                  { n: missedSummary.expiring.length, label: 'expiring soon', color: badgeSoft.amber.text },
+                ].map(s => (
+                  <View key={s.label} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 0.5, borderColor: colors.border }}>
+                    <Text style={{ fontSize: 22, fontWeight: '700', color: s.color }}>{s.n}</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{s.label}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {missedSummary.goneBad.length > 0 && (
+                <View style={{ marginBottom: 14 }}>
+                  <Text style={[styles.fieldLabel, { marginTop: 0 }]}>Moved to your food report</Text>
+                  <Text style={{ fontSize: 13, color: colors.text, lineHeight: 19 }}>
+                    {missedSummary.goneBad.slice(0, 6).join(', ')}
+                    {missedSummary.goneBad.length > 6 ? ` and ${missedSummary.goneBad.length - 6} more` : ''}
+                  </Text>
+                </View>
+              )}
+
+              {missedSummary.expiring.length > 0 && (
+                <View style={{ marginBottom: 6 }}>
+                  <Text style={[styles.fieldLabel, { marginTop: 0 }]}>Use these next</Text>
+                  {missedSummary.expiring.slice(0, 5).map(item => {
+                    const d = getDaysLeft(item.expiryDate);
+                    const b = getBadge(d, item.category);
+                    return (
+                      <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
+                        <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{item.baseName}</Text>
+                        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: badgeSoft[b].bg }}>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: badgeSoft[b].text }}>{getExpiryText(d)}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+                <TouchableOpacity
+                  style={[styles.sfFooterBtn, { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={() => setMissedSummary(null)}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSub }}>Got it</Text>
+                </TouchableOpacity>
+                {missedSummary.expiring.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.sfFooterBtn, { flex: 2, backgroundColor: colors.btnPrimary }]}
+                    onPress={() => { setMissedSummary(null); setTimeout(() => setShowExpiringDetail(true), 400); }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: 'white' }}>See expiring soon</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <View style={{ height: 16 }} />
+            </ScrollView>
+          )}
+        </BottomSheet>
+
         {/* ── Expiring Detail ── */}
         <BottomSheet visible={showExpiringDetail} onClose={() => setShowExpiringDetail(false)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={styles.modalTitle}>Expiring Soon</Text>
-            <TouchableOpacity onPress={() => setShowExpiringDetail(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-          </View>
-          {!isPremium && (
+          <Text style={[styles.modalTitle, { textAlign: 'center', marginBottom: 12 }]}>Expiring Soon</Text>
+          {isPremium ? (
+            /* ── Good Bot CTA (moved here from the bottom of the inventory screen) ── */
+            <TouchableOpacity
+              style={[styles.goodBotBtn, { marginBottom: 0, shadowOpacity: 0, elevation: 0 }]}
+              onPress={() => { setShowExpiringDetail(false); router.navigate('/(tabs)/goodbot' as any); }}
+            >
+              <View style={styles.goodBotLeft}>
+                <View style={styles.goodBotAvatarWrap}>
+                  <Text style={{ fontSize: 15 }}>🤖</Text>
+                </View>
+                <View>
+                  <Text style={styles.goodBotText}>Ask Good Bot what to make</Text>
+                  <Text style={styles.goodBotSub}>{goodBotMsg()}</Text>
+                </View>
+              </View>
+              <Text style={styles.goodBotArrow}>→</Text>
+            </TouchableOpacity>
+          ) : (
             <TouchableOpacity
               onPress={() => { setShowExpiringDetail(false); showPaywall(); }}
               style={{ backgroundColor: colors.btnPrimary, borderRadius: 12, padding: 12, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}
@@ -3026,7 +3320,8 @@ export default function FridgeScreen() {
               <Text style={{ fontSize: 16, color: '#5DCAA5' }}>›</Text>
             </TouchableOpacity>
           )}
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <View style={{ flexShrink: 1 }}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: TOP_FADE_H - 14 }}>
             {allExpiringSoon.length === 0 ? (
               <Text style={{ color: colors.textSub, textAlign: 'center', paddingVertical: 24 }}>Nothing expiring soon!</Text>
             ) : (
@@ -3037,9 +3332,6 @@ export default function FridgeScreen() {
                 return (
                 <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: iconBg[liveBadge], alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 22 }}>{item.icon}</Text>
-                    </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{item.baseName}</Text>
                       <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
@@ -3050,20 +3342,15 @@ export default function FridgeScreen() {
                       <Text style={{ fontSize: 12, fontWeight: '600', color: badgeSoft[liveBadge].text }}>{liveExpires}</Text>
                     </View>
                   </View>
-                  {liveDays < 0 && (
-                    <TouchableOpacity
-                      style={{ marginTop: 8, alignSelf: 'flex-end', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(232,117,106,0.12)', borderWidth: 1, borderColor: 'rgba(232,117,106,0.3)' }}
-                      onPress={() => { setShowExpiringDetail(false); goneBad(item); }}
-                    >
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#C0392B' }}>Gone bad 🥀</Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
                 );
               })
             )}
             <View style={{ height: 20 }} />
           </ScrollView>
+          {/* Items fade out as they slide up under the Good Bot bubble */}
+          <TopFade color={colors.bg} />
+          </View>
         </BottomSheet>
 
         {/* ── Save confirmation ── */}
@@ -3071,7 +3358,6 @@ export default function FridgeScreen() {
           <Text style={styles.modalTitle}>Does everything look right?</Text>
           {lastSaved && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginVertical: 14, padding: 14, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 0.5, borderColor: colors.border }}>
-              <Text style={{ fontSize: 42 }}>{lastSaved.icon}</Text>
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{lastSaved.baseName}</Text>
                 <Text style={{ fontSize: 12, color: colors.textSub }}>
@@ -3120,10 +3406,8 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   logoGreen:             { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   menuBtn:               { width: 32, height: 32, justifyContent: 'center', gap: 5 },
   menuLine:              { width: 20, height: 1.5, backgroundColor: c.text, borderRadius: 999 },
-  expiringBadge:         { backgroundColor: '#FFEAEA', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
-  expiringBadgeText:     { fontSize: 11, fontWeight: '600', color: '#C0392B' },
-  addBtn:                { width: 34, height: 34, borderRadius: 17, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.5, shadowRadius: 14, elevation: 8 },
-  addBtnText:            { color: 'white', fontSize: 22, lineHeight: 22, fontWeight: '300', includeFontPadding: false, marginTop: 1 },
+  expiringBadge:         { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+  expiringBadgeText:     { fontSize: 12, fontWeight: '600', color: c.textSub },
   scanIconBtn:           { width: 34, height: 34, borderRadius: 17, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.4, shadowRadius: 12, elevation: 6 },
 
   // Search
@@ -3143,14 +3427,15 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   // Sort bar
   sortBar:               { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },
   collapseAllBtn:        { alignSelf: 'flex-end', paddingHorizontal: 16, paddingBottom: 6, paddingTop: 0 },
-  collapseAllText:       { fontSize: 11, fontWeight: '600' },
+  collapseAllText:       { fontSize: 12, fontWeight: '600' },
+  collapseAllBtn:        { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
   sortBarLeft:           { flex: 1, alignItems: 'flex-start' },
   sortBarRight:          { flex: 1, alignItems: 'flex-end' },
   sortBarLabel:          { fontSize: 10, fontWeight: '700', color: c.text, letterSpacing: 0.5 },
-  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12 },
-  sortFilterBtnText:     { fontSize: 12, color: c.teal, fontWeight: '600' },
-  filterBadge:           { width: 16, height: 16, borderRadius: 8, backgroundColor: '#E8756A', alignItems: 'center', justifyContent: 'center' },
-  filterBadgeText:       { fontSize: 9, color: 'white', fontWeight: '700' },
+  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+  sortFilterBtnText:     { fontSize: 12, color: c.textSub, fontWeight: '600' },
+  filterBadge:           { width: 16, height: 16, borderRadius: 8, backgroundColor: c.text, alignItems: 'center', justifyContent: 'center' },
+  filterBadgeText:       { fontSize: 9, color: c.bg, fontWeight: '700' },
 
   // Items
   scroll:                { flex: 1, paddingHorizontal: 16 },
@@ -3196,8 +3481,6 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   itemCard:              { backgroundColor: c.surface, borderRadius: compact ? 12 : 16, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.16, shadowRadius: 14, elevation: 6 },
   itemCardExpanded:      { borderColor: c.borderStrong },
   itemMain:              { flexDirection: 'row', alignItems: 'center', padding: compact ? 10 : 14, gap: compact ? 8 : 12 },
-  iconWrap:              { width: compact ? 38 : 52, height: compact ? 38 : 52, borderRadius: compact ? 19 : 26, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  itemIcon:              { fontSize: compact ? 19 : 26 },
   itemInfo:              { flex: 1 },
   itemName:              { fontSize: compact ? 13 : 16, fontWeight: '600', color: c.text },
   batchInline:           { fontSize: compact ? 9 : 11, fontWeight: '400', color: c.textMuted },
@@ -3209,25 +3492,8 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
 
   // Item expanded
   itemDetail:            { paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 0.5, borderTopColor: c.border, gap: 10, paddingTop: 12 },
-  qtyRow:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  qtyLabel:              { fontSize: 10, color: c.textSub },
-  qtyControls:           { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  qtyBtn:                { width: 26, height: 26, borderRadius: 13, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center' },
-  qtyBtnText:            { color: 'white', fontSize: 18, lineHeight: 20 },
-  qtyNum:                { fontSize: 13, fontWeight: '500', color: c.text, minWidth: 40, textAlign: 'center' },
-  actionRow:             { flexDirection: 'row', gap: 6 },
-  actionBtn:             { flex: 1, padding: 8, borderRadius: 12, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
-  actionUsed:            { backgroundColor: c.goneGoodBg, borderColor: isDark ? 'rgba(93,202,165,0.3)' : '#9FE1CB' },
-  actionBad:             { backgroundColor: isDark ? 'rgba(245,180,60,0.15)' : '#FAEEDA', borderColor: isDark ? 'rgba(245,180,60,0.3)' : '#FAC775' },
-  actionEdit:            { flex: 0, paddingHorizontal: 12, backgroundColor: isDark ? 'rgba(100,160,255,0.15)' : '#E6F1FB', borderColor: isDark ? 'rgba(100,160,255,0.3)' : '#B3D4F5' },
-  actionDelete:          { flex: 0, paddingHorizontal: 12, backgroundColor: c.goneBadBg, borderColor: isDark ? 'rgba(240,120,100,0.3)' : '#F7C1C1' },
-  actionUsedText:        { fontSize: 10, color: c.goneGoodText, fontWeight: '500' },
-  actionBadText:         { fontSize: 10, color: isDark ? '#F5D090' : '#854F0B', fontWeight: '500' },
-  actionEditText:        { fontSize: 12, color: isDark ? '#90C0FF' : '#185FA5' },
-  actionDeleteText:      { fontSize: 12, color: c.goneBadText },
 
   // Good Bot CTA
-  goodBotWrapper:        { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8, backgroundColor: c.bg },
   goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.btnPrimary, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 30, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isDark ? 0.12 : 0.18, shadowRadius: 6, elevation: 4 },
   goodBotLeft:           { flexDirection: 'row', alignItems: 'center', gap: 10 },
   goodBotAvatarWrap:     { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
@@ -3259,24 +3525,30 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   modalTitle:            { fontSize: 16, fontWeight: '600', color: c.brand },
   fieldLabel:            { fontSize: 10, fontWeight: '600', color: c.textSub, textTransform: 'uppercase', letterSpacing: 1, marginTop: 10, marginBottom: 4 },
   input:                 { backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder, borderRadius: 10, padding: 11, fontSize: 14, color: c.inputText },
+  inputError:            { borderColor: '#E0574A' },
+  fieldError:            { fontSize: 11, color: '#E0574A', marginTop: 4, lineHeight: 15 },
+  sfGroupRow:            { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  sfRowLabel:            { width: 78, fontSize: 12, fontWeight: '600' },
+  sfChip:                { flex: 1, minHeight: 40, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  sfChipText:            { fontSize: 12, fontWeight: '600' },
+  sfSection:             { borderTopWidth: 0.5 },
+  sfSectionHeader:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  sfSectionTitle:        { fontSize: 14, fontWeight: '600' },
+  sfSectionSummary:      { flex: 1, textAlign: 'right', fontSize: 12, fontWeight: '500', marginLeft: 12 },
+  sfFooterBtn:           { flex: 1, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   scanRow:               { flexDirection: 'row', gap: 8, marginBottom: 6, marginTop: 10 },
   scanBtn:               { flex: 1, backgroundColor: c.btnPrimary, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  scanBtnBarcode:        { backgroundColor: c.teal },
+  scanBtnBarcode:        { backgroundColor: c.btnPrimary },
   scanBtnText:           { color: 'white', fontSize: 11, fontWeight: '600' },
   scanHint:              { fontSize: 10, color: c.textMuted, textAlign: 'center', marginBottom: 14 },
   barcodeFrame:          { width: 280, height: 160, borderRadius: 12, position: 'relative' },
   barcodeCorner:         { position: 'absolute', width: 24, height: 24, borderColor: '#5DCAA5', borderRadius: 2 },
-  iconPickerRow:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  iconPickerPreview:     { width: 46, height: 46, borderRadius: 12, backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  iconPickerScroll:      { flex: 1 },
-  iconChip:              { width: 40, height: 40, borderRadius: 10, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
-  iconChipActive:        { borderColor: c.btnPrimary, borderWidth: 2, backgroundColor: c.inputBg },
   categoryRow:           { flexDirection: 'row', gap: 6, marginTop: 4 },
   categoryBtn:           { flex: 1, padding: 8, borderRadius: 100, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
   categoryBtnActive:     { backgroundColor: c.btnPrimary, borderColor: c.btnPrimary },
   categoryBtnText:       { fontSize: 10, fontWeight: '500', color: c.textSub },
   categoryBtnTextActive: { color: 'white' },
-  addConfirmBtn:         { backgroundColor: c.teal, padding: 14, borderRadius: 14, alignItems: 'center', marginTop: 12 },
+  addConfirmBtn:         { backgroundColor: c.btnPrimary, padding: 14, borderRadius: 14, alignItems: 'center', marginTop: 12 },
   addConfirmText:        { color: 'white', fontSize: 14, fontWeight: '600' },
   cancelBtn:             { alignItems: 'center', padding: 10 },
   cancelText:            { fontSize: 13, color: c.textMuted },

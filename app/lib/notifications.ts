@@ -52,6 +52,44 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 }
 
+// The local day an item counts as "gone bad" — the first midnight at least a full
+// day after its expiry date. Matches getDaysLeft() < 0 in the inventory screen.
+function goneBadDay(expiryDate: string): Date {
+  const threshold = new Date(new Date(expiryDate).getTime() + 86400000);
+  const day = new Date(threshold);
+  day.setHours(0, 0, 0, 0);
+  if (day < threshold) day.setDate(day.getDate() + 1);
+  return day;
+}
+
+// One notification per day that items go bad: "1 item has gone bad" / "3 items have gone bad".
+async function scheduleGoneBadNotifications(items: NotifItem[]) {
+  const counts = new Map<string, { date: Date; count: number }>();
+  for (const item of items) {
+    if (!item.expiryDate) continue;
+    const day = goneBadDay(item.expiryDate);
+    if (isNaN(day.getTime())) continue;
+    const key = day.toDateString();
+    const entry = counts.get(key) ?? { date: day, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+  }
+
+  for (const { date, count } of counts.values()) {
+    const notifyAt = new Date(date);
+    notifyAt.setHours(9, 0, 0, 0);
+    if (notifyAt <= new Date()) continue;
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `${count} item${count === 1 ? ' has' : 's have'} gone bad`,
+        body: 'Tap now to prevent future items from going bad.',
+        data: { type: 'gone_bad', count },
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: notifyAt },
+    });
+  }
+}
+
 export interface NotifItem {
   id: number;
   name: string;
@@ -60,18 +98,27 @@ export interface NotifItem {
 }
 
 // Cancel all scheduled expiry notifications and reschedule from current item list.
-export async function rescheduleExpiryNotifications(
-  items: NotifItem[],
-  enabled: boolean
-) {
+// Calls are queued so overlapping reschedules can't create duplicate notifications.
+let rescheduleQueue: Promise<void> = Promise.resolve();
+export function rescheduleExpiryNotifications(items: NotifItem[], enabled: boolean): Promise<void> {
+  rescheduleQueue = rescheduleQueue
+    .then(() => doReschedule(items, enabled))
+    .catch(e => { if (__DEV__) console.warn('[notifications] reschedule failed', e); });
+  return rescheduleQueue;
+}
+
+async function doReschedule(items: NotifItem[], enabled: boolean) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const n of scheduled) {
-    if ((n.content.data as any)?.type === 'expiry') {
+    const type = (n.content.data as any)?.type;
+    if (type === 'expiry' || type === 'gone_bad') {
       await Notifications.cancelScheduledNotificationAsync(n.identifier);
     }
   }
 
   if (!enabled || items.length === 0) return;
+
+  await scheduleGoneBadNotifications(items);
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
 

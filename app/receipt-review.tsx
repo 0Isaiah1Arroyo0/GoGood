@@ -39,15 +39,6 @@ const FOOD_CATEGORY_ICONS: Record<string, string> = {
   'Supplements': '💊', 'Herbs & Spices': '🌿', 'Leftovers': '🍽️', 'Other': '🥘',
 };
 
-const FOOD_EMOJIS = [
-  '🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝',
-  '🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🫒','🧄','🧅','🥔','🍠','🫘','🥜','🍄',
-  '🍞','🥐','🥖','🥨','🥯','🧇','🍳','🧈','🍚','🥣','🥗','🍲','🥘','🍿','🥫','🫙',
-  '🍖','🍗','🥩','🥓','🥚','🦴','🦐','🐟','🐠','🦑','🍤','🍣',
-  '🥛','🧀','🍦','🧁','🍰','🍭','🍬','🍫','🍩','🍪','🍯',
-  '🧃','🥤','☕','🫖','🍵','💧','🧊',
-  '🧂','🌾',
-];
 
 const EXPIRY_CHIPS = [
   { label: '3d',  days: 3   },
@@ -228,7 +219,6 @@ export default function ReceiptReviewScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           {savedItems.map((item, i) => (
             <View key={i} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-              <Text style={{ fontSize: 32 }}>{item.icon}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>{item.baseName || item.name}</Text>
                 <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 3 }}>
@@ -448,7 +438,6 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
   const [qtyText,       setQtyText]       = useState(String(draft.qtyNum));
   const [editingDate,   setEditingDate]   = useState(false);
   const [dateText,      setDateText]      = useState(draft.expiryDate ?? '');
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const [proteinText,  setProteinText]  = useState(String(draft.protein || 0));
   const [carbsText,    setCarbsText]    = useState(String(draft.carbs   || 0));
@@ -498,9 +487,6 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
     }]}>
       {/* Top row: icon + name + scan button + remove */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <TouchableOpacity onPress={() => setShowEmojiPicker(v => !v)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-          <Text style={{ fontSize: 26 }}>{draft.icon}</Text>
-        </TouchableOpacity>
         <View style={{ flex: 1 }}>
           {editingName ? (
             <TextInput
@@ -530,21 +516,6 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
           <Text style={{ fontSize: 18, color: colors.textMuted }}>✕</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Emoji picker grid */}
-      {showEmojiPicker && (
-        <View style={{ marginBottom: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
-          {FOOD_EMOJIS.map((emoji, i) => (
-            <TouchableOpacity
-              key={`${emoji}-${i}`}
-              onPress={() => { onUpdate({ icon: emoji }); setShowEmojiPicker(false); }}
-              style={{ width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: draft.icon === emoji ? '#085041' : colors.surfaceAlt, borderWidth: 1, borderColor: draft.icon === emoji ? '#085041' : colors.border }}
-            >
-              <Text style={{ fontSize: 22 }}>{emoji}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
 
       {/* Location selector */}
       <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>

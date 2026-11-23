@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.gogood.app",
+      "bundleIdentifier": "com.isaiaharroyo.gogood",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -31,7 +31,7 @@
         "android.permission.USE_FINGERPRINT",
         "android.permission.POST_NOTIFICATIONS"
       ],
-      "package": "com.gogood.app"
+      "package": "com.isaiaharroyo.gogood"
     },
     "web": {
       "output": "static",

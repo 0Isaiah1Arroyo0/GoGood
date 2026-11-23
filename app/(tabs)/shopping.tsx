@@ -1,3 +1,4 @@
+import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Animated, Alert, Share, Modal, TextInput, KeyboardAvoidingView,
@@ -12,6 +13,7 @@ import { captureRef } from 'react-native-view-shot';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAppDrawer } from '../components/AppDrawer';
+import HeaderAddButton from '@/components/header-add-button';
 import { HOUSEHOLD_KEY } from '../lib/household';
 import {
   type ShoppingItem,
@@ -55,6 +57,7 @@ function buildShareText(items: ShoppingItem[]): string {
 export default function ShoppingScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const { menuBtn, drawerEl } = useAppDrawer();
 
@@ -293,9 +296,7 @@ export default function ShoppingScreen() {
                 <Text style={styles.clearBtnText}>✓ clear</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={openAdd} style={styles.addBtn}>
-              <Text style={styles.addBtnText}>+</Text>
-            </TouchableOpacity>
+            <HeaderAddButton onPress={openAdd} accessibilityLabel="Add to shopping list" />
           </View>
         </View>
         </Animated.View>
@@ -311,7 +312,7 @@ export default function ShoppingScreen() {
           </View>
         ) : (
           <ScrollView
-            contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 40 }}
+            contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: tabSpace + 24 }}
             showsVerticalScrollIndicator={false}
           >
             {/* Unchecked items grouped by recipe */}
@@ -584,8 +585,6 @@ function createStyles(c: ThemeColors, isDark = false) {
 
     footerBtn:  { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
 
-    addBtn:     { width: 34, height: 34, borderRadius: 17, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center' },
-    addBtnText: { fontSize: 22, color: '#fff', fontWeight: '300', lineHeight: 26, marginTop: -1 },
 
     modalOverlay:   { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
     modalSheet:     { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingTop: 12, gap: 12 },

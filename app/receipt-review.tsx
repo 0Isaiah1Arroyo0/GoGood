@@ -89,7 +89,8 @@ export default function ReceiptReviewScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { sessionId, storeName } = useLocalSearchParams<{ sessionId: string; storeName?: string }>();
+  const { sessionId, storeName, mode } = useLocalSearchParams<{ sessionId: string; storeName?: string; mode?: string }>();
+  const isPhoto = mode === 'photo' || mode === 'labels'; // items found in a photo (fridge/pantry or several labels) rather than a receipt
 
   const [drafts,      setDrafts]      = useState<DraftItem[]>([]);
   const [loading,     setLoading]     = useState(true);
@@ -324,7 +325,7 @@ export default function ReceiptReviewScreen() {
             <Text style={{ fontSize: 20, color: colors.brand }}>‹</Text>
           </TouchableOpacity>
           <View style={{ flex: 1, alignItems: 'center' }}>
-            <Text style={[styles.headerTitle, { color: colors.brand }]}>review receipt</Text>
+            <Text style={[styles.headerTitle, { color: colors.brand }]}>{isPhoto ? 'review items' : 'review receipt'}</Text>
             {storeName ? (
               <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>from {storeName}</Text>
             ) : null}
@@ -336,7 +337,9 @@ export default function ReceiptReviewScreen() {
           <View style={styles.center}>
             <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginBottom: 8 }}>No items found</Text>
             <Text style={{ fontSize: 14, color: colors.textSub, textAlign: 'center', lineHeight: 20 }}>
-              We couldn't parse any grocery items from that receipt. Try a clearer photo.
+              {isPhoto
+                ? "We couldn't spot any food items in that photo. Try a closer, well-lit shot."
+                : "We couldn't parse any grocery items from that receipt. Try a clearer photo."}
             </Text>
             <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, marginTop: 24, alignSelf: 'stretch' }]} onPress={() => router.back()}>
               <Text style={styles.confirmText}>Go back</Text>

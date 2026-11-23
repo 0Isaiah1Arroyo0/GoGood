@@ -1,3 +1,4 @@
+import EdgeFade from '@/components/edge-fade';
 import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -311,8 +312,9 @@ export default function ShoppingScreen() {
             </Text>
           </View>
         ) : (
+          <View style={{ flex: 1 }}>
           <ScrollView
-            contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: tabSpace + 24 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 14, paddingBottom: tabSpace + 24 }}
             showsVerticalScrollIndicator={false}
           >
             {/* Unchecked items grouped by recipe */}
@@ -380,6 +382,9 @@ export default function ShoppingScreen() {
               </TouchableOpacity>
             </View>
           </ScrollView>
+          {/* Content fades out under the header, like the inventory list */}
+          <EdgeFade color={colors.bg} edge="top" height={36} />
+          </View>
         )}
         </Animated.View>
 
@@ -562,7 +567,7 @@ function createStyles(c: ThemeColors, isDark = false) {
     safe:      { flex: 1, backgroundColor: c.bg },
     container: { flex: 1, backgroundColor: c.bg },
 
-    header:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: 0.5, borderBottomColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
+    header:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8, backgroundColor: c.bg },
     headerLogo:       { fontSize: 24, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
     headerLogoGreen:  { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
     householdBadge:   { fontSize: 10, fontWeight: '600', color: c.teal, letterSpacing: 0.4, marginTop: 1 },

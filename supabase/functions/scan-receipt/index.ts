@@ -294,7 +294,14 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: cors })
 
-    const { imageBase64: rawBase64, mimeType: claimedType = 'image/jpeg', storeName } = await req.json()
+    const {
+      imageBase64: rawBase64, mimeType: claimedType = 'image/jpeg', storeName,
+      mode = 'receipt',          // 'receipt' | 'photo' (items in a fridge/pantry/counter) | 'labels' (several product labels)
+      locationHint = null,       // 'fridge' | 'freezer' | 'pantry' when the user says where the photo was taken
+    } = await req.json()
+    const isLabels = mode === 'labels'
+    const isPhoto = mode === 'photo' || isLabels   // both are pictures of products, not receipts
+    const todayStr = new Date().toISOString().slice(0, 10)
     if (!rawBase64) return new Response(JSON.stringify({ error: 'imageBase64 required' }), { status: 400, headers: cors })
 
     // Strip a data-URL prefix or line breaks if present, then check format and size
@@ -396,6 +403,54 @@ PARSING RULES:
 - estimatedCategory: frozen → "freezer"; dairy/produce/meat/deli → "fridge"; everything else → "pantry"
 - If you cannot identify any food items clearly, return []`
 
+    const photoPrompt = `You identify food and drink items in a photo of someone's fridge, freezer, pantry shelf, or groceries laid out on a counter.
+Return ONLY a valid JSON array — no markdown, no explanation, nothing else.
+
+Each object must have exactly these fields:
+- name: string (clear product name; include the brand only if the label is clearly readable, e.g. "Chobani Greek Yogurt", otherwise generic, e.g. "Greek Yogurt")
+- qty: number (how many of that item you can see — count separate containers; default 1)
+- unit: string (count, bottle, can, jar, carton, bag, box, pack, lbs — default "count")
+- estimatedCategory: "fridge" | "freezer" | "pantry"
+- icon: string (single emoji for the item)
+- estimatedExpiryDays: number | null (typical days of shelf life left for a recently bought item of this kind; null for indefinitely shelf-stable items like salt or honey)
+- sku: null
+
+RULES:
+- One entry per distinct product. If you see three identical cans, return one entry with qty 3.
+- Only list items you can actually see and reasonably identify. Do not guess at items hidden behind others.
+- If you can't tell what something is, skip it rather than inventing a name.
+- SKIP non-food items (cleaning supplies, medicine, containers with no visible contents, appliances, shelves).
+- Use the same shelf-life guide as a grocery list: raw meat 2-3 days, milk 10, eggs 35, yogurt 21, berries 5, leafy greens 5, bread 5, condiments 180-365, canned goods 730, frozen items 90-180.
+${locationHint ? `- The user says this photo is of their ${locationHint}. Set estimatedCategory to "${locationHint}" for everything unless an item clearly belongs elsewhere.` : '- estimatedCategory: frozen items → "freezer"; dairy/produce/meat/deli → "fridge"; everything else → "pantry".'}
+- If you cannot identify any food items, return []`
+
+    const labelsPrompt = `You read the labels of several food and drink products in one photo (packages lined up, held together, or on a shelf).
+Return ONLY a valid JSON array — no markdown, no explanation, nothing else.
+
+Today's date is ${todayStr}.
+
+Each object must have exactly these fields:
+- name: string (product name as printed on the label, including the brand when readable, e.g. "Great Value Whole Milk")
+- qty: number (how many of that exact product are in the photo; default 1)
+- unit: string (count, bottle, can, jar, carton, bag, box, pack, lbs, oz — default "count")
+- estimatedCategory: "fridge" | "freezer" | "pantry"
+- icon: string (single emoji for the item)
+- estimatedExpiryDays: number | null
+- sku: string | null (the UPC barcode number if its digits are printed and readable, otherwise null)
+
+EXPIRY — MOST IMPORTANT:
+- Look for a printed date: "best by", "best if used by", "use by", "sell by", "exp", or a bare date stamp.
+- If you find one, set estimatedExpiryDays to the number of days from today (${todayStr}) to that date. Negative if it has already passed.
+- If only month and year are printed (e.g. "MAY 2027" or "05/27"), use the last day of that month.
+- If no date is readable, use typical shelf life for a recently bought product of that kind (milk 10, yogurt 21, eggs 35, bread 5, canned goods 730, condiments 180-365), or null for indefinitely shelf-stable items.
+
+RULES:
+- One entry per distinct product; identical products are one entry with a higher qty.
+- Only list products whose label you can actually read or clearly recognize. Skip anything you can't identify.
+- SKIP non-food items.
+${locationHint ? `- The user says these are going in their ${locationHint}. Set estimatedCategory to "${locationHint}" unless an item clearly belongs elsewhere.` : '- estimatedCategory: frozen → "freezer"; dairy/produce/meat/deli → "fridge"; everything else → "pantry".'}
+- If you cannot identify any products, return []`
+
     let items: ParsedItem[] = []
     let rawClaudeText = ''
     let attempts = 0
@@ -412,7 +467,7 @@ PARSING RULES:
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
           max_tokens: 16000, // long receipts produce long item lists — 4096 cut them off mid-list
-          system: systemPrompt,
+          system: isLabels ? labelsPrompt : isPhoto ? photoPrompt : systemPrompt,
           messages: [{
             role: 'user',
             content: [{
@@ -420,9 +475,15 @@ PARSING RULES:
               source: { type: 'base64', media_type: mimeType, data: imageBase64 }
             }, {
               type: 'text',
-              text: attempts === 1
-                ? `Parse all grocery food items from this receipt${storeName ? ` from ${storeName}` : ''}. For each item, look for any number sequence (5-15 digits) near that item line and record it as the sku field — this helps us look up exact nutrition data. Return only the JSON array.`
-                : 'Parse this receipt. Return ONLY the JSON array starting with [ and ending with ]. Each item: name, qty, unit, estimatedCategory, icon, estimatedExpiryDays, sku.',
+              text: isPhoto
+                ? (attempts === 1
+                    ? (isLabels
+                        ? 'Read the label of every food and drink product in this photo, including any printed expiry dates. Return only the JSON array.'
+                        : 'List every food and drink item you can see in this photo. Return only the JSON array.')
+                    : 'Return ONLY the JSON array starting with [ and ending with ]. Each item: name, qty, unit, estimatedCategory, icon, estimatedExpiryDays, sku (null).')
+                : attempts === 1
+                  ? `Parse all grocery food items from this receipt${storeName ? ` from ${storeName}` : ''}. For each item, look for any number sequence (5-15 digits) near that item line and record it as the sku field — this helps us look up exact nutrition data. Return only the JSON array.`
+                  : 'Parse this receipt. Return ONLY the JSON array starting with [ and ending with ]. Each item: name, qty, unit, estimatedCategory, icon, estimatedExpiryDays, sku.',
             }]
           }]
         })
@@ -456,7 +517,9 @@ PARSING RULES:
         error: apiRejected ? 'image_rejected' : 'no_items_found',
         message: apiRejected
           ? "We couldn't read that image. Try taking a new photo, or a screenshot saved as a regular image."
-          : "We couldn't find any food items on that receipt. Make sure the item lines are fully visible and in focus.",
+          : isPhoto
+            ? "We couldn't spot any food items in that photo. Try a closer, well-lit shot where labels face the camera."
+            : "We couldn't find any food items on that receipt. Make sure the item lines are fully visible and in focus.",
         debug: rawClaudeText.slice(0, 500),
       })
     }
@@ -534,7 +597,8 @@ PARSING RULES:
 
     const today = new Date()
     const toExpiryDate = (days: number | null): string | null => {
-      if (!days || days <= 0) return null
+      if (days === null || days === undefined) return null
+      if (!isLabels && days <= 0) return null   // label scans can read a date that has already passed
       const d = new Date(today)
       d.setDate(d.getDate() + days)
       return d.toISOString().slice(0, 10)
@@ -543,7 +607,7 @@ PARSING RULES:
     const sessionId = crypto.randomUUID()
     const rows = enriched.map(item => ({
       user_id:         user.id,
-      source:          'receipt' as const,
+      source:          isPhoto ? 'photo' : 'receipt',
       name:            item.name,
       base_name:       item.name,
       icon:            item.icon ?? '🥘',
@@ -557,7 +621,7 @@ PARSING RULES:
       fat:             item.fat     ?? 0,
       cal:             item.cal     ?? 0,
       scan_session_id: sessionId,
-      store_name:      storeName ?? null,
+      store_name:      isPhoto ? null : (storeName ?? null),
     }))
 
     await supabase.from('draft_items').insert(rows)

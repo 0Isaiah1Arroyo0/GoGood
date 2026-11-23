@@ -1,3 +1,4 @@
+import EdgeFade from '@/components/edge-fade';
 import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView,
@@ -961,9 +962,10 @@ export default function FoodReportScreen() {
           ))}
         </View>
 
+        <View style={{ flex: 1 }}>
         <Animated.ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: tabSpace + 24 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 12, paddingBottom: tabSpace + 24 }}
           style={{ opacity: contentFade, transform: [{ translateY: contentSlide }] }}
         >
 
@@ -1686,6 +1688,9 @@ export default function FoodReportScreen() {
             </>
           )}
         </Animated.ScrollView>
+        {/* Content fades out under the header, like the inventory list */}
+        <EdgeFade color={colors.bg} edge="top" height={36} />
+        </View>
 
         {/* Paywall intercept — covers tabs + content, not the header */}
         {!isPremium && (
@@ -2068,7 +2073,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   safe:          { flex: 1 },
   container:     { flex: 1 },
 
-  header:        { backgroundColor: c.bg, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, borderBottomWidth: 0.5, borderBottomColor: c.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
+  header:        { backgroundColor: c.bg, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   logo:          { fontSize: 28, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   logoGreen:     { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
 

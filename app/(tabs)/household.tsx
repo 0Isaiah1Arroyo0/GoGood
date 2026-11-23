@@ -1,3 +1,4 @@
+import EdgeFade from '@/components/edge-fade';
 import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -394,9 +395,10 @@ export default function HouseholdScreen() {
           <ActivityIndicator size="large" color={colors.teal} />
         </View>
       ) : (
+        <View style={{ flex: 1 }}>
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: tabSpace + 24 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 12, paddingBottom: tabSpace + 24 }}
         >
 
           {household ? (
@@ -667,6 +669,9 @@ export default function HouseholdScreen() {
             </>
           )}
         </ScrollView>
+        {/* Content fades out under the header, like the inventory list */}
+        <EdgeFade color={colors.bg} edge="top" height={36} />
+        </View>
       )}
 
       {/* Edit household sheet */}
@@ -732,10 +737,9 @@ export default function HouseholdScreen() {
 
 const styles = StyleSheet.create({
   header: {
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12,
-    borderBottomWidth: 0.5, flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8,
+    flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3,
   },
   logo: { fontSize: 28, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
 

@@ -12,6 +12,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
 import { useAppDrawer } from '../components/AppDrawer';
 import HeaderAddButton from '@/components/header-add-button';
+import EdgeFade from '@/components/edge-fade';
 import { useSubscription } from '../context/subscription';
 import { useAuth } from '../context/auth';
 import { HOUSEHOLD_KEY } from '../lib/household';
@@ -1193,7 +1194,6 @@ export default function CollectionsScreen() {
 
   if (activeCollection) {
     const title = activeCollection === 'all' ? 'All Saved Recipes' : activeCollection.name;
-    const icon  = activeCollection === 'all' ? '📚' : activeCollection.emoji;
 
     return (
       <View style={styles.safe}>
@@ -1202,16 +1202,24 @@ export default function CollectionsScreen() {
 
           <Animated.View style={{ transform: [{ scale: heroScale }] }}>
           <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-            <TouchableOpacity onPress={() => { setActiveCollection(null); setQuery(''); }} style={styles.backBtn}>
+            <TouchableOpacity
+              onPress={() => { setActiveCollection(activeCollection === 'all' ? null : 'all'); setQuery(''); }}
+              style={styles.backBtn}
+            >
               <Text style={{ fontSize: 20, color: colors.brand, lineHeight: 24 }}>‹</Text>
             </TouchableOpacity>
             <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.headerTitle}>{icon} {title}</Text>
+              <Text style={styles.headerTitle}>{title}</Text>
               <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
                 {visibleRecipes.length} recipe{visibleRecipes.length !== 1 ? 's' : ''}{q ? ' found' : ''}
               </Text>
             </View>
-            <View style={{ width: 40 }} />
+            {activeCollection === 'all'
+              ? <HeaderAddButton
+                  accessibilityLabel="New category"
+                  onPress={() => { if (!isPremium) { showPaywall(); return; } setRenamingCol(null); setModalVisible(true); }}
+                />
+              : <View style={{ width: 40 }} />}
           </View>
           </Animated.View>
 
@@ -1221,7 +1229,7 @@ export default function CollectionsScreen() {
             <Text style={{ fontSize: 15, color: colors.textMuted }}>🔍</Text>
             <TextInput
               style={{ flex: 1, fontSize: 14, color: colors.text }}
-              placeholder="Search recipes…"
+              placeholder={activeCollection === 'all' ? 'Search all recipes…' : 'Search this category…'}
               placeholderTextColor={colors.textMuted}
               value={query}
               onChangeText={setQuery}
@@ -1230,21 +1238,73 @@ export default function CollectionsScreen() {
             />
           </View>
 
-          {visibleRecipes.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={{ fontSize: 52, marginBottom: 16 }}>{q ? '🔍' : icon}</Text>
-              <Text style={styles.emptyTitle}>
-                {q ? `No recipes match "${query}"` : 'No recipes here yet'}
-              </Text>
-              <Text style={styles.emptySub}>
-                {q
-                  ? 'Try a different search term.'
-                  : 'Ask Good Bot for a recipe and tap\n"Save Recipe" to add it here.'}
-              </Text>
-            </View>
-          ) : (
-            <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }} showsVerticalScrollIndicator={false}>
-              {visibleRecipes.map(r => (
+          <View style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 10, paddingBottom: tabSpace + 24 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {/* Categories (only on All Saved Recipes, and not while searching) */}
+            {activeCollection === 'all' && !q && (
+              <>
+                <Text style={styles.sectionLabel}>CATEGORIES</Text>
+                {collections.map(col => (
+                  <TouchableOpacity
+                    key={col.id}
+                    style={styles.colCard}
+                    onPress={() => setActiveCollection(col)}
+                    onLongPress={() =>
+                      Alert.alert(col.name, undefined, [
+                        { text: 'Rename', onPress: () => { setRenamingCol(col); setModalVisible(true); } },
+                        { text: 'Delete', style: 'destructive', onPress: () => handleDeleteCollection(col) },
+                        { text: 'Cancel', style: 'cancel' },
+                      ])
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.colName}>{col.name}</Text>
+                      <Text style={styles.colSub}>{countFor(col)} recipe{countFor(col) !== 1 ? 's' : ''} · hold to edit</Text>
+                    </View>
+                    <Text style={{ color: colors.textMuted, fontSize: 22 }}>›</Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[styles.colCard, { borderStyle: 'dashed', justifyContent: 'center' }]}
+                  onPress={() => { if (!isPremium) { showPaywall(); return; } setRenamingCol(null); setModalVisible(true); }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSub }}>+ New category</Text>
+                </TouchableOpacity>
+
+                {householdRecipes.length > 0 && (
+                  <>
+                    <Text style={[styles.sectionLabel, { marginTop: 10 }]}>HOUSEHOLD RECIPES · {householdRecipes.length}</Text>
+                    {householdRecipes.map(r => (
+                      <TouchableOpacity key={r.id} style={styles.recipeCard} onPress={() => openRecipe(r)} activeOpacity={0.8}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.recipeCardName} numberOfLines={2}>{r.name}</Text>
+                          <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 5 }}>Shared by a household member · {timeAgo(r.savedAt)}</Text>
+                        </View>
+                        <Text style={{ color: colors.textMuted, fontSize: 20 }}>›</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+
+                <Text style={[styles.sectionLabel, { marginTop: 10 }]}>ALL RECIPES · {visibleRecipes.length}</Text>
+              </>
+            )}
+
+            {visibleRecipes.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>
+                  {q ? `No recipes match "${query}"` : 'No recipes here yet'}
+                </Text>
+                <Text style={styles.emptySub}>
+                  {q
+                    ? 'Try a different search term.'
+                    : 'Ask Good Bot for a recipe and tap\n"Save to Recipes" to add it here.'}
+                </Text>
+              </View>
+            ) : (
+              visibleRecipes.map(r => (
                 <TouchableOpacity key={r.id} style={styles.recipeCard} onPress={() => openRecipe(r)} activeOpacity={0.8}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.recipeCardName} numberOfLines={2}>{r.name}</Text>
@@ -1257,18 +1317,31 @@ export default function CollectionsScreen() {
                       </View>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>{timeAgo(r.savedAt)}</Text>
-                      {r.cookedCount ? <Text style={{ fontSize: 11, color: colors.teal }}>🍳 ×{r.cookedCount}</Text> : null}
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                        {activeCollection === 'all'
+                          ? `${collections.find(c => c.id === r.collectionId)?.name ?? 'Uncategorized'} · ${timeAgo(r.savedAt)}`
+                          : timeAgo(r.savedAt)}
+                      </Text>
+                      {r.cookedCount ? <Text style={{ fontSize: 11, color: colors.teal }}>cooked ×{r.cookedCount}</Text> : null}
                       {r.rating ? <StarRating rating={r.rating} size={12} readonly /> : null}
                     </View>
                   </View>
                   <Text style={{ color: colors.textMuted, fontSize: 20 }}>›</Text>
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
+              ))
+            )}
+          </ScrollView>
+          <EdgeFade color={colors.bg} edge="top" height={36} />
+          </View>
           </Animated.View>
 
+          <CollectionModal
+            visible={modalVisible}
+            onClose={() => { setModalVisible(false); setRenamingCol(null); }}
+            onSave={handleSaveCollection}
+            renaming={renamingCol}
+            colors={colors}
+          />
           {sharedSheets}
           {drawerEl}
         </Animated.View>
@@ -1302,168 +1375,45 @@ export default function CollectionsScreen() {
         <View style={{ flex: 1, position: 'relative' }}>
 
         <Animated.View style={{ flex: 1, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
-        {/* Global search bar */}
-        <View style={styles.searchBar}>
-          <Text style={{ fontSize: 15, color: colors.textMuted }}>🔍</Text>
-          <TextInput
-            style={{ flex: 1, fontSize: 14, color: colors.text }}
-            placeholder="Search all recipes…"
-            placeholderTextColor={colors.textMuted}
-            value={query}
-            onChangeText={setQuery}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-          />
-        </View>
+        <View style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 12, paddingBottom: tabSpace + 24 }} showsVerticalScrollIndicator={false}>
+          {/* All saved recipes — search, categories and every recipe live inside */}
+          <TouchableOpacity style={styles.allCard} onPress={() => setActiveCollection('all')} activeOpacity={0.85}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.allCardTitle}>All Saved Recipes</Text>
+              <Text style={styles.allCardSub}>
+                {recipes.length} recipe{recipes.length !== 1 ? 's' : ''}
+                {collections.length ? ` · ${collections.length} categor${collections.length !== 1 ? 'ies' : 'y'}` : ''}
+              </Text>
+            </View>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 22 }}>›</Text>
+          </TouchableOpacity>
 
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: tabSpace + 24 }} showsVerticalScrollIndicator={false}>
+          {/* Import from social — same green button */}
+          <TouchableOpacity
+            style={styles.allCard}
+            onPress={() => { if (!isPremium) { showPaywall(); return; } router.push('/social-recipe-import'); }}
+            activeOpacity={0.85}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.allCardTitle}>Import from TikTok & More</Text>
+              <Text style={styles.allCardSub}>Paste a link and AI pulls out the recipe</Text>
+            </View>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 22 }}>›</Text>
+          </TouchableOpacity>
 
-          {/* ── Global search results ── */}
-          {q ? (
-            searchResults.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={{ fontSize: 40, marginBottom: 12 }}>🔍</Text>
-                <Text style={styles.emptyTitle}>No recipes match "{query}"</Text>
-                <Text style={styles.emptySub}>Try a different name or ingredient.</Text>
-              </View>
-            ) : (
-              <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSub, letterSpacing: 0.8, marginBottom: 2 }}>
-                  {searchResults.length} RESULT{searchResults.length !== 1 ? 'S' : ''}
-                </Text>
-                {searchResults.map(r => (
-                  <TouchableOpacity key={r.id} style={styles.recipeCard} onPress={() => openRecipe(r)} activeOpacity={0.8}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.recipeCardName} numberOfLines={2}>{r.name}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
-                        <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                          {collections.find(c => c.id === r.collectionId)?.name ?? 'Uncategorized'}
-                        </Text>
-                        {r.cookedCount ? <Text style={{ fontSize: 11, color: colors.teal }}>🍳 ×{r.cookedCount}</Text> : null}
-                        {r.rating ? <StarRating rating={r.rating} size={12} readonly /> : null}
-                      </View>
-                    </View>
-                    <Text style={{ color: colors.textMuted, fontSize: 20 }}>›</Text>
-                  </TouchableOpacity>
-                ))}
-              </>
-            )
-          ) : (
-            /* ── Normal collections list ── */
-            <>
-              {/* Import from Social banner */}
-              <TouchableOpacity
-                style={styles.importCard}
-                onPress={() => { if (!isPremium) { showPaywall(); return; } router.push('/social-recipe-import'); }}
-                activeOpacity={0.85}
-              >
-                <View style={styles.importCardIcon}>
-                  <Text style={{ fontSize: 24 }}>📲</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.importCardTitle}>Import from TikTok & More</Text>
-                  <Text style={styles.importCardSub}>Paste a link · AI extracts the recipe</Text>
-                </View>
-                <Text style={{ color: colors.teal, fontSize: 20 }}>›</Text>
-              </TouchableOpacity>
-
-              {/* All saved recipes entry point */}
-              {recipes.length > 0 && (
-                <TouchableOpacity style={styles.allCard} onPress={() => setActiveCollection('all')} activeOpacity={0.85}>
-                  <Text style={{ fontSize: 34 }}>📚</Text>
-                  <View style={{ flex: 1, marginLeft: 14 }}>
-                    <Text style={styles.allCardTitle}>All Saved Recipes</Text>
-                    <Text style={styles.allCardSub}>{recipes.length} recipe{recipes.length !== 1 ? 's' : ''} total</Text>
-                  </View>
-                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 22 }}>›</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Collection cards */}
-              {collections.map(col => (
-                <TouchableOpacity
-                  key={col.id}
-                  style={styles.colCard}
-                  onPress={() => setActiveCollection(col)}
-                  onLongPress={() =>
-                    Alert.alert(`${col.emoji} ${col.name}`, undefined, [
-                      { text: 'Rename', onPress: () => { setRenamingCol(col); setModalVisible(true); } },
-                      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteCollection(col) },
-                      { text: 'Cancel', style: 'cancel' },
-                    ])
-                  }
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.colEmojiWrap}>
-                    <Text style={{ fontSize: 26 }}>{col.emoji}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.colName}>{col.name}</Text>
-                    <Text style={styles.colSub}>{countFor(col)} recipe{countFor(col) !== 1 ? 's' : ''} · hold to edit</Text>
-                  </View>
-                  <Text style={{ color: colors.textMuted, fontSize: 22 }}>›</Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* Empty state */}
-              {collections.length === 0 && recipes.length === 0 && (
-                <View style={styles.emptyState}>
-                  <Text style={{ fontSize: 60, marginBottom: 18 }}>🍳</Text>
-                  <Text style={styles.emptyTitle}>No saved recipes yet</Text>
-                  <Text style={styles.emptySub}>
-                    Ask Good Bot for a recipe, then tap{'\n'}
-                    "Save Recipe" to start your collection.
-                  </Text>
-                </View>
-              )}
-
-              {/* Uncategorized preview */}
-              {uncategorized.length > 0 && (
-                <View style={styles.uncatCard}>
-                  <Text style={styles.uncatLabel}>📌  UNCATEGORIZED · {uncategorized.length}</Text>
-                  {uncategorized.slice(0, 4).map(r => (
-                    <TouchableOpacity key={r.id} style={styles.uncatRow} onPress={() => openRecipe(r)} activeOpacity={0.8}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.uncatName} numberOfLines={1}>{r.name}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {r.rating ? <StarRating rating={r.rating} size={11} readonly /> : null}
-                        <Text style={styles.uncatMeta}>{timeAgo(r.savedAt)}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                  {uncategorized.length > 4 && (
-                    <TouchableOpacity onPress={() => setActiveCollection('all')} style={{ paddingTop: 8 }}>
-                      <Text style={{ fontSize: 12, color: colors.teal, fontWeight: '600' }}>+{uncategorized.length - 4} more →</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-
-              {/* Household Recipes */}
-              {householdRecipes.length > 0 && (
-                <View style={styles.uncatCard}>
-                  <Text style={styles.uncatLabel}>🏠  HOUSEHOLD RECIPES · {householdRecipes.length}</Text>
-                  {householdRecipes.slice(0, 5).map(r => (
-                    <TouchableOpacity key={r.id} style={styles.uncatRow} onPress={() => openRecipe(r)} activeOpacity={0.8}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.uncatName} numberOfLines={1}>{r.name}</Text>
-                        <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>Shared by a household member</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {r.rating ? <StarRating rating={r.rating} size={11} readonly /> : null}
-                        <Text style={styles.uncatMeta}>{timeAgo(r.savedAt)}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                  {householdRecipes.length > 5 && (
-                    <Text style={{ fontSize: 12, color: colors.textMuted, paddingTop: 6 }}>+{householdRecipes.length - 5} more</Text>
-                  )}
-                </View>
-              )}
-            </>
+          {recipes.length === 0 && householdRecipes.length === 0 && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No saved recipes yet</Text>
+              <Text style={styles.emptySub}>
+                Ask Good Bot for a recipe, then tap{'\n'}
+                "Save to Recipes" to start your collection.
+              </Text>
+            </View>
           )}
         </ScrollView>
+        <EdgeFade color={colors.bg} edge="top" height={36} />
+        </View>
 
         <CollectionModal
           visible={modalVisible}
@@ -1498,7 +1448,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   safe:          { flex: 1, backgroundColor: c.bg },
   container:     { flex: 1, backgroundColor: c.bg },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: 0.5, borderBottomColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8, backgroundColor: c.bg },
   headerLogo:    { fontSize: 24, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   headerLogoGreen: { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   headerTitle:   { fontSize: 16, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
@@ -1509,6 +1459,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   allCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.btnPrimary, borderRadius: 18, padding: 18, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 6 }, shadowOpacity: isDark ? 0.18 : 0.35, shadowRadius: 14, elevation: 6 },
   allCardTitle:  { fontSize: 16, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
   allCardSub:    { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 3 },
+  sectionLabel:  { fontSize: 11, fontWeight: '700', color: c.textSub, letterSpacing: 0.8, marginTop: 4, marginBottom: 2 },
 
   colCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 16, padding: 16, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
   colEmojiWrap:  { width: 52, height: 52, borderRadius: 14, backgroundColor: c.chipBg, alignItems: 'center', justifyContent: 'center', marginRight: 14 },

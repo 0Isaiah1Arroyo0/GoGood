@@ -3,7 +3,7 @@ import type { SyncItem } from './sync';
 
 export interface DraftItem {
   id: string;
-  source: 'receipt' | 'kroger' | 'manual';
+  source: 'receipt' | 'kroger' | 'manual' | 'photo';
   name: string;
   baseName: string;
   icon: string;

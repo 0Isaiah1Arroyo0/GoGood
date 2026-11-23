@@ -1533,6 +1533,7 @@ export default function FridgeScreen() {
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [barcodeScanned, setBarcodeScanned]         = useState(false);
   const [scanningReceipt, setScanningReceipt]       = useState(false);
+  const [scanMode, setScanMode] = useState<'receipt' | 'photo' | 'labels'>('receipt');
   const [scanningLabel,   setScanningLabel]         = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [showSuccess, setShowSuccess]               = useState(false);
@@ -2308,7 +2309,13 @@ export default function FridgeScreen() {
     }
   };
 
-  const doScanReceipt = async (source: 'camera' | 'library', storeName?: string) => {
+  const doScanReceipt = async (
+    source: 'camera' | 'library',
+    storeName?: string,
+    mode: 'receipt' | 'photo' | 'labels' = 'receipt',
+    locationHint: Category | null = null,
+  ) => {
+    const isPhoto = mode !== 'receipt'; // photo of items or of several labels
     try {
       let result: ImagePicker.ImagePickerResult;
       if (source === 'camera') {
@@ -2328,6 +2335,7 @@ export default function FridgeScreen() {
       // Wait for the Add sheet and photo picker to fully close: iOS silently skips
       // presenting the full-screen scanning overlay while another pop-up is closing.
       await new Promise<void>(r => setTimeout(r, 750));
+      setScanMode(mode);
       setScanningReceipt(true);
       const { data: { session } } = await import('../lib/supabase').then(m => m.supabase.auth.getSession());
       if (!session) { showToast('Please sign in to scan receipts', true); setScanningReceipt(false); return; }
@@ -2338,6 +2346,8 @@ export default function FridgeScreen() {
           imageBase64: result.assets[0].base64,
           mimeType: imageMimeFromBase64(result.assets[0].base64!),
           storeName: storeName ?? null,
+          mode,
+          locationHint,
         }),
       });
       // Read as text first: if Supabase stops the function (time/memory/size limit) the
@@ -2351,7 +2361,9 @@ export default function FridgeScreen() {
         data.message = res.status === 413
           ? 'That image is too large to upload. Try a closer photo, or crop the screenshot to just the items.'
           : (res.status === 504 || res.status === 546 || res.status === 408)
-            ? 'That receipt took too long to read. Try scanning it in two parts (top half, then bottom half).'
+            ? (isPhoto
+                ? 'That photo took too long to read. Try a photo of one shelf at a time.'
+                : 'That receipt took too long to read. Try scanning it in two parts (top half, then bottom half).')
             : `The scan service had a problem (error ${res.status}). Please try again.`;
       }
       if (!data.sessionId) {
@@ -2359,16 +2371,18 @@ export default function FridgeScreen() {
         // Close the blocking overlay first — an alert shown on top of it would be dismissed with it
         setScanningReceipt(false);
         setTimeout(() => Alert.alert(
-          'Receipt Not Recognized',
+          isPhoto ? 'No Items Found' : 'Receipt Not Recognized',
           data.message
-            ?? 'Make sure the entire receipt is visible, well-lit, and the text is in focus. Screenshots of digital receipts work too.\n\nTip: item number codes on your receipt help us look up exact nutrition info.',
-          [{ text: 'Try Again', onPress: () => scanReceipt() }, { text: 'Cancel', style: 'cancel' }],
+            ?? (isPhoto
+              ? 'Try a closer, well-lit photo with labels facing the camera.'
+              : 'Make sure the entire receipt is visible, well-lit, and the text is in focus. Screenshots of digital receipts work too.\n\nTip: item number codes on your receipt help us look up exact nutrition info.'),
+          [{ text: 'Try Again', onPress: () => (mode === 'labels' ? scanLabel() : isPhoto ? scanPhoto() : scanReceipt()) }, { text: 'Cancel', style: 'cancel' }],
         ), 400);
         return;
       }
-      router.push({ pathname: '/receipt-review', params: { sessionId: data.sessionId, storeName: storeName ?? '' } } as any);
+      router.push({ pathname: '/receipt-review', params: { sessionId: data.sessionId, storeName: storeName ?? '', mode } } as any);
     } catch {
-      showToast('Receipt scan failed — check your connection', true);
+      showToast(`${isPhoto ? 'Photo' : 'Receipt'} scan failed — check your connection`, true);
     }
     setScanningReceipt(false);
   };
@@ -2379,19 +2393,69 @@ export default function FridgeScreen() {
       'Scan Walmart Receipt',
       'Choose how to add your receipt. Item codes on the receipt are used to look up exact nutrition info.',
       [
-        { text: '📷  Take Photo',    onPress: () => doScanReceipt('camera',  'Walmart') },
-        { text: '🖼️  Photo Library', onPress: () => doScanReceipt('library', 'Walmart') },
+        { text: 'Take Photo',    onPress: () => doScanReceipt('camera',  'Walmart') },
+        { text: 'Photo Library', onPress: () => doScanReceipt('library', 'Walmart') },
         { text: 'Cancel', style: 'cancel' },
       ],
     );
   };
 
-  const scanLabel = async () => {
+  // Batch add: a photo of a fridge, freezer, pantry shelf, or groceries on the counter
+  const scanPhoto = () => {
+    if (!isAnnual) { showPaywall(); return; }
+    // If they're on the Fridge/Freezer/Pantry tab, assume that's where the photo is from
+    const hint: Category | null = activeTab === 'all' ? null : activeTab;
+    Alert.alert(
+      'Add Items From a Photo',
+      `Take or choose a photo of your ${hint ?? 'fridge, freezer, pantry, or groceries'}. GoGood will find each item so you can review them before adding.\n\nTip: good lighting and labels facing the camera work best.`,
+      [
+        { text: 'Take Photo',    onPress: () => doScanReceipt('camera',  undefined, 'photo', hint) },
+        { text: 'Photo Library', onPress: () => doScanReceipt('library', undefined, 'photo', hint) },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  };
+
+  // Label button: one item (fills the expiry date in this form) or several items
+  // (adds them all for review), from the camera or the photo library.
+  const scanLabel = () => {
+    const pickSource = (onPick: (src: 'camera' | 'library') => void, title: string) =>
+      Alert.alert(title, undefined, [
+        { text: 'Take Photo',    onPress: () => onPick('camera') },
+        { text: 'Photo Library', onPress: () => onPick('library') },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    Alert.alert(
+      'Scan Labels',
+      'Scan one label to fill in its expiry date, or a photo of several products to add them all at once.',
+      [
+        { text: 'One item', onPress: () => pickSource(src => scanSingleLabel(src), 'Scan One Label') },
+        {
+          text: 'Several items',
+          onPress: () => {
+            if (!isAnnual) { showPaywall(); return; }
+            const hint: Category | null = activeTab === 'all' ? null : activeTab;
+            pickSource(src => doScanReceipt(src, undefined, 'labels', hint), 'Scan Several Labels');
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  };
+
+  const scanSingleLabel = async (source: 'camera' | 'library' = 'camera') => {
     setScanning(true);
     try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') { showToast('Camera permission needed', true); setScanning(false); return; }
-      const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
+      let result: ImagePicker.ImagePickerResult;
+      if (source === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') { showToast('Camera permission needed', true); setScanning(false); return; }
+        result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') { showToast('Photo library access needed', true); setScanning(false); return; }
+        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'] });
+      }
       if (result.canceled || !result.assets?.[0]?.base64) { setScanning(false); return; }
       setShowAdd(false);
       await new Promise<void>(r => setTimeout(r, 320));
@@ -2406,7 +2470,7 @@ export default function FridgeScreen() {
           messages: [{
             role: 'user',
             content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+              { type: 'image', source: { type: 'base64', media_type: imageMimeFromBase64(base64), data: base64 } },
               { type: 'text', text: 'Find any best-by, use-by, sell-by, or expiry date printed on this label. Convert it to YYYY-MM-DD format. If only month and year are visible (e.g. "MAY 2026" or "05/26"), use the last day of that month. If only month/day with no year, assume the nearest future year. Return ONLY: {"expiryDate":"YYYY-MM-DD"}. If no date is found return {"expiryDate":""}.' },
             ],
           }],
@@ -2422,7 +2486,7 @@ export default function FridgeScreen() {
       setTimeout(() => setShowAdd(true), 320);
       if (!json.expiryDate) { showToast('No expiry date found on label', true); setScanning(false); return; }
       setForm(f => ({ ...f, expiryDate: json.expiryDate }));
-      showToast('Expiry date captured! 📅');
+      showToast('Expiry date captured');
     } catch (e: any) {
       setScanningLabel(false);
       setTimeout(() => setShowAdd(true), 320);
@@ -2797,9 +2861,11 @@ export default function FridgeScreen() {
       <ScanStatusStrip
         visible={scanningReceipt}
         blocking
-        label="Scanning receipt"
-        sublabel="Please stay on this screen and don't tap anything. Long receipts can take up to a minute."
-        slowHint="Still working — reading every item and looking up nutrition."
+        label={scanMode === 'labels' ? 'Reading labels' : scanMode === 'photo' ? 'Finding your items' : 'Scanning receipt'}
+        sublabel={scanMode !== 'receipt'
+          ? "Please stay on this screen and don't tap anything. This can take up to a minute."
+          : "Please stay on this screen and don't tap anything. Long receipts can take up to a minute."}
+        slowHint="Still working — identifying every item and looking up nutrition."
       />
       <ScanStatusStrip visible={scanningLabel}   label="reading label"    sublabel="Extracting expiry date…" />
       <BarcodeScanStrip visible={barcodeProcessing} scanSuccess={scanSuccess} scannedEmoji={scannedEmoji} scannedName={scannedName} />
@@ -3027,8 +3093,15 @@ export default function FridgeScreen() {
                   >
                     <Text style={styles.scanBtnText}>Receipt</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.scanBtn}
+                    onPress={scanPhoto}
+                    disabled={scanningReceipt}
+                  >
+                    <Text style={styles.scanBtnText}>Photo</Text>
+                  </TouchableOpacity>
                 </View>
-                <Text style={styles.scanHint}>Barcode · Label · Receipt — all fill the form automatically</Text>
+                <Text style={styles.scanHint}>Barcode and Label fill this form · Receipt and Photo add many items at once</Text>
               </>
             )}
             {!editItem && itemHistory.length > 0 && (

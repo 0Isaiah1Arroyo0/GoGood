@@ -201,8 +201,6 @@ function getSuggestionGroups(hasExpiring: boolean): SuggestionGroup[] {
   ];
 }
 
-const SUGGESTIONS_PER_GROUP = 4; // show this many per group until "show more" is tapped
-
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
@@ -560,7 +558,8 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
     setLoading(false);
   };
 
-  const [openSuggestGroups, setOpenSuggestGroups] = useState<Set<string>>(new Set());
+  // Which suggestion group is open (null = showing the three choices)
+  const [suggestGroup, setSuggestGroup] = useState<string | null>(null);
 
   const chooseSuggestion = (prompt: string) => {
     if (!isPremium) { showPaywall(); return; }
@@ -792,14 +791,38 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                         {msg.showSuggestions && !suggestionChosen && (
                           <View style={styles.suggestCard}>
                             <Text style={styles.suggestLabel}>what sounds good?</Text>
-                            {getSuggestionGroups(!!(msg.welcomeChips?.length)).map(group => {
-                              const showAll = openSuggestGroups.has(group.key);
-                              const visible = showAll ? group.items : group.items.slice(0, SUGGESTIONS_PER_GROUP);
-                              const hidden = group.items.length - visible.length;
+                            {(() => {
+                              const groups = getSuggestionGroups(!!(msg.welcomeChips?.length));
+                              const picked = groups.find(g => g.key === suggestGroup);
+                              const switchGroup = (key: string | null) => {
+                                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                setSuggestGroup(key);
+                              };
+
+                              // Step 1: three choices
+                              if (!picked) {
+                                return (
+                                  <View style={styles.suggestGroup}>
+                                    {groups.map(g => (
+                                      <TouchableOpacity
+                                        key={g.key}
+                                        style={styles.suggestChoice}
+                                        onPress={() => { Haptics.selectionAsync(); switchGroup(g.key); }}
+                                        activeOpacity={0.75}
+                                      >
+                                        <Text style={styles.suggestChoiceText}>{g.title}</Text>
+                                        <Text style={styles.suggestChoiceCount}>{g.items.length}</Text>
+                                      </TouchableOpacity>
+                                    ))}
+                                  </View>
+                                );
+                              }
+
+                              // Step 2: that group's full list
                               return (
-                                <View key={group.key} style={styles.suggestGroup}>
-                                  <Text style={styles.suggestGroupTitle}>{group.title}</Text>
-                                  {visible.map(sug => (
+                                <View style={styles.suggestGroup}>
+                                  <Text style={styles.suggestGroupTitle}>{picked.title}</Text>
+                                  {picked.items.map(sug => (
                                     <TouchableOpacity
                                       key={sug.key}
                                       style={styles.suggestRow}
@@ -809,24 +832,12 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                                       <Text style={styles.suggestRowText}>{sug.label}</Text>
                                     </TouchableOpacity>
                                   ))}
-                                  {(hidden > 0 || showAll) && (
-                                    <TouchableOpacity
-                                      style={styles.suggestMore}
-                                      onPress={() => {
-                                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                                        setOpenSuggestGroups(prev => {
-                                          const n = new Set(prev);
-                                          n.has(group.key) ? n.delete(group.key) : n.add(group.key);
-                                          return n;
-                                        });
-                                      }}
-                                    >
-                                      <Text style={styles.suggestMoreText}>{showAll ? 'Show less' : `Show ${hidden} more`}</Text>
-                                    </TouchableOpacity>
-                                  )}
+                                  <TouchableOpacity style={styles.suggestMore} onPress={() => switchGroup(null)}>
+                                    <Text style={styles.suggestMoreText}>Back to choices</Text>
+                                  </TouchableOpacity>
                                 </View>
                               );
-                            })}
+                            })()}
                             <Text style={styles.orType}>or type your own question below</Text>
                           </View>
                         )}
@@ -1121,6 +1132,9 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   suggestGroupTitle:  { fontSize: 16, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold', marginTop: 14, marginBottom: 4 },
   suggestRow:         { paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: c.border },
   suggestRowText:     { fontSize: 14, color: c.text, fontFamily: 'Fraunces_600SemiBold' },
+  suggestChoice:      { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg },
+  suggestChoiceText:  { flex: 1, fontSize: 15, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
+  suggestChoiceCount: { fontSize: 12, fontWeight: '600', color: c.textMuted },
   suggestMore:        { alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg },
   suggestMoreText:    { fontSize: 12, fontWeight: '600', color: c.textSub },
 

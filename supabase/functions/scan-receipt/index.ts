@@ -199,6 +199,38 @@ async function walmartBatchLookup(skus: string[]): Promise<{ results: Map<string
   return { results, debug }
 }
 
+// The image's real format, read from its first bytes (the label sent by the app can
+// be wrong — e.g. PNG screenshots labeled as JPEG — and the API rejects mismatches).
+function detectImageType(b64: string, fallback: string): string {
+  if (b64.startsWith('/9j/'))   return 'image/jpeg'
+  if (b64.startsWith('iVBOR'))  return 'image/png'
+  if (b64.startsWith('R0lGOD')) return 'image/gif'
+  if (b64.startsWith('UklGR'))  return 'image/webp'
+  return fallback
+}
+
+// Barcode databases sometimes prefix names with a missing brand ("None Broccoli").
+function cleanProductName(name: string): string {
+  return name.replace(/^(none|null|undefined|n\/a)\s+/i, '').replace(/\s{2,}/g, ' ').trim()
+}
+
+// True when two product names share a meaningful word (ignores tiny words and plurals).
+function namesOverlap(a: string, b: string): boolean {
+  const words = (s: string) => new Set(
+    s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+      .filter(w => w.length >= 4).map(w => w.replace(/(es|s)$/, ''))
+  )
+  const wa = words(a), wb = words(b)
+  for (const w of wa) if (wb.has(w)) return true
+  return false
+}
+
+// The API accepts images up to about 5 MB each.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
 // Try to extract a clean JSON array from Claude's response text
 function extractJsonArray(text: string): any[] | null {
   // Direct match
@@ -227,7 +259,20 @@ function extractJsonArray(text: string): any[] | null {
     try {
       const parsed = JSON.parse(text.slice(start, end + 1))
       if (Array.isArray(parsed)) return parsed
-    } catch { /* give up */ }
+    } catch { /* fall through */ }
+  }
+
+  // Cut-off response (e.g. a very long receipt hit the output limit): keep every
+  // complete item object and drop the half-written one at the end.
+  if (start !== -1) {
+    let cut = text.lastIndexOf('}')
+    while (cut > start) {
+      try {
+        const parsed = JSON.parse(text.slice(start, cut + 1) + ']')
+        if (Array.isArray(parsed)) return parsed
+      } catch { /* try the previous closing brace */ }
+      cut = text.lastIndexOf('}', cut - 1)
+    }
   }
 
   return null
@@ -249,8 +294,19 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: cors })
 
-    const { imageBase64, mimeType = 'image/jpeg', storeName } = await req.json()
-    if (!imageBase64) return new Response(JSON.stringify({ error: 'imageBase64 required' }), { status: 400, headers: cors })
+    const { imageBase64: rawBase64, mimeType: claimedType = 'image/jpeg', storeName } = await req.json()
+    if (!rawBase64) return new Response(JSON.stringify({ error: 'imageBase64 required' }), { status: 400, headers: cors })
+
+    // Strip a data-URL prefix or line breaks if present, then check format and size
+    const imageBase64 = String(rawBase64).replace(/^data:[^,]+,/, '').replace(/\s/g, '')
+    const mimeType = detectImageType(imageBase64, claimedType)
+    const approxBytes = Math.floor(imageBase64.length * 3 / 4)
+    if (approxBytes > MAX_IMAGE_BYTES) {
+      return json({
+        sessionId: null, items: [], error: 'image_too_large',
+        message: `That image is too large to read (${(approxBytes / 1048576).toFixed(1)} MB). Try a closer photo, or crop the screenshot to just the items.`,
+      })
+    }
 
     const systemPrompt = `You are a grocery receipt parser for US retail stores (Walmart, Kroger, Target, Publix, Costco, Sam's Club, etc.).
 Extract ONLY the food and beverage line items from the receipt image.
@@ -355,7 +411,7 @@ PARSING RULES:
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: 4096,
+          max_tokens: 16000, // long receipts produce long item lists — 4096 cut them off mid-list
           system: systemPrompt,
           messages: [{
             role: 'user',
@@ -380,6 +436,9 @@ PARSING RULES:
 
       const anthropicData = await anthropicRes.json()
       rawClaudeText = anthropicData?.content?.[0]?.text ?? ''
+      if (anthropicData?.stop_reason === 'max_tokens') {
+        console.log('[scan-receipt] response hit max_tokens — item list was cut off')
+      }
 
       const parsed = extractJsonArray(rawClaudeText)
       if (parsed && parsed.length > 0) {
@@ -389,13 +448,16 @@ PARSING RULES:
     }
 
     if (items.length === 0) {
-      return new Response(JSON.stringify({
+      const apiRejected = rawClaudeText.startsWith('API error')
+      console.log('[scan-receipt] no items:', rawClaudeText.slice(0, 500))
+      return json({
         sessionId: null,
         items: [],
-        error: 'Could not parse receipt',
+        error: apiRejected ? 'image_rejected' : 'no_items_found',
+        message: apiRejected
+          ? "We couldn't read that image. Try taking a new photo, or a screenshot saved as a regular image."
+          : "We couldn't find any food items on that receipt. Make sure the item lines are fully visible and in focus.",
         debug: rawClaudeText.slice(0, 500),
-      }), {
-        headers: { ...cors, 'Content-Type': 'application/json' }
       })
     }
 
@@ -419,7 +481,10 @@ PARSING RULES:
       const rawSku = item.sku?.replace(/\D/g, '') ?? null
 
       // Try as UPC-A (12 digits) or EAN-13 (13 digits) first
-      const validUpc = rawSku && /^\d{12,13}$/.test(rawSku) ? rawSku : null
+      // Loose produce has a 4-5 digit PLU (4011 = bananas) that Walmart pads with zeros.
+      // It isn't a barcode, so a barcode lookup returns unrelated products — skip it.
+      const isProducePlu = !!rawSku && /^0{7,9}\d{4,5}$/.test(rawSku)
+      const validUpc = rawSku && !isProducePlu && /^\d{12,13}$/.test(rawSku) ? rawSku : null
 
       // For short SKUs, check if Walmart resolved it to a product with a UPC
       const walmartItem = rawSku && !validUpc ? walmartResults.get(rawSku) : null
@@ -449,8 +514,11 @@ PARSING RULES:
       }
 
       // Name priority: Walmart product name > UPC-resolved name > original Claude name
+      // Only trust a barcode-database name when it clearly matches what's on the receipt
+      // (the database can return foreign-language or junk names like "None Broccoli").
+      const upcName = nutrition?.source === 'upc' && nutrition.name ? cleanProductName(nutrition.name) : null
       const bestName = walmartItem?.name
-        ?? ((nutrition?.source === 'upc' && nutrition.name) ? nutrition.name : item.name)
+        ?? (upcName && namesOverlap(upcName, item.name) ? upcName : item.name)
 
       return {
         ...item,

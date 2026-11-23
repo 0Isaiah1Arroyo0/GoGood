@@ -1066,9 +1066,29 @@ function ConfettiBlast({ good, onDone }: { good: boolean; onDone: () => void }) 
   );
 }
 
+// Detect an image's real format from its base64 header. The picker can return PNG
+// (e.g. screenshots), and the AI service rejects images labeled with the wrong type.
+function imageMimeFromBase64(b64: string): string {
+  if (b64.startsWith('iVBOR'))  return 'image/png';
+  if (b64.startsWith('R0lGOD')) return 'image/gif';
+  if (b64.startsWith('UklGR'))  return 'image/webp';
+  return 'image/jpeg';
+}
+
 // ─── Scan Status Strip (receipt + label scans) ───────────────────────────────
-function ScanStatusStrip({ visible, label, sublabel }: { visible: boolean; label: string; sublabel: string }) {
+function ScanStatusStrip({ visible, label, sublabel, blocking = false, slowHint }: {
+  visible: boolean; label: string; sublabel: string;
+  blocking?: boolean;   // cover the whole app so a stray tap can't leave mid-scan
+  slowHint?: string;    // shown under the sublabel once the scan has run a while
+}) {
   const insets = useSafeAreaInsets();
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!visible) { setElapsed(0); return; }
+    const t = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(t);
+  }, [visible]);
+  const tabSpace = useTabBarSpace(); // sit above the floating bottom bar
   const translateY = useRef(new Animated.Value(120)).current;
   const dot1 = useRef(new Animated.Value(0.3)).current;
   const dot2 = useRef(new Animated.Value(0.3)).current;
@@ -1097,19 +1117,20 @@ function ScanStatusStrip({ visible, label, sublabel }: { visible: boolean; label
     return () => dotLoopRef.current?.stop();
   }, [visible]);
 
-  return (
+  const card = (
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
       style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
-        paddingBottom: Math.max(insets.bottom, 20) + 10,
+        position: 'absolute', bottom: tabSpace + 8, left: 16, right: 16,
+        paddingBottom: 16,
         paddingTop: 18, paddingHorizontal: 24,
         backgroundColor: '#0A5740',
         flexDirection: 'row', alignItems: 'center', gap: 16,
-        borderTopLeftRadius: 16, borderTopRightRadius: 16,
+        borderRadius: 16,
         shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.2, shadowRadius: 10, elevation: 10,
-        transform: [{ translateY }],
+        opacity: translateY.interpolate({ inputRange: [0, 120], outputRange: [1, 0] }),
+        transform: [{ translateY: translateY.interpolate({ inputRange: [0, 120], outputRange: [0, 40] }) }],
         zIndex: 200,
       }}
     >
@@ -1120,9 +1141,22 @@ function ScanStatusStrip({ visible, label, sublabel }: { visible: boolean; label
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600', fontFamily: 'Fraunces_400Regular' }}>{label}</Text>
-        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 }}>{sublabel}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, marginTop: 2, lineHeight: 17 }}>{sublabel}</Text>
+        {slowHint && elapsed >= 12 ? (
+          <Text style={{ color: '#5DCAA5', fontSize: 12, marginTop: 6, lineHeight: 17 }}>{slowHint}</Text>
+        ) : null}
       </View>
     </Animated.View>
+  );
+
+  if (!blocking) return card;
+  // Blocking: dim and cover everything (including the bottom bar) until the scan finishes
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}>
+        {card}
+      </View>
+    </Modal>
   );
 }
 
@@ -1134,6 +1168,7 @@ function BarcodeScanStrip({ visible, scanSuccess, scannedEmoji, scannedName }: {
   scannedName: string;
 }) {
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace(); // sit above the floating bottom bar
   const translateY = useRef(new Animated.Value(120)).current;
   const dot1 = useRef(new Animated.Value(0.3)).current;
   const dot2 = useRef(new Animated.Value(0.3)).current;
@@ -1174,14 +1209,15 @@ function BarcodeScanStrip({ visible, scanSuccess, scannedEmoji, scannedName }: {
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
       style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
-        paddingBottom: Math.max(insets.bottom, 20) + 10,
+        position: 'absolute', bottom: tabSpace + 8, left: 16, right: 16,
+        paddingBottom: 16,
         paddingTop: 18, paddingHorizontal: 24,
         backgroundColor: '#0A5740',
-        borderTopLeftRadius: 16, borderTopRightRadius: 16,
+        borderRadius: 16,
         shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.2, shadowRadius: 10, elevation: 10,
-        transform: [{ translateY }],
+        opacity: translateY.interpolate({ inputRange: [0, 120], outputRange: [1, 0] }),
+        transform: [{ translateY: translateY.interpolate({ inputRange: [0, 120], outputRange: [0, 40] }) }],
         zIndex: 1001,
       }}
     >
@@ -2278,12 +2314,12 @@ export default function FridgeScreen() {
       if (source === 'camera') {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') { showToast('Camera permission needed', true); return; }
-        // Higher quality for receipts — fine text needs good resolution
-        result = await ImagePicker.launchCameraAsync({ base64: true, quality: 1.0 });
+        // 0.7 keeps receipt text sharp while staying well under the ~5 MB image limit
+        result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') { showToast('Photo library access needed', true); return; }
-        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 1.0, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'] });
       }
       if (result.canceled || !result.assets?.[0]?.base64) { return; }
       // Close the BottomSheet Modal first — iOS only allows one Modal at a time.
@@ -2298,19 +2334,34 @@ export default function FridgeScreen() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({
           imageBase64: result.assets[0].base64,
-          mimeType: 'image/jpeg',
+          mimeType: imageMimeFromBase64(result.assets[0].base64!),
           storeName: storeName ?? null,
         }),
       });
-      const data = await res.json();
+      // Read as text first: if Supabase stops the function (time/memory/size limit) the
+      // reply isn't our usual JSON, and we still want a useful message.
+      const rawText = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(rawText); } catch { /* non-JSON gateway reply */ }
+      if (__DEV__) console.log('[scan-receipt] status', res.status, rawText.slice(0, 300));
       if (__DEV__ && data._debug) console.log('[scan-receipt debug]', JSON.stringify(data._debug, null, 2));
+      if (!res.ok && !data.message) {
+        data.message = res.status === 413
+          ? 'That image is too large to upload. Try a closer photo, or crop the screenshot to just the items.'
+          : (res.status === 504 || res.status === 546 || res.status === 408)
+            ? 'That receipt took too long to read. Try scanning it in two parts (top half, then bottom half).'
+            : `The scan service had a problem (error ${res.status}). Please try again.`;
+      }
       if (!data.sessionId) {
-        Alert.alert(
-          'Receipt Not Recognized',
-          'Make sure the entire receipt is visible, well-lit, and the text is in focus. Try flattening the receipt on a dark surface.\n\nTip: item number codes on your receipt help us look up exact nutrition info.',
-          [{ text: 'Try Again', onPress: () => scanReceipt() }, { text: 'Cancel', style: 'cancel' }],
-        );
+        if (__DEV__) console.log('[scan-receipt] failed:', data.error, data.debug);
+        // Close the blocking overlay first — an alert shown on top of it would be dismissed with it
         setScanningReceipt(false);
+        setTimeout(() => Alert.alert(
+          'Receipt Not Recognized',
+          data.message
+            ?? 'Make sure the entire receipt is visible, well-lit, and the text is in focus. Screenshots of digital receipts work too.\n\nTip: item number codes on your receipt help us look up exact nutrition info.',
+          [{ text: 'Try Again', onPress: () => scanReceipt() }, { text: 'Cancel', style: 'cancel' }],
+        ), 400);
         return;
       }
       router.push({ pathname: '/receipt-review', params: { sessionId: data.sessionId, storeName: storeName ?? '' } } as any);
@@ -2741,7 +2792,13 @@ export default function FridgeScreen() {
 
   return (
     <View style={styles.safeArea}>
-      <ScanStatusStrip visible={scanningReceipt} label="scanning receipt" sublabel="Reading items & looking up nutrition…" />
+      <ScanStatusStrip
+        visible={scanningReceipt}
+        blocking
+        label="Scanning receipt"
+        sublabel="Please stay on this screen and don't tap anything. Long receipts can take up to a minute."
+        slowHint="Still working — reading every item and looking up nutrition."
+      />
       <ScanStatusStrip visible={scanningLabel}   label="reading label"    sublabel="Extracting expiry date…" />
       <BarcodeScanStrip visible={barcodeProcessing} scanSuccess={scanSuccess} scannedEmoji={scannedEmoji} scannedName={scannedName} />
       <StatusBar style={colors.statusBar} backgroundColor={colors.bg} />

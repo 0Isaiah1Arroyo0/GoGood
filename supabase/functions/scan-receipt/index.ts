@@ -14,6 +14,7 @@ interface ParsedItem {
   icon: string
   estimatedExpiryDays: number | null
   sku: string | null  // 5-15 digit item number/UPC if visible on receipt
+  nutrition?: { cal?: number; protein?: number; carbs?: number; fat?: number } | null // AI estimate per 100 g
 }
 
 interface NutritionData {
@@ -22,7 +23,7 @@ interface NutritionData {
   carbs: number
   fat: number
   cal: number
-  source: 'upc' | 'off_search' | 'usda' | 'none'
+  source: 'upc' | 'off_search' | 'usda' | 'ai_estimate' | 'none'
 }
 
 // Look up a product by UPC/EAN via Open Food Facts (free, no API key)
@@ -209,6 +210,32 @@ function detectImageType(b64: string, fallback: string): string {
   return fallback
 }
 
+// Nutrition databases rarely match a full product name like "Too Good & Co. Blended
+// Vanilla Yogurt 32 oz", so also try shorter, more generic versions of it.
+const KNOWN_BRANDS = [
+  'great value', 'freshness guaranteed', 'marketside', "sam's choice", 'equate', 'member\'s mark',
+  'kirkland signature', 'good & gather', 'market pantry', 'kroger', 'simple truth', 'private selection',
+  'o organics', 'signature select', '365', 'trader joe\'s',
+]
+function simplerNames(name: string): string[] {
+  let n = name.toLowerCase()
+    .replace(/\b\d+(\.\d+)?\s*(fl\.?\s*oz|oz|lbs?|ct|count|pk|pack|g|kg|ml|l|gal|qt|pt)\b/g, ' ') // sizes
+    .replace(/\b\d+(\.\d+)?\s*%\s*\w*/g, ' ')                                                    // 2% milkfat
+    .replace(/[^a-z' &-]/g, ' ').replace(/\s+/g, ' ').trim()
+  const out: string[] = []
+  if (n && n !== name.toLowerCase()) out.push(n)
+  for (const b of KNOWN_BRANDS) {
+    if (n.startsWith(b + ' ')) { n = n.slice(b.length).trim(); out.push(n); break }
+  }
+  // Drop a leading brand-like chunk ending in "&" or "co" (e.g. "too good & co")
+  const noCo = n.replace(/^.*?\b(co|inc|company)\b\.?\s+/, '')
+  if (noCo !== n && noCo.split(' ').length >= 1) out.push(noCo)
+  const words = n.split(' ').filter(w => w.length > 1 && !['and', 'the', 'with', 'organic', 'natural', 'original', 'all'].includes(w))
+  if (words.length > 3) out.push(words.slice(-3).join(' '))
+  if (words.length > 2) out.push(words.slice(-2).join(' '))
+  return [...new Set(out.filter(x => x.length >= 3))]
+}
+
 // Barcode databases sometimes prefix names with a missing brand ("None Broccoli").
 function cleanProductName(name: string): string {
   return name.replace(/^(none|null|undefined|n\/a)\s+/i, '').replace(/\s{2,}/g, ' ').trim()
@@ -336,6 +363,7 @@ Each object must have exactly these fields:
 - icon: string (single emoji best representing the item)
 - estimatedExpiryDays: number | null (typical shelf-life days from purchase; null for indefinitely shelf-stable items)
 - sku: string | null (the item number/barcode printed on the receipt — see SKU DETECTION below)
+- nutrition: { "cal": number, "protein": number, "carbs": number, "fat": number } (typical values per 100 g for this kind of food — your best estimate, grams for protein/carbs/fat; use 0s for water or zero-calorie drinks)
 
 SKU DETECTION — CRITICAL FOR ITEM LOOKUP:
 Walmart, Target, Kroger, and most US retail receipts print item identifier numbers that help with product lookup.
@@ -423,6 +451,7 @@ Each object must have exactly these fields:
 - icon: string (single emoji for the item)
 - estimatedExpiryDays: number | null (typical days of shelf life left for a recently bought item of this kind; null for indefinitely shelf-stable items like salt or honey)
 - sku: null
+- nutrition: { "cal": number, "protein": number, "carbs": number, "fat": number } (typical values per 100 g for this kind of food — your best estimate, grams for protein/carbs/fat; use 0s for water or zero-calorie drinks)
 
 RULES:
 - One entry per distinct product. If you see three identical cans, return one entry with qty 3.
@@ -450,6 +479,7 @@ Each object must have exactly these fields:
 - icon: string (single emoji for the item)
 - estimatedExpiryDays: number | null
 - sku: string | null (the UPC barcode digits only if they're printed and fully readable, otherwise null)
+- nutrition: { "cal": number, "protein": number, "carbs": number, "fat": number } (typical values per 100 g for this kind of food — your best estimate, grams for protein/carbs/fat; use 0s for water or zero-calorie drinks)
 
 EXPIRY:
 - If a date is printed ("best by", "best if used by", "use by", "sell by", "exp", or a bare date stamp), set estimatedExpiryDays to the days from today (${todayStr}) to that date — negative if it has passed. Month/year only → last day of that month.
@@ -585,10 +615,30 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
       }
 
       // USDA as last resort (good for fresh/unbranded: produce, meat, eggs)
-      if (!nutrition || (nutrition.cal === 0 && nutrition.protein === 0)) {
+      const empty = (n: NutritionData | null) => !n || (n.cal === 0 && n.protein === 0)
+      if (empty(nutrition)) {
         const usda = await lookupByNameUSDA(searchName)
         if (usda && (usda.cal > 0 || usda.protein > 0)) {
           nutrition = usda
+        }
+      }
+
+      // Still nothing: try shorter, generic versions of the name ("vanilla yogurt")
+      if (empty(nutrition)) {
+        for (const alt of simplerNames(searchName)) {
+          const [off, usda] = await Promise.all([lookupByNameOFF(alt), lookupByNameUSDA(alt)])
+          const hit = [usda, off].find(n => n && (n.cal > 0 || n.protein > 0)) ?? null
+          if (hit) { nutrition = { ...hit, name: undefined }; break }
+        }
+      }
+
+      // Last resort: the AI's own typical values, so an item is never left blank
+      if (empty(nutrition) && item.nutrition && (Number(item.nutrition.cal) > 0 || Number(item.nutrition.protein) > 0)) {
+        const r = (v: unknown) => Math.max(0, Math.round((Number(v) || 0) * 10) / 10)
+        nutrition = {
+          protein: r(item.nutrition.protein), carbs: r(item.nutrition.carbs),
+          fat: r(item.nutrition.fat), cal: Math.round(Number(item.nutrition.cal) || 0),
+          source: 'ai_estimate',
         }
       }
 

@@ -1,3 +1,5 @@
+import { requireOptionalNativeModule } from 'expo-modules-core';
+
 // On-device text recognition (Apple Vision on iOS — the engine behind Live Text —
 // and Google ML Kit on Android) via expo-text-extractor.
 //
@@ -9,11 +11,17 @@ let mod: { isSupported: boolean; extractTextFromImage: (uri: string) => Promise<
 
 function loadModule() {
   if (mod !== undefined) return mod;
+  // Check quietly first: requiring the package in a build without the native module
+  // throws (and logs a red error) even when the require is wrapped in try/catch.
+  if (!requireOptionalNativeModule('ExpoTextExtractor')) {
+    mod = null; // native module not in this build — callers fall back to AI-only scanning
+    return mod;
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     mod = require('expo-text-extractor');
   } catch {
-    mod = null; // native module not in this build
+    mod = null;
   }
   return mod;
 }

@@ -17,6 +17,7 @@ import { useTheme, type ThemeColors } from '../context/theme';
 import { useAuth } from '../context/auth';
 import { requestNotificationPermission, rescheduleExpiryNotifications } from '../lib/notifications';
 import * as Notifications from 'expo-notifications';
+import { readTextOnDevice, parseExpiryFromText } from '../lib/ocr';
 import { pushItems, pullItems, fromRow } from '../lib/sync';
 import { HOUSEHOLD_KEY, HOUSEHOLD_NAME_KEY, subscribeToHouseholdItems } from '../lib/household';
 import { useAppDrawer } from '../components/AppDrawer';
@@ -2326,7 +2327,7 @@ export default function FridgeScreen() {
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') { showToast('Photo library access needed', true); return; }
-        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'] });
+        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'], preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
       }
       if (result.canceled || !result.assets?.[0]?.base64) { return; }
       // Close the BottomSheet Modal first — iOS only allows one Modal at a time.
@@ -2337,6 +2338,9 @@ export default function FridgeScreen() {
       await new Promise<void>(r => setTimeout(r, 750));
       setScanMode(mode);
       setScanningReceipt(true);
+      // Photos of items/labels: read the text on the phone first and send it along,
+      // so names and dates come from what's actually printed.
+      const ocrLines = isPhoto ? await readTextOnDevice(result.assets[0].uri) : null;
       const { data: { session } } = await import('../lib/supabase').then(m => m.supabase.auth.getSession());
       if (!session) { showToast('Please sign in to scan receipts', true); setScanningReceipt(false); return; }
       const res = await fetch(`${SUPABASE_URL}/functions/v1/scan-receipt`, {
@@ -2348,6 +2352,7 @@ export default function FridgeScreen() {
           storeName: storeName ?? null,
           mode,
           locationHint,
+          ocrText: ocrLines?.length ? ocrLines.join('\n').slice(0, 8000) : null,
         }),
       });
       // Read as text first: if Supabase stops the function (time/memory/size limit) the
@@ -2376,7 +2381,7 @@ export default function FridgeScreen() {
             ?? (isPhoto
               ? 'Try a closer, well-lit photo with labels facing the camera.'
               : 'Make sure the entire receipt is visible, well-lit, and the text is in focus. Screenshots of digital receipts work too.\n\nTip: item number codes on your receipt help us look up exact nutrition info.'),
-          [{ text: 'Try Again', onPress: () => (mode === 'labels' ? scanLabel() : isPhoto ? scanPhoto() : scanReceipt()) }, { text: 'Cancel', style: 'cancel' }],
+          [{ text: 'Try Again', onPress: () => (isPhoto ? scanLabel() : scanReceipt()) }, { text: 'Cancel', style: 'cancel' }],
         ), 400);
         return;
       }
@@ -2400,21 +2405,6 @@ export default function FridgeScreen() {
     );
   };
 
-  // Batch add: a photo of a fridge, freezer, pantry shelf, or groceries on the counter
-  const scanPhoto = () => {
-    if (!isAnnual) { showPaywall(); return; }
-    // If they're on the Fridge/Freezer/Pantry tab, assume that's where the photo is from
-    const hint: Category | null = activeTab === 'all' ? null : activeTab;
-    Alert.alert(
-      'Add Items From a Photo',
-      `Take or choose a photo of your ${hint ?? 'fridge, freezer, pantry, or groceries'}. GoGood will find each item so you can review them before adding.\n\nTip: good lighting and labels facing the camera work best.`,
-      [
-        { text: 'Take Photo',    onPress: () => doScanReceipt('camera',  undefined, 'photo', hint) },
-        { text: 'Photo Library', onPress: () => doScanReceipt('library', undefined, 'photo', hint) },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
-  };
 
   // Label button: one item (fills the expiry date in this form) or several items
   // (adds them all for review), from the camera or the photo library.
@@ -2427,7 +2417,7 @@ export default function FridgeScreen() {
       ]);
     Alert.alert(
       'Scan Labels',
-      'Scan one label to fill in its expiry date, or a photo of several products to add them all at once.',
+      'Scan one label to fill in its expiry date, or a photo of several items (your fridge, a shelf, or groceries on the counter) to add them all at once.',
       [
         { text: 'One item', onPress: () => pickSource(src => scanSingleLabel(src), 'Scan One Label') },
         {
@@ -2435,7 +2425,7 @@ export default function FridgeScreen() {
           onPress: () => {
             if (!isAnnual) { showPaywall(); return; }
             const hint: Category | null = activeTab === 'all' ? null : activeTab;
-            pickSource(src => doScanReceipt(src, undefined, 'labels', hint), 'Scan Several Labels');
+            pickSource(src => doScanReceipt(src, undefined, 'labels', hint), 'Scan Several Items');
           },
         },
         { text: 'Cancel', style: 'cancel' },
@@ -2454,9 +2444,19 @@ export default function FridgeScreen() {
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') { showToast('Photo library access needed', true); setScanning(false); return; }
-        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'] });
+        result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'], preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
       }
       if (result.canceled || !result.assets?.[0]?.base64) { setScanning(false); return; }
+      // Read the label on the phone first (Apple Vision / ML Kit). If it finds the
+      // date we're done — no upload, no AI call.
+      const onDeviceLines = await readTextOnDevice(result.assets[0].uri);
+      const onDeviceDate = onDeviceLines ? parseExpiryFromText(onDeviceLines) : null;
+      if (onDeviceDate) {
+        setForm(f => ({ ...f, expiryDate: onDeviceDate }));
+        showToast('Expiry date captured');
+        setScanning(false);
+        return;
+      }
       setShowAdd(false);
       await new Promise<void>(r => setTimeout(r, 320));
       setScanningLabel(true);
@@ -2861,7 +2861,7 @@ export default function FridgeScreen() {
       <ScanStatusStrip
         visible={scanningReceipt}
         blocking
-        label={scanMode === 'labels' ? 'Reading labels' : scanMode === 'photo' ? 'Finding your items' : 'Scanning receipt'}
+        label={scanMode === 'receipt' ? 'Scanning receipt' : 'Finding your items'}
         sublabel={scanMode !== 'receipt'
           ? "Please stay on this screen and don't tap anything. This can take up to a minute."
           : "Please stay on this screen and don't tap anything. Long receipts can take up to a minute."}
@@ -3093,15 +3093,7 @@ export default function FridgeScreen() {
                   >
                     <Text style={styles.scanBtnText}>Receipt</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.scanBtn}
-                    onPress={scanPhoto}
-                    disabled={scanningReceipt}
-                  >
-                    <Text style={styles.scanBtnText}>Photo</Text>
-                  </TouchableOpacity>
                 </View>
-                <Text style={styles.scanHint}>Barcode and Label fill this form · Receipt and Photo add many items at once</Text>
               </>
             )}
             {!editItem && itemHistory.length > 0 && (

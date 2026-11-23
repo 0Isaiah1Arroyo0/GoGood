@@ -298,6 +298,7 @@ serve(async (req) => {
       imageBase64: rawBase64, mimeType: claimedType = 'image/jpeg', storeName,
       mode = 'receipt',          // 'receipt' | 'photo' (items in a fridge/pantry/counter) | 'labels' (several product labels)
       locationHint = null,       // 'fridge' | 'freezer' | 'pantry' when the user says where the photo was taken
+      ocrText = null,            // text the phone already read from the photo (Apple Vision / ML Kit), if available
     } = await req.json()
     const isLabels = mode === 'labels'
     const isPhoto = mode === 'photo' || isLabels   // both are pictures of products, not receipts
@@ -307,6 +308,14 @@ serve(async (req) => {
     // Strip a data-URL prefix or line breaks if present, then check format and size
     const imageBase64 = String(rawBase64).replace(/^data:[^,]+,/, '').replace(/\s/g, '')
     const mimeType = detectImageType(imageBase64, claimedType)
+    // HEIC/HEIF files start with an ISO-BMFF box whose type, at bytes 4-7, is "ftyp"
+    const head = (() => { try { return atob(imageBase64.slice(0, 16)) } catch { return '' } })()
+    if (head.slice(4, 8) === 'ftyp') {
+      return json({
+        sessionId: null, items: [], error: 'unsupported_format',
+        message: "That photo is in Apple's HEIC format, which can't be read. Update the app and try again, or take a new photo from inside GoGood.",
+      })
+    }
     const approxBytes = Math.floor(imageBase64.length * 3 / 4)
     if (approxBytes > MAX_IMAGE_BYTES) {
       return json({
@@ -424,32 +433,34 @@ RULES:
 ${locationHint ? `- The user says this photo is of their ${locationHint}. Set estimatedCategory to "${locationHint}" for everything unless an item clearly belongs elsewhere.` : '- estimatedCategory: frozen items → "freezer"; dairy/produce/meat/deli → "fridge"; everything else → "pantry".'}
 - If you cannot identify any food items, return []`
 
-    const labelsPrompt = `You read the labels of several food and drink products in one photo (packages lined up, held together, or on a shelf).
+    const labelsPrompt = `You find every food and drink item in a photo — a fridge or freezer shelf, a pantry, groceries on a counter, or several product labels — and read their labels the way a phone's text recognition (like iPhone Live Text) would.
 Return ONLY a valid JSON array — no markdown, no explanation, nothing else.
 
 Today's date is ${todayStr}.
 
+HOW TO WORK:
+1. Before answering, go over the whole photo carefully, shelf by shelf, and read every word printed on every package: brand, product name, flavor, size, and any dates. Zoom in mentally on small text.
+2. Then list each distinct item. Use what the label says. For unlabeled items (produce, eggs in a carton, leftovers in clear containers), name them by what they clearly are.
+
 Each object must have exactly these fields:
-- name: string (product name as printed on the label, including the brand when readable, e.g. "Great Value Whole Milk")
-- qty: number (how many of that exact product are in the photo; default 1)
+- name: string (as printed on the label, with the brand when readable, e.g. "Chobani Plain Greek Yogurt"; for unlabeled items a plain name, e.g. "Red Bell Peppers")
+- qty: number (how many of that exact item you can see; default 1)
 - unit: string (count, bottle, can, jar, carton, bag, box, pack, lbs, oz — default "count")
 - estimatedCategory: "fridge" | "freezer" | "pantry"
 - icon: string (single emoji for the item)
 - estimatedExpiryDays: number | null
-- sku: string | null (the UPC barcode number if its digits are printed and readable, otherwise null)
+- sku: string | null (the UPC barcode digits only if they're printed and fully readable, otherwise null)
 
-EXPIRY — MOST IMPORTANT:
-- Look for a printed date: "best by", "best if used by", "use by", "sell by", "exp", or a bare date stamp.
-- If you find one, set estimatedExpiryDays to the number of days from today (${todayStr}) to that date. Negative if it has already passed.
-- If only month and year are printed (e.g. "MAY 2027" or "05/27"), use the last day of that month.
-- If no date is readable, use typical shelf life for a recently bought product of that kind (milk 10, yogurt 21, eggs 35, bread 5, canned goods 730, condiments 180-365), or null for indefinitely shelf-stable items.
+EXPIRY:
+- If a date is printed ("best by", "best if used by", "use by", "sell by", "exp", or a bare date stamp), set estimatedExpiryDays to the days from today (${todayStr}) to that date — negative if it has passed. Month/year only → last day of that month.
+- Otherwise use typical shelf life for a recently bought item of that kind (raw meat 2-3, milk 10, yogurt 21, eggs 35, berries 5, leafy greens 5, bread 5, condiments 180-365, canned goods 730, frozen items 90-180), or null for indefinitely shelf-stable items.
 
 RULES:
-- One entry per distinct product; identical products are one entry with a higher qty.
-- Only list products whose label you can actually read or clearly recognize. Skip anything you can't identify.
-- SKIP non-food items.
-${locationHint ? `- The user says these are going in their ${locationHint}. Set estimatedCategory to "${locationHint}" unless an item clearly belongs elsewhere.` : '- estimatedCategory: frozen → "freezer"; dairy/produce/meat/deli → "fridge"; everything else → "pantry".'}
-- If you cannot identify any products, return []`
+- One entry per distinct item; identical items are one entry with a higher qty.
+- Include partly hidden items if you can still tell what they are. Skip only things you truly can't identify.
+- SKIP non-food items (cleaning supplies, medicine, empty containers, the fridge itself).
+${locationHint ? `- The user says this photo is of their ${locationHint}. Set estimatedCategory to "${locationHint}" unless an item clearly belongs elsewhere.` : '- estimatedCategory: frozen → "freezer"; dairy/produce/meat/deli → "fridge"; everything else → "pantry".'}
+- If you truly cannot identify any food, return []`
 
     let items: ParsedItem[] = []
     let rawClaudeText = ''
@@ -465,8 +476,10 @@ ${locationHint ? `- The user says these are going in their ${locationHint}. Set 
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 16000, // long receipts produce long item lists — 4096 cut them off mid-list
+          // Photos of items/labels need the strongest image reading; receipts are plain text and do well on Sonnet
+          model: isPhoto ? 'claude-opus-5-5' : 'claude-sonnet-4-6',
+          // Opus 5.5 thinks before answering, and that counts toward max_tokens, so give photo scans more room
+          max_tokens: isPhoto ? 32000 : 16000,
           system: isLabels ? labelsPrompt : isPhoto ? photoPrompt : systemPrompt,
           messages: [{
             role: 'user',
@@ -478,7 +491,10 @@ ${locationHint ? `- The user says these are going in their ${locationHint}. Set 
               text: isPhoto
                 ? (attempts === 1
                     ? (isLabels
-                        ? 'Read the label of every food and drink product in this photo, including any printed expiry dates. Return only the JSON array.'
+                        ? ('Find every food and drink item in this photo and read their labels, including any printed expiry dates. Return only the JSON array.'
+                          + (ocrText
+                              ? `\n\nThe phone's text recognition already read this text from the photo (one line per text block, in no particular order). Use it to get exact product names, brands and dates, and match each piece of text to the item it belongs to. It may contain errors or text that isn't from food:\n${String(ocrText).slice(0, 8000)}`
+                              : ''))
                         : 'List every food and drink item you can see in this photo. Return only the JSON array.')
                     : 'Return ONLY the JSON array starting with [ and ending with ]. Each item: name, qty, unit, estimatedCategory, icon, estimatedExpiryDays, sku (null).')
                 : attempts === 1
@@ -496,7 +512,7 @@ ${locationHint ? `- The user says these are going in their ${locationHint}. Set 
       }
 
       const anthropicData = await anthropicRes.json()
-      rawClaudeText = anthropicData?.content?.[0]?.text ?? ''
+      rawClaudeText = (anthropicData?.content ?? []).find((b: any) => b?.type === 'text')?.text ?? ''
       if (anthropicData?.stop_reason === 'max_tokens') {
         console.log('[scan-receipt] response hit max_tokens — item list was cut off')
       }

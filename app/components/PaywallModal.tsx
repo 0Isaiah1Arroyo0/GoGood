@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, ScrollView,
   Animated, ActivityIndicator, StyleSheet, Dimensions,
-  Alert, Easing, Linking, Platform,
+  Alert, Easing, Linking, Platform, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type PurchasesPackage } from 'react-native-purchases';
@@ -68,6 +68,22 @@ export default function PaywallModal() {
   const sheetScale = useRef(new Animated.Value(0.96)).current;
   const ctaScale   = useRef(new Animated.Value(1)).current;
   const badgeScale = useRef(new Animated.Value(0)).current;
+
+  // Swipe down on the top of the sheet to close it
+  const hideRef = useRef(hidePaywall);
+  hideRef.current = hidePaywall;
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
+    onPanResponderMove: (_, g) => { slideAnim.setValue(Math.max(0, g.dy)); },
+    onPanResponderRelease: (_, g) => {
+      if (g.dy > 100 || g.vy > 0.8) hideRef.current();
+      else Animated.spring(slideAnim, { toValue: 0, damping: 24, stiffness: 260, useNativeDriver: true }).start();
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(slideAnim, { toValue: 0, damping: 24, stiffness: 260, useNativeDriver: true }).start();
+    },
+  })).current;
 
   const [mounted,    setMounted]    = useState(false);
   const [selected,   setSelected]   = useState<'monthly' | 'annual'>('annual');
@@ -198,7 +214,10 @@ export default function PaywallModal() {
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={dismiss} />
 
         <Animated.View style={[styles.sheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY: slideAnim }, { scale: sheetScale }] }]}>
-          <View style={styles.handle} />
+          {/* Drag handle — the whole top strip is grabbable; swipe down to close */}
+          <View {...panResponder.panHandlers} style={styles.handleZone}>
+            <View style={styles.handle} />
+          </View>
 
           {/* ── Hero ── */}
           <View style={styles.heroBg}>
@@ -320,9 +339,6 @@ export default function PaywallModal() {
             cancel anytime in your {STORE.settings}.
           </Text>
 
-          <TouchableOpacity style={styles.closeBtn} onPress={dismiss} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Text style={styles.closeTxt}>✕</Text>
-          </TouchableOpacity>
         </Animated.View>
       </View>
     </Modal>
@@ -339,18 +355,11 @@ const styles = StyleSheet.create({
     paddingTop: 12, paddingHorizontal: 16,
     maxHeight: SCREEN_H * 0.92,
   },
+  handleZone: { marginTop: -12, marginHorizontal: -16, paddingTop: 12, paddingBottom: 16, alignItems: 'center' },
   handle: {
-    width: 36, height: 4, borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'center', marginBottom: 16,
+    width: 40, height: 5, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
-  closeBtn: {
-    position: 'absolute', top: 20, right: 20,
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  closeTxt: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700' },
 
   // ── Hero ──
   heroBg: { overflow: 'hidden', borderRadius: 18, marginBottom: 14 },

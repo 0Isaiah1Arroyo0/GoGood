@@ -1,7 +1,7 @@
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, Alert, ActivityIndicator, Platform, KeyboardAvoidingView,
-  Animated,
+  Animated, LayoutAnimation,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -17,7 +17,6 @@ import { HOUSEHOLD_KEY } from './lib/household';
 import { rescheduleExpiryNotifications } from './lib/notifications';
 
 const CATEGORIES = ['fridge', 'freezer', 'pantry'] as const;
-const CAT_ICONS: Record<string, string> = { fridge: '❄️', freezer: '🧊', pantry: '🥫' };
 
 const FOOD_CATEGORY_ORDER = [
   'Meat', 'Poultry', 'Fish & Seafood', 'Dairy', 'Eggs',
@@ -28,31 +27,30 @@ const FOOD_CATEGORY_ORDER = [
   'Supplements', 'Herbs & Spices', 'Leftovers', 'Other',
 ];
 
-const FOOD_CATEGORY_ICONS: Record<string, string> = {
-  'Meat': '🥩', 'Poultry': '🍗', 'Fish & Seafood': '🐟',
-  'Dairy': '🥛', 'Eggs': '🥚', 'Vegetables': '🥦', 'Fruit': '🍎',
-  'Legumes & Beans': '🫘', 'Nuts & Seeds': '🥜',
-  'Bread & Grains': '🍞', 'Canned & Jarred': '🥫', 'Baking': '🧁',
-  'Condiments & Sauces': '🫙', 'Syrups & Sweeteners': '🍯',
-  'Drinks': '🧃', 'Coffee & Tea': '☕',
-  'Snacks & Sweets': '🍫', 'Frozen Foods': '🥶', 'Prepared & Deli': '🥙',
-  'Supplements': '💊', 'Herbs & Spices': '🌿', 'Leftovers': '🍽️', 'Other': '🥘',
+
+
+// Expiry badge — same colors and wording as the inventory screen's item cards
+type Badge = 'red' | 'amber' | 'green' | 'blue' | 'black';
+const BADGE_LIGHT: Record<Badge, { bg: string; text: string }> = {
+  red: { bg: '#FEEBEB', text: '#A52020' }, amber: { bg: '#FFF8E6', text: '#7A4A00' },
+  green: { bg: '#E1F5EE', text: '#0A5740' }, blue: { bg: '#EBF4FF', text: '#14428A' },
+  black: { bg: '#2C2C2E', text: '#FFFFFF' },
 };
-
-
-const EXPIRY_CHIPS = [
-  { label: '3d',  days: 3   },
-  { label: '7d',  days: 7   },
-  { label: '14d', days: 14  },
-  { label: '30d', days: 30  },
-  { label: '3mo', days: 90  },
-  { label: '1yr', days: 365 },
-];
-
-function addDays(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+const BADGE_DARK: Record<Badge, { bg: string; text: string }> = {
+  red: { bg: 'rgba(245,90,90,0.2)', text: '#F5A0A0' }, amber: { bg: 'rgba(245,180,60,0.2)', text: '#F5D090' },
+  green: { bg: 'rgba(93,202,165,0.2)', text: '#5DCAA5' }, blue: { bg: 'rgba(100,160,255,0.2)', text: '#90C0FF' },
+  black: { bg: '#2C2C2E', text: '#FFFFFF' },
+};
+function daysUntil(date: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.ceil((new Date(date).getTime() - today.getTime()) / 86400000);
+}
+function expiryBadge(date: string | null, category: string): { badge: Badge; text: string } | null {
+  if (!date) return null;
+  const d = daysUntil(date);
+  const badge: Badge = d < 0 ? 'black' : category === 'freezer' ? 'blue' : d === 0 ? 'red' : d <= 5 ? 'amber' : 'green';
+  const text = d < 0 ? 'expired' : d === 0 ? 'today' : d === 1 ? 'tomorrow' : `${d} days`;
+  return { badge, text };
 }
 
 async function lookupBarcode(upc: string): Promise<{
@@ -87,7 +85,7 @@ async function lookupBarcode(upc: string): Promise<{
 }
 
 export default function ReceiptReviewScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
@@ -104,6 +102,12 @@ export default function ReceiptReviewScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const barcodeLockRef = useRef(false);
   const bannerAnim = useRef(new Animated.Value(0)).current;
+  // Every item starts collapsed so the user can open and check them one at a time
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
 
   useEffect(() => {
     if (!sessionId) { router.back(); return; }
@@ -166,7 +170,7 @@ export default function ReceiptReviewScreen() {
     updateLocal(targetId, changes);
     updateDraft(targetId, changes).catch(() => {});
     Alert.alert(
-      'Nutrition updated ✓',
+      'Nutrition updated',
       result.name ? `Found: ${result.name}` : 'Nutrition data updated from barcode.',
     );
   };
@@ -206,7 +210,6 @@ export default function ReceiptReviewScreen() {
 
   // ── Post-save review ─────────────────────────────────────────────────────────
   if (savedItems) {
-    const CAT_EMOJI: Record<string, string> = { fridge: '❄️', freezer: '🧊', pantry: '🥫' };
     return (
       <View style={[styles.safe, { backgroundColor: colors.bg }]}>
         <StatusBar style={colors.statusBar} backgroundColor={colors.bg} />
@@ -222,12 +225,12 @@ export default function ReceiptReviewScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>{item.baseName || item.name}</Text>
                 <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 3 }}>
-                  {CAT_EMOJI[item.category]} {(item.category as string).charAt(0).toUpperCase() + (item.category as string).slice(1)}
+                  {(item.category as string).charAt(0).toUpperCase() + (item.category as string).slice(1)}
                   {item.foodCategory ? `  ·  ${item.foodCategory}` : ''}
                 </Text>
                 <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
-                  📅 {item.expiryDate || 'No expiry set'}
-                  {item.qty ? `  ·  📦 ${item.qty}` : ''}
+                  {item.expiryDate ? `Expires ${item.expiryDate}` : 'No expiry set'}
+                  {item.qty ? `  ·  ${item.qty}` : ''}
                 </Text>
                 {(item.cal > 0 || item.protein > 0) && (
                   <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
@@ -240,16 +243,16 @@ export default function ReceiptReviewScreen() {
         </ScrollView>
         <View style={[styles.confirmBar, { paddingBottom: insets.bottom + 12, backgroundColor: colors.bg, borderTopColor: colors.border }]}>
           <TouchableOpacity
-            style={[styles.confirmBtn, { backgroundColor: '#085041', marginBottom: 10 }]}
+            style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, marginBottom: 10 }]}
             onPress={() => router.replace('/(tabs)')}
           >
-            <Text style={{ color: 'white', fontWeight: '800', fontSize: 15 }}>Looks good — go to inventory</Text>
+            <Text style={styles.confirmText}>Looks good — go to inventory</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.confirmBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
             onPress={() => setSavedItems(null)}
           >
-            <Text style={{ color: colors.textSub, fontWeight: '600', fontSize: 14 }}>Go back to edit items</Text>
+            <Text style={[styles.confirmText, { color: colors.textSub }]}>Go back to edit items</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -289,10 +292,10 @@ export default function ReceiptReviewScreen() {
           )}
         </View>
         <TouchableOpacity
-          style={{ position: 'absolute', top: insets.top + 12, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}
+          style={{ position: 'absolute', top: insets.top + 12, right: 20, paddingHorizontal: 16, height: 36, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}
           onPress={() => { barcodeLockRef.current = false; setScanningForId(null); }}
         >
-          <Text style={{ color: 'white', fontSize: 18 }}>✕</Text>
+          <Text style={{ color: 'white', fontSize: 13, fontWeight: '600' }}>Close</Text>
         </TouchableOpacity>
         <View style={{ alignItems: 'center', paddingBottom: insets.bottom + 20 }}>
           <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11 }}>powered by Open Food Facts</Text>
@@ -331,13 +334,12 @@ export default function ReceiptReviewScreen() {
 
         {visibleDrafts.length === 0 ? (
           <View style={styles.center}>
-            <Text style={{ fontSize: 52, marginBottom: 16 }}>🧾</Text>
             <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginBottom: 8 }}>No items found</Text>
             <Text style={{ fontSize: 14, color: colors.textSub, textAlign: 'center', lineHeight: 20 }}>
               We couldn't parse any grocery items from that receipt. Try a clearer photo.
             </Text>
-            <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: colors.brand, marginTop: 24 }]} onPress={() => router.back()}>
-              <Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>Go back</Text>
+            <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, marginTop: 24, alignSelf: 'stretch' }]} onPress={() => router.back()}>
+              <Text style={styles.confirmText}>Go back</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -354,8 +356,18 @@ export default function ReceiptReviewScreen() {
                 )}
               </Text>
               <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
-                Verify expiry dates · tap ✕ to remove · tap 🏷️ to scan product barcode
+                Tap an item to check its details, fix anything that's off, or remove it.
               </Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                {[
+                  { label: 'Expand all',   onPress: () => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setExpandedIds(new Set(visibleDrafts.map(d => d.id))); } },
+                  { label: 'Collapse all', onPress: () => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setExpandedIds(new Set()); } },
+                ].map(b => (
+                  <TouchableOpacity key={b.label} style={[styles.grayBtn, { borderColor: colors.border, backgroundColor: colors.bg }]} onPress={b.onPress}>
+                    <Text style={[styles.grayBtnText, { color: colors.textSub }]}>{b.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </Animated.View>
 
             <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
@@ -365,6 +377,9 @@ export default function ReceiptReviewScreen() {
                   draft={draft}
                   colors={colors}
                   enterDelay={Math.min(index * 60, 360)}
+                  isDark={isDark}
+                  expanded={expandedIds.has(draft.id)}
+                  onToggle={() => toggleExpanded(draft.id)}
                   onUpdate={(changes) => {
                     updateLocal(draft.id, changes);
                     updateDraft(draft.id, changes).catch(() => {});
@@ -383,13 +398,13 @@ export default function ReceiptReviewScreen() {
                 </Text>
               )}
               <TouchableOpacity
-                style={[styles.confirmBtn, { backgroundColor: '#085041', opacity: saving ? 0.7 : 1 }]}
+                style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, opacity: saving ? 0.7 : 1 }]}
                 onPress={handleConfirm}
                 disabled={saving}
               >
                 {saving
                   ? <ActivityIndicator color="white" />
-                  : <Text style={{ color: 'white', fontWeight: '800', fontSize: 15 }}>
+                  : <Text style={styles.confirmText}>
                       Add {visibleDrafts.length} item{visibleDrafts.length !== 1 ? 's' : ''} to Inventory
                     </Text>
                 }
@@ -404,9 +419,12 @@ export default function ReceiptReviewScreen() {
 
 // ─── DraftCard ────────────────────────────────────────────────────────────────
 
-function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDelay }: {
+function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, enterDelay, expanded, onToggle }: {
   draft: DraftItem;
   colors: any;
+  isDark: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onUpdate: (changes: Partial<DraftItem>) => void;
   onRemove: () => void;
   onScanBarcode: () => void;
@@ -471,67 +489,75 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
     }
   };
 
-  const applyChip = (days: number) => {
-    const date = addDays(days);
-    setDateText(date);
-    setAiEstimated(false);
-    onUpdate({ expiryDate: date });
-  };
 
   return (
-    <Animated.View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }, {
+    <Animated.View style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }, {
       opacity: cardAnim,
       transform: [{
         translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }),
       }],
     }]}>
-      {/* Top row: icon + name + scan button + remove */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      {/* Summary row — looks like an inventory item; tap to open or close */}
+      <TouchableOpacity onPress={onToggle} activeOpacity={0.7} style={styles.itemMain}>
         <View style={{ flex: 1 }}>
-          {editingName ? (
-            <TextInput
-              style={{ fontSize: 15, fontWeight: '700', color: colors.text, borderBottomWidth: 1, borderBottomColor: colors.brand, paddingVertical: 2 }}
-              value={nameText}
-              onChangeText={setNameText}
-              onBlur={() => { setEditingName(false); if (nameText.trim()) onUpdate({ name: nameText.trim() }); }}
-              autoFocus
-              returnKeyType="done"
-            />
-          ) : (
-            <TouchableOpacity onPress={() => setEditingName(true)}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }} numberOfLines={1}>{draft.name}</Text>
-            </TouchableOpacity>
-          )}
-          <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>tap name to edit</Text>
+          <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={1}>{draft.name}</Text>
+          <Text style={[styles.itemQty, { color: colors.textSub }]} numberOfLines={1}>
+            {draft.qtyNum}{draft.unit ? ` ${draft.unit}` : ''}  ·  {draft.category.charAt(0).toUpperCase() + draft.category.slice(1)}
+          </Text>
         </View>
-        {/* Scan barcode button */}
-        <TouchableOpacity
-          onPress={onScanBarcode}
-          hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-          style={{ padding: 4, borderRadius: 8, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border }}
-        >
-          <Text style={{ fontSize: 16 }}>🏷️</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleRemove} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={{ fontSize: 18, color: colors.textMuted }}>✕</Text>
-        </TouchableOpacity>
+        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+          {(() => {
+            const b = expiryBadge(draft.expiryDate, draft.category);
+            const pal = isDark ? BADGE_DARK : BADGE_LIGHT;
+            return b ? (
+              <View style={[styles.badge, { backgroundColor: pal[b.badge].bg }]}>
+                <Text style={[styles.badgeText, { color: pal[b.badge].text }]}>{b.text}</Text>
+              </View>
+            ) : (
+              <View style={[styles.badge, { backgroundColor: 'rgba(232,117,106,0.12)' }]}>
+                <Text style={[styles.badgeText, { color: '#E8756A' }]}>set expiry</Text>
+              </View>
+            );
+          })()}
+          {!expanded && <Text style={{ fontSize: 9, color: colors.textMuted }}>tap for details</Text>}
+        </View>
+      </TouchableOpacity>
+
+      {expanded && (
+      <View style={[styles.itemDetail, { borderTopColor: colors.border }]}>
+      {/* Name */}
+      <Text style={fieldLabelStyle(colors)}>NAME</Text>
+      <View style={{ marginBottom: 10 }}>
+        {editingName ? (
+          <TextInput
+            style={[styles.inputField, { color: colors.text, backgroundColor: colors.surfaceAlt, borderColor: colors.brand }]}
+            value={nameText}
+            onChangeText={setNameText}
+            onBlur={() => { setEditingName(false); if (nameText.trim()) onUpdate({ name: nameText.trim() }); }}
+            autoFocus
+            returnKeyType="done"
+          />
+        ) : (
+          <TouchableOpacity onPress={() => setEditingName(true)} style={[styles.inputField, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+            <Text style={{ color: colors.text, fontSize: 14 }} numberOfLines={1}>{draft.name}</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
+      <Text style={fieldLabelStyle(colors)}>LOCATION</Text>
       {/* Location selector */}
       <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
         {CATEGORIES.map(cat => (
           <TouchableOpacity
             key={cat}
             onPress={() => onUpdate({ category: cat })}
-            style={{
-              flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 10,
-              backgroundColor: draft.category === cat ? '#085041' : colors.surfaceAlt,
-              borderWidth: 1,
-              borderColor: draft.category === cat ? '#085041' : colors.border,
-            }}
+            style={[styles.grayBtn, {
+              flex: 1,
+              backgroundColor: draft.category === cat ? colors.btnPrimary : colors.surface,
+              borderColor: draft.category === cat ? colors.btnPrimary : colors.border,
+            }]}
           >
-            <Text style={{ fontSize: 14 }}>{CAT_ICONS[cat]}</Text>
-            <Text style={{ fontSize: 10, color: draft.category === cat ? 'white' : colors.textSub, fontWeight: '600', marginTop: 2, textTransform: 'capitalize' }}>
+            <Text style={[styles.grayBtnText, { color: draft.category === cat ? 'white' : colors.textSub, textTransform: 'capitalize' }]}>
               {cat}
             </Text>
           </TouchableOpacity>
@@ -539,22 +565,22 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
       </View>
 
       {/* Food category selector */}
-      <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSub, letterSpacing: 0.5, marginBottom: 6 }}>FOOD CATEGORY</Text>
+      <Text style={fieldLabelStyle(colors)}>FOOD CATEGORY</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
         <TouchableOpacity
           onPress={() => onUpdate({ foodCategory: null })}
-          style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, backgroundColor: !draft.foodCategory ? '#085041' : colors.surfaceAlt, borderColor: !draft.foodCategory ? '#085041' : colors.border }}
+          style={[styles.grayBtn, { backgroundColor: !draft.foodCategory ? colors.btnPrimary : colors.surface, borderColor: !draft.foodCategory ? colors.btnPrimary : colors.border }]}
         >
-          <Text style={{ fontSize: 11, fontWeight: '600', color: !draft.foodCategory ? 'white' : colors.textSub }}>Auto</Text>
+          <Text style={[styles.grayBtnText, { color: !draft.foodCategory ? 'white' : colors.textSub }]}>Auto</Text>
         </TouchableOpacity>
         {FOOD_CATEGORY_ORDER.map(cat => (
           <TouchableOpacity
             key={cat}
             onPress={() => onUpdate({ foodCategory: cat })}
-            style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, backgroundColor: draft.foodCategory === cat ? '#085041' : colors.surfaceAlt, borderColor: draft.foodCategory === cat ? '#085041' : colors.border }}
+            style={[styles.grayBtn, { backgroundColor: draft.foodCategory === cat ? colors.btnPrimary : colors.surface, borderColor: draft.foodCategory === cat ? colors.btnPrimary : colors.border }]}
           >
-            <Text style={{ fontSize: 11, fontWeight: '600', color: draft.foodCategory === cat ? 'white' : colors.textSub }}>
-              {FOOD_CATEGORY_ICONS[cat]} {cat}
+            <Text style={[styles.grayBtnText, { color: draft.foodCategory === cat ? 'white' : colors.textSub }]}>
+              {cat}
             </Text>
           </TouchableOpacity>
         ))}
@@ -624,37 +650,14 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
         </View>
       </View>
 
-      {/* Quick-pick expiry chips */}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-        {EXPIRY_CHIPS.map(chip => {
-          const chipDate = addDays(chip.days);
-          const isActive = draft.expiryDate === chipDate;
-          return (
-            <TouchableOpacity
-              key={chip.label}
-              onPress={() => applyChip(chip.days)}
-              style={{
-                paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
-                backgroundColor: isActive ? '#085041' : colors.surfaceAlt,
-                borderWidth: 1,
-                borderColor: isActive ? '#085041' : colors.border,
-              }}
-            >
-              <Text style={{ fontSize: 11, fontWeight: '600', color: isActive ? 'white' : colors.textSub }}>
-                +{chip.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-        {draft.expiryDate && (
-          <TouchableOpacity
-            onPress={() => { setDateText(''); setAiEstimated(false); onUpdate({ expiryDate: null }); }}
-            style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt }}
-          >
-            <Text style={{ fontSize: 11, fontWeight: '600', color: '#E8756A' }}>clear</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {draft.expiryDate && (
+        <TouchableOpacity
+          onPress={() => { setDateText(''); setAiEstimated(false); onUpdate({ expiryDate: null }); }}
+          style={[styles.grayBtn, { alignSelf: 'flex-start', marginTop: 8, borderColor: colors.border, backgroundColor: colors.surface }]}
+        >
+          <Text style={[styles.grayBtnText, { color: colors.textSub }]}>Clear expiry</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Macros — always editable */}
       <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: colors.border }}>
@@ -698,14 +701,27 @@ function DraftCard({ draft, colors, onUpdate, onRemove, onScanBarcode, enterDela
 
       {/* PSA notice */}
       <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'flex-start', gap: 5 }}>
-        <Text style={{ fontSize: 11 }}>⚠️</Text>
         <Text style={{ fontSize: 11, color: colors.textMuted, flex: 1, lineHeight: 15 }}>
           Nutrition is estimated. Check the product label for exact values and the real expiry date — tap the expiry field above to update it.
         </Text>
       </View>
+
+      {/* Actions */}
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+        <TouchableOpacity onPress={onScanBarcode} style={[styles.grayBtn, { flex: 1, minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <Text style={[styles.grayBtnText, { color: colors.textSub }]}>Scan barcode</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleRemove} style={[styles.grayBtn, { flex: 1, minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <Text style={[styles.grayBtnText, { color: colors.textSub }]}>Remove</Text>
+        </TouchableOpacity>
+      </View>
+      </View>
+      )}
     </Animated.View>
   );
 }
+
+const fieldLabelStyle = (colors: any) => ({ fontSize: 10, fontWeight: '700' as const, color: colors.textSub, letterSpacing: 0.5, marginBottom: 6 });
 
 const styles = StyleSheet.create({
   safe:   { flex: 1 },
@@ -715,9 +731,21 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 19, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
   banner: { marginHorizontal: 16, marginBottom: 4, padding: 12, borderRadius: 14, borderWidth: 0.5 },
   card:   { borderRadius: 16, padding: 14, borderWidth: 0.5 },
+  // Matches the inventory screen's item cards
+  itemCard:   { borderRadius: 16, borderWidth: 0.5, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.16, shadowRadius: 14, elevation: 6 },
+  itemMain:   { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  itemName:   { fontSize: 16, fontWeight: '600' },
+  itemQty:    { fontSize: 11, marginTop: 3 },
+  badge:      { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  badgeText:  { fontSize: 12, fontWeight: '500' },
+  itemDetail: { paddingHorizontal: 14, paddingBottom: 14, paddingTop: 12, borderTopWidth: 0.5 },
   inputField: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14 },
   confirmBar: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 0.5 },
-  confirmBtn: { borderRadius: 16, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
+  confirmBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  confirmText: { color: 'white', fontSize: 14, fontWeight: '600' },
+  // Same look as the inventory screen's gray buttons (Edit / Remove / Sort & Filter options)
+  grayBtn: { minHeight: 34, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  grayBtnText: { fontSize: 12, fontWeight: '600' },
 });
 
 const scanStyles = StyleSheet.create({

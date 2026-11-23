@@ -875,7 +875,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
               </View>
 
               {/* ── Input ── */}
-              <View style={[styles.inputRow, { paddingBottom: tabSpace + 8 }]}>
+              <View style={[styles.inputRow, { paddingBottom: tabSpace + 22 }]}>
                 <View style={{ flex: 1 }}>
                   <TextInput
                     style={styles.chatInput}

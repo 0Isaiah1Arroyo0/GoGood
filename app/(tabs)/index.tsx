@@ -2325,7 +2325,9 @@ export default function FridgeScreen() {
       // Close the BottomSheet Modal first — iOS only allows one Modal at a time.
       // Wait for its 280ms close animation to fully unmount before showing the overlay.
       setShowAdd(false);
-      await new Promise<void>(r => setTimeout(r, 320));
+      // Wait for the Add sheet and photo picker to fully close: iOS silently skips
+      // presenting the full-screen scanning overlay while another pop-up is closing.
+      await new Promise<void>(r => setTimeout(r, 750));
       setScanningReceipt(true);
       const { data: { session } } = await import('../lib/supabase').then(m => m.supabase.auth.getSession());
       if (!session) { showToast('Please sign in to scan receipts', true); setScanningReceipt(false); return; }

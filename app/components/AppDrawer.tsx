@@ -1,7 +1,7 @@
 import {
   View, Text, TouchableOpacity, Animated, StyleSheet, Alert, Image,
   Modal, TextInput, ScrollView, Switch, Platform, KeyboardAvoidingView,
-  LayoutAnimation, UIManager, Linking, Keyboard, Dimensions,
+  UIManager, Linking, Keyboard, Dimensions,
 } from 'react-native';
 
 // The side menu slides in and fills the whole screen width.
@@ -18,6 +18,7 @@ import { useTheme, type ThemeColors } from '../context/theme';
 import { useSubscription } from '../context/subscription';
 import { requestNotificationPermission, rescheduleExpiryNotifications } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
+import { raised, raisedGreen } from '@/components/raised';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -39,20 +40,20 @@ const EMPTY_NOTIFS:  Notifs  = { expiry: true, digest: false, weekly: false };
 const DIETARY_OPTIONS = ['Vegan', 'Vegetarian', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Nut-Free', 'Halal', 'Kosher'];
 
 const FAQ = [
-  { q: 'How do I add items?', a: 'Tap the + button in the top right. Fill in details manually or use 📷 scan label to auto-fill from a food package.' },
-  { q: 'What do the badge colors mean?', a: 'Green = 6+ days left. Amber = 1–5 days. Red = expires today. Dark = already expired. Blue = frozen.' },
-  { q: 'How does label scanning work?', a: 'When adding an item, tap 📷 scan label, take a photo of the packaging, and AI fills in the name, expiry, and macros automatically.' },
-  { q: 'How do I mark something as used?', a: 'Tap any item to expand it, then tap ✓ gone good when used, or 🥀 gone bad if it went to waste.' },
-  { q: 'Can I share with family?', a: 'Yes! Go to the Household tab (🏠) to create a shared list or join one with an invite code. Everyone in the household sees and edits the same inventory in real time.' },
-  { q: 'How do I edit an item?', a: 'Expand the item by tapping it, then tap the ✏️ button to open the edit form.' },
+  { q: 'How do I add items?', a: 'Tap the green + in the top right. Type the details, or use Barcode or Label to fill them in from the package. Receipt adds everything from a store receipt at once.' },
+  { q: 'Can I add a lot of items at once?', a: 'Yes. Tap Label, then Several items, and take a photo of your fridge, a shelf, or groceries on the counter. GoGood finds each item so you can review them before adding.' },
+  { q: 'What do the badge colors mean?', a: 'Green = 6+ days left. Amber = 1–5 days. Red = expires today. Blue = frozen. Expired items move to your Food Report automatically.' },
+  { q: 'How do I mark something as used?', a: 'Tap an item to expand it, then tap Use a portion, or Remove and choose whether it went bad or you no longer have it.' },
+  { q: 'How do I edit an item?', a: 'Tap the item to expand it, then tap Edit.' },
+  { q: 'Can I share with family?', a: 'Yes. Open the Household tab to create a shared list or join one with an invite code. Everyone in the household sees and edits the same inventory.' },
 ];
 
 const PRO_FEATURES = [
-  { icon: '📷', title: 'Unlimited label scanning',  sub: 'Scan as many items as you want' },
-  { icon: '🤖', title: 'AI recipe suggestions',      sub: "Recipes based on what's about to expire" },
-  { icon: '👨‍👩‍👧', title: 'Household sharing',         sub: 'Share your inventory with family' },
-  { icon: '📊', title: 'Waste analytics',            sub: 'Track food and money saved over time' },
-  { icon: '⚡', title: 'Priority support',           sub: 'Get help fast when you need it' },
+  { title: 'Unlimited label scanning',  sub: 'Scan as many items as you want' },
+  { title: 'AI recipe suggestions',      sub: "Recipes based on what's about to expire" },
+  { title: 'Household sharing',         sub: 'Share your inventory with family' },
+  { title: 'Waste analytics',            sub: 'Track food and money saved over time' },
+  { title: 'Priority support',           sub: 'Get help fast when you need it' },
 ];
 
 // ─── Inner Sheet (slide-up modal) ─────────────────────────────────────────────
@@ -97,15 +98,34 @@ function Sheet({ visible, onClose, children, colors }: {
   );
 }
 
-// ─── Collapsible section header ───────────────────────────────────────────────
+// ─── Menu building blocks ─────────────────────────────────────────────────────
 
-function SectionHeader({ label, open, onToggle, colors }: {
-  label: string; open: boolean; onToggle: () => void; colors: ThemeColors;
+function MenuGroup({ title, colors, isDark, children }: {
+  title: string; colors: ThemeColors; isDark: boolean; children: React.ReactNode;
 }) {
   return (
-    <TouchableOpacity style={sharedStyles.sectionHeader} onPress={onToggle} activeOpacity={0.7}>
-      <Text style={[sharedStyles.sectionLabel, { color: colors.textMuted }]}>{label}</Text>
-      <Text style={[sharedStyles.sectionArrow, { color: colors.textMuted, transform: [{ rotate: open ? '90deg' : '0deg' }] }]}>›</Text>
+    <View style={sharedStyles.group}>
+      <Text style={[sharedStyles.groupTitle, { color: colors.textMuted }]}>{title}</Text>
+      <View style={[sharedStyles.groupCard, raised(isDark, 'md'), { backgroundColor: colors.surface }]}>{children}</View>
+    </View>
+  );
+}
+
+function MenuRow({ label, sub, right, onPress, first, colors }: {
+  label: string; sub?: string; right?: React.ReactNode;
+  onPress: () => void; first?: boolean; colors: ThemeColors;
+}) {
+  return (
+    <TouchableOpacity
+      style={[sharedStyles.row, !first && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+      onPress={onPress}
+      activeOpacity={0.6}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={[sharedStyles.rowText, { color: colors.text }]}>{label}</Text>
+        {sub ? <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{sub}</Text> : null}
+      </View>
+      {right ?? <Text style={[sharedStyles.chevron, { color: colors.textMuted }]}>›</Text>}
     </TouchableOpacity>
   );
 }
@@ -125,9 +145,6 @@ export function useAppDrawer() {
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
   // ── Section collapse state ──────────────────────────────────────────────────
-  const [navOpen,     setNavOpen]     = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
-  const [appOpen,     setAppOpen]     = useState(false);
 
   // ── Modal visibility ────────────────────────────────────────────────────────
   const [showProfile,       setShowProfile]       = useState(false);
@@ -228,12 +245,6 @@ export function useAppDrawer() {
   const openModal = (setter: (v: boolean) => void) => {
     close();
     setTimeout(() => setter(true), 400); // wait for the menu Modal to finish closing (iOS)
-  };
-
-  // ── Section toggle ───────────────────────────────────────────────────────────
-  const toggleSection = (setter: (v: boolean) => void, current: boolean) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setter(!current);
   };
 
   // ── Biometric ────────────────────────────────────────────────────────────────
@@ -402,112 +413,77 @@ export function useAppDrawer() {
               {/* Header */}
               <View style={sharedStyles.drawerHeader}>
                 <Text style={[sharedStyles.drawerLogo, { color: colors.brand }]}>go<Text style={{ color: colors.teal, fontFamily: 'Fraunces_600SemiBold' }}>good</Text></Text>
-                <TouchableOpacity onPress={close} style={[sharedStyles.closeBtn, { backgroundColor: colors.surfaceAlt }]}>
-                  <Text style={[sharedStyles.closeText, { color: colors.textMuted }]}>✕</Text>
+                <TouchableOpacity onPress={close} style={[sharedStyles.closeBtn, raised(isDark), { backgroundColor: colors.surface }]} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={[sharedStyles.closeText, { color: colors.textSub }]}>✕</Text>
                 </TouchableOpacity>
               </View>
 
-              {/* Profile preview */}
-              <TouchableOpacity style={[sharedStyles.profileRow, { borderBottomColor: colors.border }]} onPress={() => openModal(setShowProfile)} activeOpacity={0.75}>
-                <View style={sharedStyles.avatar}>
+              {/* Profile card */}
+              <TouchableOpacity
+                style={[sharedStyles.profileCard, raised(isDark, 'md'), { backgroundColor: colors.surface }]}
+                onPress={() => openModal(setShowProfile)}
+                activeOpacity={0.8}
+              >
+                <View style={[sharedStyles.avatar, { backgroundColor: colors.chipBg }]}>
                   {profile.photo
-                    ? <Image source={{ uri: profile.photo }} style={{ width: 44, height: 44, borderRadius: 22 }} />
-                    : <Text style={{ fontSize: 20 }}>{profile.name ? profile.name[0].toUpperCase() : '👤'}</Text>}
+                    ? <Image source={{ uri: profile.photo }} style={{ width: 48, height: 48, borderRadius: 24 }} />
+                    : <Text style={{ fontSize: 20, fontWeight: '700', color: colors.chipText }}>{profile.name ? profile.name[0].toUpperCase() : '?'}</Text>}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[sharedStyles.profileName, { color: colors.text }]} numberOfLines={1}>
                     {profile.name || 'Set up your profile'}
                   </Text>
-                  <Text style={{ fontSize: 11, color: '#5DCAA5' }}>edit profile →</Text>
+                  <Text style={{ fontSize: 12, color: colors.textSub }}>Edit profile</Text>
                 </View>
+                <Text style={[sharedStyles.chevron, { color: colors.textMuted }]}>›</Text>
               </TouchableOpacity>
 
-              {/* ── Navigate ── */}
-              <SectionHeader label="navigate" open={navOpen} onToggle={() => toggleSection(setNavOpen, navOpen)} colors={colors} />
-              {navOpen && (
-                <View>
-                  {[
-                    { icon: '🥗', label: 'Inventory',        route: '/(tabs)' },
-                    { icon: '🤖', label: 'Good Bot',          route: '/(tabs)/goodbot' },
-                    { icon: '📊', label: 'Food Report',       route: '/(tabs)/foodreport' },
-                    { icon: '🏠', label: 'Household',         route: '/(tabs)/household' },
-                    { icon: '🛒', label: 'Grocery Stores',    route: '/store-connections' },
-                  ].map(item => (
-                    <TouchableOpacity key={item.label} style={[sharedStyles.item, { borderBottomColor: colors.border }]}
-                      onPress={() => { close(); router.navigate(item.route as any); }}>
-                      <Text style={sharedStyles.itemIcon}>{item.icon}</Text>
-                      <Text style={[sharedStyles.itemText, { color: colors.text }]}>{item.label}</Text>
-                      <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+              {/* Go to */}
+              <MenuGroup title="Go to" colors={colors} isDark={isDark}>
+                {[
+                  { label: 'Inventory',      route: '/(tabs)' },
+                  { label: 'GoodBot',        route: '/(tabs)/goodbot' },
+                  { label: 'Food Report',    route: '/(tabs)/foodreport' },
+                  { label: 'Household',      route: '/(tabs)/household' },
+                ].map((item, i) => (
+                  <MenuRow key={item.label} first={i === 0} label={item.label} colors={colors}
+                    onPress={() => { close(); router.navigate(item.route as any); }} />
+                ))}
+              </MenuGroup>
+
+              {/* Account */}
+              <MenuGroup title="Account" colors={colors} isDark={isDark}>
+                <MenuRow first label="Profile" colors={colors} onPress={() => openModal(setShowProfile)} />
+                <MenuRow label="Go Good Pro" colors={colors}
+                  onPress={() => { close(); setTimeout(showPaywall, 400); }} />
+                <MenuRow label="Notifications" colors={colors} onPress={() => openModal(setShowNotifications)} />
+                <MenuRow label="Face ID" colors={colors} onPress={toggleBiometric}
+                  right={<Switch value={biometricEnabled} onValueChange={toggleBiometric} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
+              </MenuGroup>
+
+              {/* Preferences */}
+              <MenuGroup title="Preferences" colors={colors} isDark={isDark}>
+                <MenuRow first label="Dark mode" colors={colors} onPress={toggleTheme}
+                  right={<Switch value={isDark} onValueChange={toggleTheme} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
+              </MenuGroup>
+
+              {/* Support */}
+              <MenuGroup title="Support" colors={colors} isDark={isDark}>
+                <MenuRow first label="Help & Feedback" colors={colors} onPress={() => openModal(setShowHelp)} />
+                <MenuRow label="Rate Go Good" colors={colors} onPress={() => openModal(setShowRate)} />
+              </MenuGroup>
+
+              {/* Testing tools — only in development builds, never in the App Store version */}
+              {__DEV__ && (
+                <MenuGroup title="Developer" colors={colors} isDark={isDark}>
+                  <MenuRow first label="Paywall demo mode" sub="Show the paywall on locked features" colors={colors}
+                    onPress={() => setPaywallDemoMode(!paywallDemoMode)}
+                    right={<Switch value={paywallDemoMode} onValueChange={setPaywallDemoMode} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
+                </MenuGroup>
               )}
 
-              {/* ── Account ── */}
-              <SectionHeader label="account" open={accountOpen} onToggle={() => toggleSection(setAccountOpen, accountOpen)} colors={colors} />
-              {accountOpen && (
-                <View>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => openModal(setShowProfile)}>
-                    <Text style={sharedStyles.itemIcon}>👤</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>Profile</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={toggleBiometric}>
-                    <Text style={sharedStyles.itemIcon}>{biometricEnabled ? '🔐' : '🔓'}</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>Face ID</Text>
-                    <Switch value={biometricEnabled} onValueChange={toggleBiometric}
-                      trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => openModal(setShowNotifications)}>
-                    <Text style={sharedStyles.itemIcon}>🔔</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>Notifications</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => { close(); setTimeout(showPaywall, 400); }}>
-                    <Text style={sharedStyles.itemIcon}>🌱</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>Go Good Pro</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                  </TouchableOpacity>
-                  <View style={[sharedStyles.item, { borderBottomColor: colors.border }]}>
-                    <Text style={sharedStyles.itemIcon}>🎭</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[sharedStyles.itemText, { color: colors.text }]}>Paywall demo mode</Text>
-                      <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>Show paywall when tapping locked features</Text>
-                    </View>
-                    <Switch
-                      value={paywallDemoMode}
-                      onValueChange={setPaywallDemoMode}
-                      trackColor={{ false: '#ddd', true: '#1D9E75' }}
-                      thumbColor="white"
-                    />
-                  </View>
-                </View>
-              )}
-
-              {/* ── App ── */}
-              <SectionHeader label="app" open={appOpen} onToggle={() => toggleSection(setAppOpen, appOpen)} colors={colors} />
-              {appOpen && (
-                <View>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={toggleTheme}>
-                    <Text style={sharedStyles.itemIcon}>{isDark ? '☀️' : '🌙'}</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>{isDark ? 'Light mode' : 'Dark mode'}</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                  </TouchableOpacity>
-<TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => openModal(setShowHelp)}>
-                    <Text style={sharedStyles.itemIcon}>❓</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>Help & Feedback</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[sharedStyles.item, { borderBottomColor: colors.border }]} onPress={() => openModal(setShowRate)}>
-                    <Text style={sharedStyles.itemIcon}>⭐</Text>
-                    <Text style={[sharedStyles.itemText, { color: colors.text }]}>Rate Go Good</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 16 }}>›</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Logout */}
-              <TouchableOpacity style={sharedStyles.logoutBtn} onPress={handleLogout}>
+              {/* Log out */}
+              <TouchableOpacity style={[sharedStyles.logoutBtn, raised(isDark, 'md'), { backgroundColor: colors.surface }]} onPress={handleLogout} activeOpacity={0.8}>
                 <Text style={sharedStyles.logoutText}>Log out</Text>
               </TouchableOpacity>
               <TouchableOpacity style={sharedStyles.deleteBtn} onPress={handleDeleteAccount} disabled={deleting}>
@@ -515,7 +491,7 @@ export function useAppDrawer() {
                   {deleting ? 'Deleting account…' : 'Delete account'}
                 </Text>
               </TouchableOpacity>
-              <Text style={[sharedStyles.version, { color: colors.textMuted }]}>Go Good v{Constants.expoConfig?.version ?? '1.0'} · made with 🌱 in NC</Text>
+              <Text style={[sharedStyles.version, { color: colors.textMuted }]}>Go Good v{Constants.expoConfig?.version ?? '1.0'} · made in NC</Text>
 
             </ScrollView>
           </Animated.View>
@@ -536,10 +512,10 @@ export function useAppDrawer() {
               <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                 {editProfile.photo
                   ? <Image source={{ uri: editProfile.photo }} style={{ width: 84, height: 84 }} />
-                  : <Text style={{ fontSize: 36 }}>{editProfile.name ? editProfile.name[0].toUpperCase() : '👤'}</Text>}
+                  : <Text style={{ fontSize: 34, fontWeight: '700', color: '#085041' }}>{editProfile.name ? editProfile.name[0].toUpperCase() : '?'}</Text>}
               </View>
               <View style={{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 13 }}>📷</Text>
+                <Text style={{ fontSize: 16, color: 'white', fontWeight: '600', lineHeight: 18 }}>+</Text>
               </View>
             </TouchableOpacity>
             <Text style={{ fontSize: 10, color: '#aaa', marginTop: 6 }}>tap to change photo</Text>
@@ -607,7 +583,7 @@ export function useAppDrawer() {
           </View>
 
           <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 20 }]} onPress={saveProfile}>
-            <Text style={sharedStyles.confirmBtnText}>Save profile →</Text>
+            <Text style={sharedStyles.confirmBtnText}>Save profile</Text>
           </TouchableOpacity>
           <TouchableOpacity style={sharedStyles.cancelBtn} onPress={() => setShowProfile(false)}>
             <Text style={sharedStyles.cancelText}>cancel</Text>
@@ -637,22 +613,21 @@ export function useAppDrawer() {
           </View>
         ))}
         <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 20 }]} onPress={saveNotifications}>
-          <Text style={sharedStyles.confirmBtnText}>Save →</Text>
+          <Text style={sharedStyles.confirmBtnText}>Save</Text>
         </TouchableOpacity>
       </Sheet>
 
       {/* ── Go Good Pro modal ── */}
       <Sheet visible={showPro} onClose={() => setShowPro(false)} colors={colors}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <Text style={[sharedStyles.modalTitle, { color: colors.text }]}>Go Good Pro 🌱</Text>
+          <Text style={[sharedStyles.modalTitle, { color: colors.text }]}>Go Good Pro</Text>
           <TouchableOpacity onPress={() => setShowPro(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
         </View>
         <View style={{ backgroundColor: '#E1F5EE', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginBottom: 16 }}>
           <Text style={{ fontSize: 10, fontWeight: '600', color: '#085041' }}>COMING SOON</Text>
         </View>
         {PRO_FEATURES.map(f => (
-          <View key={f.icon} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-            <Text style={{ fontSize: 22 }}>{f.icon}</Text>
+          <View key={f.title} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
             <View>
               <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>{f.title}</Text>
               <Text style={{ fontSize: 11, color: colors.textSub }}>{f.sub}</Text>
@@ -660,7 +635,7 @@ export function useAppDrawer() {
           </View>
         ))}
         <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 20 }]} onPress={() => setShowPro(false)}>
-          <Text style={sharedStyles.confirmBtnText}>Join waitlist →</Text>
+          <Text style={sharedStyles.confirmBtnText}>Join waitlist</Text>
         </TouchableOpacity>
         <TouchableOpacity style={sharedStyles.cancelBtn} onPress={() => setShowPro(false)}>
           <Text style={sharedStyles.cancelText}>maybe later</Text>
@@ -688,7 +663,7 @@ export function useAppDrawer() {
           <Text style={[sharedStyles.fieldLabel, { marginTop: 16, color: colors.textSub }]}>Send Feedback</Text>
           <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 4 }]}
             onPress={() => Linking.openURL('mailto:support@gogood.app?subject=Go Good Feedback')}>
-            <Text style={sharedStyles.confirmBtnText}>✉️ Email us →</Text>
+            <Text style={sharedStyles.confirmBtnText}>Email us</Text>
           </TouchableOpacity>
           <TouchableOpacity style={sharedStyles.cancelBtn} onPress={() => setShowHelp(false)}>
             <Text style={sharedStyles.cancelText}>close</Text>
@@ -703,11 +678,11 @@ export function useAppDrawer() {
           <Text style={[sharedStyles.modalTitle, { color: colors.text }]}>Rate Go Good</Text>
           <TouchableOpacity onPress={() => setShowRate(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
         </View>
-        <Text style={{ fontSize: 13, color: colors.textSub, textAlign: 'center', marginBottom: 16 }}>Enjoying Go Good? Your rating helps us grow 🌱</Text>
+        <Text style={{ fontSize: 13, color: colors.textSub, textAlign: 'center', marginBottom: 16 }}>Enjoying Go Good? Your rating helps us grow.</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 20 }}>
           {[1, 2, 3, 4, 5].map(star => (
             <TouchableOpacity key={star} onPress={() => setRating(star)}>
-              <Text style={{ fontSize: 36 }}>{star <= rating ? '⭐' : '☆'}</Text>
+              <Text style={{ fontSize: 38, color: star <= rating ? '#F2B01E' : colors.textMuted }}>{star <= rating ? '\u2605' : '\u2606'}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -721,7 +696,7 @@ export function useAppDrawer() {
               if (rating === 5) Linking.openURL('https://apps.apple.com/app/id0000000000');
               setShowRate(false); setRating(0); setReview('');
             }}>
-              <Text style={sharedStyles.confirmBtnText}>Submit →</Text>
+              <Text style={sharedStyles.confirmBtnText}>Submit</Text>
             </TouchableOpacity>
           </>
         )}
@@ -735,7 +710,7 @@ export function useAppDrawer() {
   return { menuBtn, drawerEl, open, close };
 }
 
-// ─── Shared styles (used by SectionHeader and the hook's JSX) ─────────────────
+// ─── Shared styles (used by the menu building blocks and the hook's JSX) ─────────────────
 
 const sharedStyles = StyleSheet.create({
   // Menu button
@@ -744,33 +719,27 @@ const sharedStyles = StyleSheet.create({
 
   // Drawer panel
   drawer:       { position: 'absolute', top: 0, left: 0, bottom: 0, width: 280, paddingTop: 60, paddingBottom: 20 },
-  drawerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, paddingHorizontal: 24 },
+  drawerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingHorizontal: 24 },
   drawerLogo:   { fontSize: 26, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
-  closeBtn:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  closeBtn:     { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   closeText:    { fontSize: 13 },
 
-  // Profile preview
-  profileRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 20, borderBottomWidth: 0.5, paddingHorizontal: 24 },
-  avatar:       { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  profileName:  { fontSize: 15, fontWeight: '600', marginBottom: 2 },
+  // Profile card
+  profileCard:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 20, marginBottom: 8, padding: 14, borderRadius: 18 },
+  avatar:       { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  profileName:  { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  chevron:      { fontSize: 20, fontWeight: '400', marginLeft: 4 },
 
-  // Section header
-  sectionHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 10, marginTop: 4 },
-  sectionLabel:   { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.2 },
-  sectionArrow:   { fontSize: 18, fontWeight: '400' },
-
-  // Items
-  item:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 24, borderBottomWidth: 0.5, gap: 12 },
-  itemIcon:     { fontSize: 18, width: 24, textAlign: 'center' },
-  itemText:     { flex: 1, fontSize: 14, fontWeight: '500' },
-
-  // Pro badge
-  proBadge:     { backgroundColor: '#E1F5EE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
-  proBadgeText: { fontSize: 9, color: '#085041', fontWeight: '600' },
+  // Groups
+  group:        { marginTop: 18, paddingHorizontal: 20 },
+  groupTitle:   { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.1, marginBottom: 8, marginLeft: 6 },
+  groupCard:    { borderRadius: 16 },
+  row:          { flexDirection: 'row', alignItems: 'center', minHeight: 50, paddingVertical: 10, paddingHorizontal: 16 },
+  rowText:      { fontSize: 15, fontWeight: '500' },
 
   // Logout + version
-  logoutBtn:    { marginHorizontal: 24, marginTop: 24, paddingVertical: 13, borderRadius: 12, backgroundColor: 'rgba(232,117,106,0.15)', alignItems: 'center' },
-  logoutText:   { color: '#E8756A', fontWeight: '600', fontSize: 14 },
+  logoutBtn:    { marginHorizontal: 20, marginTop: 28, paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
+  logoutText:   { color: '#D9534F', fontWeight: '700', fontSize: 15 },
   deleteBtn:    { alignSelf: 'center', marginTop: 12, paddingVertical: 6, paddingHorizontal: 12 },
   deleteText:   { fontSize: 12, textDecorationLine: 'underline' },
   version:      { fontSize: 10, textAlign: 'center', marginTop: 16 },
@@ -781,7 +750,7 @@ const sharedStyles = StyleSheet.create({
   input:        { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, marginBottom: 4 },
   qtyBtn:       { width: 32, height: 32, borderRadius: 16, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' },
   qtyBtnText:   { color: 'white', fontSize: 18, lineHeight: 22 },
-  confirmBtn:   { backgroundColor: '#085041', borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  confirmBtn:   { backgroundColor: '#085041', borderRadius: 14, paddingVertical: 14, alignItems: 'center', ...raisedGreen(false) },
   confirmBtnText: { color: 'white', fontWeight: '700', fontSize: 15 },
   cancelBtn:    { alignItems: 'center', paddingVertical: 12 },
   cancelText:   { fontSize: 13, color: '#aaa' },

@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Animated, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '@/app/context/theme';
+import { raised, raisedGreen } from '@/components/raised';
 
 // The round "+" button in the top-right of a screen header. One shared component so
 // it looks and feels identical everywhere (matches the inventory screen's original).
@@ -18,6 +19,7 @@ export default function HeaderAddButton({ onPress, accessibilityLabel = 'Add' }:
         accessibilityLabel={accessibilityLabel}
         style={[
           styles.btn,
+          raisedGreen(isDark, 'sm'),
           {
             backgroundColor: colors.btnPrimary,
             shadowColor: isDark ? '#8DB89A' : '#085041',

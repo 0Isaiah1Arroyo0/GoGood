@@ -32,6 +32,7 @@ import {
   unshareRecipe,
 } from '../lib/collections-sync';
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
+import { raised, raisedGreen } from '@/components/raised';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1456,7 +1457,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
 
   searchBar:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginVertical: 10, backgroundColor: c.surfaceAlt, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 0.5, borderColor: c.border },
 
-  allCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.btnPrimary, borderRadius: 18, padding: 18, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 6 }, shadowOpacity: isDark ? 0.18 : 0.35, shadowRadius: 14, elevation: 6 },
+  allCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.btnPrimary, borderRadius: 18, padding: 18, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 6 }, shadowOpacity: isDark ? 0.18 : 0.35, shadowRadius: 14, elevation: 6, ...raisedGreen(isDark) },
   allCardTitle:  { fontSize: 16, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
   allCardSub:    { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 3 },
   sectionLabel:  { fontSize: 11, fontWeight: '700', color: c.textSub, letterSpacing: 0.8, marginTop: 4, marginBottom: 2 },

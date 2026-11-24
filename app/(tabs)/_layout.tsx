@@ -37,7 +37,7 @@ function bottomFadeGradient(hex: string): string {
 const DOCK_H       = 66;   // full bar height (icon + label)
 const MINI_H       = TAB_BAR_MINI_H; // shrunk bar height (icons only)
 const DOCK_H_SIDE  = 12;   // full bar inset from the screen edges
-const MINI_WIDTH   = 0.62; // shrunk bar width, as a fraction of the full bar
+const MINI_WIDTH   = 0.7;  // shrunk bar width, as a fraction of the full bar
 const AUTO_HIDE_MS   = 7000; // bar opened from the small bar, nothing picked
 const AFTER_SWITCH_MS = 3000; // after switching screens
 const ON_LAUNCH_MS   = 4000; // first time the app opens
@@ -106,7 +106,7 @@ function FloatingDock({ state, navigation }: BottomTabBarProps) {
   const barWidth  = openAnim.interpolate({ inputRange: [0, 1], outputRange: [miniW, fullW] });
   const barHeight = openAnim.interpolate({ inputRange: [0, 1], outputRange: [MINI_H, DOCK_H] });
   const radius    = openAnim.interpolate({ inputRange: [0, 1], outputRange: [MINI_H / 2, 24] });
-  const iconScale = openAnim.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] });
+  const iconScale = openAnim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
   // Labels fade out first when shrinking and fade in last when growing.
   const labelOpacity = openAnim.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0, 0, 1] });
   const labelHeight  = openAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 15] });

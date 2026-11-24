@@ -28,6 +28,7 @@ import {
 } from '../lib/collections-sync';
 import { addToShoppingList, addToHouseholdShoppingList } from '../lib/shopping-list';
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
+import { raised, raisedGreen } from '@/components/raised';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1132,10 +1133,10 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   suggestGroupTitle:  { fontSize: 16, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold', marginTop: 14, marginBottom: 4 },
   suggestRow:         { paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: c.border },
   suggestRowText:     { fontSize: 14, color: c.text, fontFamily: 'Fraunces_600SemiBold' },
-  suggestChoice:      { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg },
+  suggestChoice:      { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg, ...raised(isDark) },
   suggestChoiceText:  { flex: 1, fontSize: 15, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   suggestChoiceCount: { fontSize: 12, fontWeight: '600', color: c.textMuted },
-  suggestMore:        { alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg },
+  suggestMore:        { alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.bg, ...raised(isDark) },
   suggestMoreText:    { fontSize: 12, fontWeight: '600', color: c.textSub },
 
   // Expiring-item chips inside welcome card
@@ -1153,7 +1154,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   // Input
   inputRow:           { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 36, backgroundColor: c.bg, borderTopWidth: 0, gap: 10 },
   chatInput:          { flex: 1, backgroundColor: c.chatInputBg, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: c.text, maxHeight: 100, fontFamily: 'Fraunces_400Regular', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3 },
-  sendBtn:            { width: 40, height: 40, borderRadius: 20, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center' },
+  sendBtn:            { width: 40, height: 40, borderRadius: 20, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center', ...raisedGreen(isDark, 'sm') },
   sendBtnText:        { color: 'white', fontSize: 18, lineHeight: 22 },
 
   // Save recipe

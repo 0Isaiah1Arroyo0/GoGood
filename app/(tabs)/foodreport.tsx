@@ -3,8 +3,7 @@ import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Modal, Animated, Easing, TextInput,
-  Platform, KeyboardAvoidingView, Alert,
-} from 'react-native';
+  Platform, KeyboardAvoidingView, Alert, LayoutAnimation } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
@@ -14,6 +13,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { captureRef } from 'react-native-view-shot';
 import { Accelerometer } from 'expo-sensors';
 import { useTheme, type ThemeColors } from '../context/theme';
+import { raised, raisedGreen } from '@/components/raised';
+
+// Report colors, matched to the app's greens and its soft expiry badges
+const GOOD     = '#23B385';
+const BAD      = '#D0644F';
+const AMBER    = '#D69A2D';
+const BAD_BG   = 'rgba(208,100,79,0.14)';
+const AMBER_BG = 'rgba(214,154,45,0.16)';
 import { useAppDrawer } from '../components/AppDrawer';
 import { useSubscription } from '../context/subscription';
 
@@ -95,12 +102,12 @@ function getEnvFactors(name: string): { co2: number; water: number; lbs: number 
 }
 
 function gradeFromScore(score: number): { grade: string; label: string; color: string } {
-  if (score >= 92) return { grade: 'A+', label: 'Food Champion',    color: '#5DCAA5' };
-  if (score >= 85) return { grade: 'A',  label: 'Excellent',        color: '#5DCAA5' };
-  if (score >= 75) return { grade: 'B',  label: 'Great work',       color: '#7DC88A' };
-  if (score >= 60) return { grade: 'C',  label: 'Making progress',  color: '#F5C842' };
-  if (score >= 45) return { grade: 'D',  label: 'Needs attention',  color: '#F59642' };
-  return              { grade: 'F',  label: 'High waste',       color: '#E8756A' };
+  if (score >= 92) return { grade: 'A+', label: 'Food Champion',    color: GOOD };
+  if (score >= 85) return { grade: 'A',  label: 'Excellent',        color: GOOD };
+  if (score >= 75) return { grade: 'B',  label: 'Great work',       color: GOOD };
+  if (score >= 60) return { grade: 'C',  label: 'Making progress',  color: AMBER };
+  if (score >= 45) return { grade: 'D',  label: 'Needs attention',  color: AMBER };
+  return              { grade: 'F',  label: 'High waste',       color: BAD };
 }
 
 function getGradeSummary(
@@ -136,11 +143,11 @@ function getGradeSummary(
   }
 
   const strengths: string[] = [];
-  if (rescueRate >= 0.8) strengths.push(`Strong rescue rate — you're saving ${rescuePct}% of tracked food 🌱`);
-  if (streak >= 7) strengths.push(`${streak}-day tracking streak — consistency is your superpower 🔥`);
-  if (momentumDelta !== null && momentumDelta >= 0.1) strengths.push(`Rescue rate improved ${Math.round(momentumDelta * 100)}% vs last period — you're trending up 📈`);
-  if (goalProgress >= 1 && period !== 'all') strengths.push(`You hit your food rescue goal this period 🎯`);
-  if (goneGoodCount >= 10) strengths.push(`${goneGoodCount} items rescued ${period === 'week' ? 'this week' : period === 'month' ? 'this month' : 'all time'} — that's real impact 💪`);
+  if (rescueRate >= 0.8) strengths.push(`Strong rescue rate — you're saving ${rescuePct}% of tracked food`);
+  if (streak >= 7) strengths.push(`${streak}-day tracking streak — consistency is your superpower`);
+  if (momentumDelta !== null && momentumDelta >= 0.1) strengths.push(`Rescue rate improved ${Math.round(momentumDelta * 100)}% vs last period — you're trending up`);
+  if (goalProgress >= 1 && period !== 'all') strengths.push(`You hit your food rescue goal this period`);
+  if (goneGoodCount >= 10) strengths.push(`${goneGoodCount} items rescued ${period === 'week' ? 'this week' : period === 'month' ? 'this month' : 'all time'} — that's real impact`);
 
   const improvements: string[] = [];
   if (atRiskItems.length > 0) {
@@ -273,7 +280,7 @@ function ActivityChart({ goodData, badData, labels, todayIdx, colors }: {
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-        {[{ color: colors.teal, label: 'gone good' }, { color: '#E8756A', label: 'gone bad' }].map(l => (
+        {[{ color: colors.teal, label: 'gone good' }, { color: BAD, label: 'gone bad' }].map(l => (
           <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
             <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: l.color }} />
             <Text style={{ fontSize: 11, color: colors.textSub }}>{l.label}</Text>
@@ -299,7 +306,7 @@ function ActivityChart({ goodData, badData, labels, todayIdx, colors }: {
                 return (
                   <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2 }}>
                     <View style={{ width: 10, height: gH, backgroundColor: colors.teal, borderTopLeftRadius: 3, borderTopRightRadius: 3 }} />
-                    <View style={{ width: 10, height: bH, backgroundColor: '#E8756A', borderTopLeftRadius: 3, borderTopRightRadius: 3 }} />
+                    <View style={{ width: 10, height: bH, backgroundColor: BAD, borderTopLeftRadius: 3, borderTopRightRadius: 3 }} />
                   </View>
                 );
               })}
@@ -330,6 +337,7 @@ export default function FoodReportScreen() {
   const { isPremium, showPaywall } = useSubscription();
 
   const [period, setPeriod]           = useState<Period>('week');
+  const [showInsights, setShowInsights] = useState(false);
   const [items, setItems]             = useState<Item[]>([]);
   const [goneGoodHistory, setGoneGoodHistory] = useState<HistoryEntry[]>([]);
   const [goneBadHistory,  setGoneBadHistory]  = useState<HistoryEntry[]>([]);
@@ -500,7 +508,7 @@ export default function FoodReportScreen() {
         try {
           await Sharing.shareAsync(uri, {
             mimeType: 'image/png',
-            dialogTitle: 'Share your food report 🌱',
+            dialogTitle: 'Share your food report',
             UTI: 'public.png',
           });
         } catch {
@@ -889,27 +897,27 @@ export default function FoodReportScreen() {
   if (atRiskItems.length > 0) {
     const soonest = atRiskItems[0];
     const when = soonest.days <= 0 ? 'today' : soonest.days === 1 ? 'tomorrow' : `in ${soonest.days} days`;
-    coachingTips.push({ icon: '⏰', title: 'Use it now', body: `${soonest.baseName} expires ${when}. Use or freeze it before it's gone.` });
+    coachingTips.push({ icon: '', title: 'Use it now', body: `${soonest.baseName} expires ${when}. Use or freeze it before it's gone.` });
   }
   if (repeatOffenders.length > 0 && coachingTips.length < 3) {
     const top = repeatOffenders[0];
-    coachingTips.push({ icon: '🔁', title: 'Repeat waste alert', body: `${top.name} has gone bad ${top.count}× ($${top.cost} lost). Buy smaller portions or freeze immediately when purchased.` });
+    coachingTips.push({ icon: '', title: 'Repeat waste alert', body: `${top.name} has gone bad ${top.count}× ($${top.cost} lost). Buy smaller portions or freeze immediately when purchased.` });
   }
   const worstCat = [...catBreakdown].filter(c => c.bad > 0).sort((a, b) => (b.bad / (b.bad + b.good)) - (a.bad / (a.bad + a.good)))[0];
   if (worstCat && worstCat.bad >= 2 && coachingTips.length < 3) {
-    coachingTips.push({ icon: '📦', title: `${worstCat.cat} needs attention`, body: `${worstCat.bad} item${worstCat.bad !== 1 ? 's' : ''} wasted in ${worstCat.cat}. Check this category first on shopping days and plan meals around what's already there.` });
+    coachingTips.push({ icon: '', title: `${worstCat.cat} needs attention`, body: `${worstCat.bad} item${worstCat.bad !== 1 ? 's' : ''} wasted in ${worstCat.cat}. Check this category first on shopping days and plan meals around what's already there.` });
   }
   if (avgDaysWhenWasted !== null && avgDaysWhenWasted < 0 && coachingTips.length < 3) {
-    coachingTips.push({ icon: '📅', title: 'Expiry timing insight', body: `Items go bad an average of ${Math.abs(avgDaysWhenWasted)} day${Math.abs(avgDaysWhenWasted) !== 1 ? 's' : ''} after their label date. Check items a few days before the date shown — not on the day.` });
+    coachingTips.push({ icon: '', title: 'Expiry timing insight', body: `Items go bad an average of ${Math.abs(avgDaysWhenWasted)} day${Math.abs(avgDaysWhenWasted) !== 1 ? 's' : ''} after their label date. Check items a few days before the date shown — not on the day.` });
   }
   if (rescueRate < 0.5 && totalTracked >= 5 && coachingTips.length < 3) {
-    coachingTips.push({ icon: '🛒', title: 'Buy less, waste less', body: `Over half your tracked food went bad. Try a smaller weekly shop and refresh mid-week — fresher items, less waste.` });
+    coachingTips.push({ icon: '', title: 'Buy less, waste less', body: `Over half your tracked food went bad. Try a smaller weekly shop and refresh mid-week — fresher items, less waste.` });
   }
   if (coachingTips.length < 3 && streak === 0) {
-    coachingTips.push({ icon: '🔥', title: 'Start your streak', body: 'Log a use or mark something gone good today to start your daily tracking streak.' });
+    coachingTips.push({ icon: '', title: 'Start your streak', body: 'Log a use or mark something gone good today to start your daily tracking streak.' });
   }
   if (coachingTips.length < 3 && atRiskItems.length === 0 && totalTracked >= 3 && rescueRate >= 0.8) {
-    coachingTips.push({ icon: '🌱', title: 'Keep it up', body: `You're rescuing ${Math.round(rescueRate * 100)}% of your food. Plan meals around expiry dates to maintain this streak.` });
+    coachingTips.push({ icon: '', title: 'Keep it up', body: `You're rescuing ${Math.round(rescueRate * 100)}% of your food. Plan meals around expiry dates to maintain this streak.` });
   }
 
   const isEmpty = stats.totalAdded === 0 && items.length === 0 && goneGoodHistory.length === 0 && goneBadHistory.length === 0;
@@ -918,10 +926,10 @@ export default function FoodReportScreen() {
   const periodLabelLower = period === 'week' ? 'this week' : period === 'month' ? 'this month' : 'all time';
 
   const shareCaption = goneGoodCount > 0 && netScore >= 0
-    ? `Rescued $${goneGoodDollars} worth of food ${periodLabelLower} and only wasted $${goneBadDollars} — net score +$${netScore} 🌱 Tracking every expiry date with @gogood so nothing goes to waste.`
+    ? `Rescued $${goneGoodDollars} worth of food ${periodLabelLower} and only wasted $${goneBadDollars} — net score +$${netScore}. Tracking every expiry date with @gogood so nothing goes to waste.`
     : goneGoodCount > 0
-      ? `Saved $${goneGoodDollars} worth of food from going bad ${periodLabelLower} with @gogood 🌱 Still working on that net score — every rescued meal counts.`
-      : `Just started tracking my food waste with @gogood 🌱 The goal: rescue every item before it goes bad and watch that net score climb.`;
+      ? `Saved $${goneGoodDollars} worth of food from going bad ${periodLabelLower} with @gogood. Still working on that net score — every rescued meal counts.`
+      : `Just started tracking my food waste with @gogood. The goal: rescue every item before it goes bad and watch that net score climb.`;
 
   // History display lists
   const HIST_PAGE = 8;
@@ -948,14 +956,14 @@ export default function FoodReportScreen() {
         <View style={{ flex: 1, position: 'relative' }}>
 
         {/* Period tabs */}
-        <View style={[styles.tabRow, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        <View style={[styles.tabRow, { backgroundColor: colors.surfaceAlt }]}>
           {(['week', 'month', 'all'] as Period[]).map(p => (
             <TouchableOpacity
               key={p}
-              style={[styles.tabBtn, period === p && styles.tabBtnActive]}
+              style={[styles.tabBtn, period === p && [styles.tabBtnActive, raised(isDark)]]}
               onPress={() => switchPeriod(p)}
             >
-              <Text style={[styles.tabBtnText, { color: period === p ? 'white' : colors.textSub }, period === p && { fontWeight: '600' }]}>
+              <Text style={[styles.tabBtnText, { color: period === p ? colors.text : colors.textSub }, period === p && { fontWeight: '600' }]}>
                 {p === 'week' ? 'This week' : p === 'month' ? 'This month' : 'All time'}
               </Text>
             </TouchableOpacity>
@@ -971,8 +979,7 @@ export default function FoodReportScreen() {
 
           {isEmpty ? (
             <View style={{ alignItems: 'center', paddingTop: 60, gap: 10 }}>
-              <Text style={{ fontSize: 48 }}>📊</Text>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.teal }}>No data yet</Text>
+              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.text }}>No data yet</Text>
               <Text style={{ fontSize: 13, color: colors.textSub, textAlign: 'center' }}>
                 Add items to your inventory and start tracking to see your report here.
               </Text>
@@ -980,362 +987,52 @@ export default function FoodReportScreen() {
           ) : (
             <>
 
-              {/* ── Hero card ── */}
+              {/* ── Summary: what you used vs. what went bad ── */}
               <Animated.View style={{ transform: [{ scale: heroScale }] }}>
               <View style={styles.heroCard}>
-                <Animated.View style={[styles.heroCircle1, { transform: [
-                  { translateY: b1Y }, { translateX: b1X },
-                  { translateX: tiltX.interpolate({ inputRange: [-1, 1], outputRange: [-20, 20] }) },
-                  { translateY: tiltY.interpolate({ inputRange: [-1, 1], outputRange: [-15, 15] }) },
-                ]}]} />
-                <Animated.View style={[styles.heroCircle2, { transform: [
-                  { translateY: b2Y }, { translateX: b2X },
-                  { translateX: tiltX.interpolate({ inputRange: [-1, 1], outputRange: [-10, 10] }) },
-                  { translateY: tiltY.interpolate({ inputRange: [-1, 1], outputRange: [-8,   8] }) },
-                ]}]} />
-                <Animated.View style={[styles.heroCircle3, { transform: [
-                  { translateY: b3Y }, { translateX: b3X },
-                  { translateX: tiltX.interpolate({ inputRange: [-1, 1], outputRange: [-14, 14] }) },
-                  { translateY: tiltY.interpolate({ inputRange: [-1, 1], outputRange: [-10, 10] }) },
-                ]}]} />
-
-                <Text style={styles.heroPeriodTag}>YOUR FOOD REPORT · {periodLabel}</Text>
-
+                <Text style={styles.heroPeriodTag}>{periodLabel}</Text>
                 <View style={styles.heroSplit}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.heroGoodTag}>GONE GOOD 🌱</Text>
-                    <Text style={styles.heroGoodVal}>${goneGoodDollars}</Text>
-                    <Text style={styles.heroSub}>{goneGoodCount} item{goneGoodCount !== 1 ? 's' : ''} rescued</Text>
+                    <Text style={styles.heroTag}>Used</Text>
+                    <Text style={styles.heroVal}>${goneGoodDollars}</Text>
+                    <Text style={styles.heroSub}>{goneGoodCount} item{goneGoodCount !== 1 ? 's' : ''}</Text>
                   </View>
                   <View style={styles.heroDivider} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.heroBadTag}>GONE BAD 🥀</Text>
-                    <Text style={styles.heroBadVal}>${goneBadDollars}</Text>
-                    <Text style={styles.heroSub}>{goneBadCount} item{goneBadCount !== 1 ? 's' : ''} lost</Text>
-                  </View>
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => setWasteSheetVisible(true)} activeOpacity={0.75}>
+                    <Text style={styles.heroTag}>Went bad</Text>
+                    <Text style={styles.heroVal}>${goneBadDollars}</Text>
+                    <Text style={styles.heroSub}>{goneBadCount} item{goneBadCount !== 1 ? 's' : ''} · details ›</Text>
+                  </TouchableOpacity>
                 </View>
-
-                <View style={styles.netRow}>
-                  <Text style={styles.netLabel}>net food score {periodLabelLower}</Text>
-                  <Text style={[styles.netVal, { color: netScore >= 0 ? '#5DCAA5' : '#E8756A' }]}>
-                    {netScore >= 0 ? '+' : ''}${Math.abs(netScore)} {netScore >= 0 ? 'ahead' : 'behind'}
-                  </Text>
+                {/* Share of food used before it went bad */}
+                <View style={styles.heroBarTrack}>
+                  <View style={[styles.heroBarFill, { width: `${Math.round(rescueRate * 100)}%` }]} />
                 </View>
-
-                <View style={styles.heroStatRow}>
-                  {[
-                    { val: `${Math.round(rescueRate * 100)}%`, label: 'RESCUE RATE' },
-                    { val: `${streak}🔥`,                      label: 'DAY STREAK'  },
-                    { val: `${totalLbs}lb`,                    label: 'RESCUED'     },
-                  ].map(s => (
-                    <View key={s.label} style={styles.heroStatCell}>
-                      <Text style={styles.heroStatVal}>{s.val}</Text>
-                      <Text style={styles.heroStatLabel}>{s.label}</Text>
-                    </View>
-                  ))}
-                </View>
+                <Text style={styles.heroBarLabel}>
+                  {Math.round(rescueRate * 100)}% of your food was used before it went bad
+                </Text>
               </View>
               </Animated.View>
 
-              {/* ── Cards below hero ── */}
               <Animated.View style={{ opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }], gap: 12 }}>
 
-              {/* ── Efficiency Grade ── */}
-              {totalTracked >= 3 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>Food Efficiency Grade</Text>
-                  <TouchableOpacity
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 }}
-                    onPress={() => setGradeSheetVisible(true)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: grade.color + '20', borderWidth: 2.5, borderColor: grade.color, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 28, fontWeight: '800', color: grade.color }}>{grade.grade}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 17, fontWeight: '700', color: grade.color }}>{grade.label}</Text>
-                      <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>Score: {efficiencyScore}/100 {periodLabelLower}</Text>
-                      {momentumDelta !== null && (
-                        <Text style={{ fontSize: 11, color: momentumDelta >= 0 ? colors.teal : '#E8756A', marginTop: 4, fontWeight: '600' }}>
-                          {momentumDelta >= 0.01 ? `↑ ${Math.round(momentumDelta * 100)}% better rescue rate vs prior period` : momentumDelta <= -0.01 ? `↓ ${Math.round(Math.abs(momentumDelta) * 100)}% vs prior period` : '→ Same rescue rate as prior period'}
-                        </Text>
-                      )}
-                      <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 5, fontWeight: '500' }}>tap for details →</Text>
-                    </View>
-                  </TouchableOpacity>
-                  {/* Score breakdown bars */}
-                  {[
-                    { label: 'Rescue rate',    pct: rescueRatePct,  weight: 40,  val: `${Math.round(rescueRate * 100)}%` },
-                    { label: 'Consistency',     pct: streakPct,      weight: 15,  val: `${streak}d streak` },
-                    { label: 'Momentum',        pct: momentumPct,    weight: 20,  val: momentumDelta !== null ? (momentumDelta >= 0 ? `+${Math.round(momentumDelta * 100)}%` : `${Math.round(momentumDelta * 100)}%`) : 'N/A' },
-                    { label: 'Goal progress',   pct: goalPct,        weight: 25,  val: period !== 'all' ? `${Math.round(goalProgress * 100)}%` : '—' },
-                  ].map(row => (
-                    <View key={row.label} style={{ marginBottom: 8 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <Text style={{ fontSize: 11, color: colors.textSub }}>{row.label} <Text style={{ color: colors.textMuted }}>({row.weight}%)</Text></Text>
-                        <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{row.val}</Text>
-                      </View>
-                      <View style={{ height: 5, borderRadius: 999, backgroundColor: colors.surfaceAlt, overflow: 'hidden' }}>
-                        <View style={{ height: '100%', width: `${Math.min(Math.max(row.pct, 0), 100)}%`, backgroundColor: grade.color, borderRadius: 999 }} />
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* ── At-Risk Now ── */}
+              {/* ── Use these first ── */}
               {atRiskItems.length > 0 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: '#F59642', borderWidth: 1.5 }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={{ fontSize: 18 }}>⚠️</Text>
-                      <View>
-                        <Text style={{ fontSize: 9, fontWeight: '700', color: '#F59642', letterSpacing: 1.2, textTransform: 'uppercase' }}>AT RISK NOW</Text>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text, marginTop: 1 }}>Use these first</Text>
-                      </View>
-                    </View>
-                    <View style={{ backgroundColor: 'rgba(245,150,66,0.12)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 }}>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#F59642' }}>~${atRiskValue} at stake</Text>
-                    </View>
+                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.cardRow}>
+                    <Text style={[styles.cardHeading, { color: colors.text }]}>Use these first</Text>
+                    <Text style={{ fontSize: 12, color: colors.textSub }}>~${atRiskValue} at stake</Text>
                   </View>
                   {atRiskItems.map((item, i) => (
-                    <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, borderTopWidth: i === 0 ? 0.5 : 0.5, borderTopColor: colors.border, gap: 10 }}>
-                      <Text style={{ fontSize: 20 }}>{item.icon || '🥘'}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>{item.baseName}</Text>
-                        <Text style={{ fontSize: 11, color: item.days <= 0 ? '#E8756A' : item.days === 1 ? '#F59642' : colors.textMuted, marginTop: 1 }}>
-                          {item.days <= 0 ? 'Expires TODAY' : item.days === 1 ? 'Expires TOMORROW' : `Expires in ${item.days} days`}
+                    <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth, borderTopColor: colors.border, gap: 10 }}>
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: '500', color: colors.text }} numberOfLines={1}>{item.baseName}</Text>
+                      <View style={[styles.pill, { backgroundColor: item.days <= 1 ? BAD_BG : AMBER_BG }]}>
+                        <Text style={[styles.pillText, { color: item.days <= 1 ? BAD : AMBER }]}>
+                          {item.days <= 0 ? 'today' : item.days === 1 ? 'tomorrow' : `${item.days} days`}
                         </Text>
                       </View>
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#F59642' }}>~${estimatePrice(item.baseName)}</Text>
                     </View>
                   ))}
-                  <View style={{ marginTop: 10, backgroundColor: 'rgba(245,150,66,0.08)', borderRadius: 10, padding: 10 }}>
-                    <Text style={{ fontSize: 11, color: '#F59642', fontWeight: '500', textAlign: 'center' }}>
-                      💡 {getTip(atRiskItems[0].baseName)}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* ── Wasted This Month ── */}
-              <TouchableOpacity
-                style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                onPress={() => setWasteSheetVisible(true)}
-                activeOpacity={0.75}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <View>
-                    <Text style={{ fontSize: 9, fontWeight: '700', color: '#E8756A', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>WASTED THIS MONTH</Text>
-                    <Text style={{ fontSize: 38, fontWeight: '700', color: thisMonthWastedDollars > 0 ? '#E8756A' : colors.teal, lineHeight: 44 }}>${thisMonthWastedDollars}</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 3 }}>
-                      {thisMonthBad.length} item{thisMonthBad.length !== 1 ? 's' : ''} gone bad this month
-                    </Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end', gap: 6, marginTop: 4 }}>
-                    {prevMonthWastedDollars > 0 && (
-                      <View style={{ backgroundColor: wastedTrend <= 0 ? 'rgba(29,158,117,0.12)' : 'rgba(232,117,106,0.12)', borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: wastedTrend < 0 ? colors.teal : wastedTrend > 0 ? '#E8756A' : colors.textSub }}>
-                          {wastedTrend < 0 ? `↓ $${Math.abs(wastedTrend)} vs last mo` : wastedTrend > 0 ? `↑ $${wastedTrend} vs last mo` : '= same as last mo'}
-                        </Text>
-                      </View>
-                    )}
-                    <Text style={{ fontSize: 12, color: colors.teal, fontWeight: '600' }}>details →</Text>
-                  </View>
-                </View>
-                {thisMonthWastedDollars === 0 ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(29,158,117,0.08)', borderRadius: 10, padding: 10 }}>
-                    <Text style={{ fontSize: 16 }}>🎉</Text>
-                    <Text style={{ fontSize: 12, color: colors.teal, fontWeight: '500', flex: 1 }}>Nothing wasted this month — keep it up!</Text>
-                  </View>
-                ) : (
-                  <View style={{ height: 6, borderRadius: 999, backgroundColor: colors.surfaceAlt, overflow: 'hidden' }}>
-                    <View style={{ height: '100%', width: `${Math.min(100, prevMonthWastedDollars > 0 ? Math.round(thisMonthWastedDollars / Math.max(thisMonthWastedDollars, prevMonthWastedDollars) * 100) : 100)}%`, backgroundColor: '#E8756A', borderRadius: 999 }} />
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {/* ── Week-over-week comparison (only on week view) ── */}
-              {period === 'week' && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>Week over week</Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {[
-                      { label: 'This week', good: goneGoodDollars, bad: goneBadDollars, net: netScore, isThis: true },
-                      { label: 'Last week',  good: lwGoodDollars,  bad: lwBadDollars,  net: lwNet,    isThis: false },
-                    ].map(w => (
-                      <View key={w.label} style={[styles.wowCard, { backgroundColor: colors.surfaceAlt, borderColor: w.isThis ? colors.teal : colors.border, borderWidth: w.isThis ? 1.5 : 0.5 }]}>
-                        <Text style={[styles.wowLabel, { color: w.isThis ? colors.teal : colors.textSub }]}>{w.label}</Text>
-                        <View style={{ gap: 6, marginTop: 8 }}>
-                          <View style={styles.wowRow}>
-                            <Text style={styles.wowDot}>🌱</Text>
-                            <Text style={[styles.wowVal, { color: colors.teal }]}>${w.good}</Text>
-                            <Text style={[styles.wowSub, { color: colors.textMuted }]}>rescued</Text>
-                          </View>
-                          <View style={styles.wowRow}>
-                            <Text style={styles.wowDot}>🥀</Text>
-                            <Text style={[styles.wowVal, { color: '#E8756A' }]}>${w.bad}</Text>
-                            <Text style={[styles.wowSub, { color: colors.textMuted }]}>wasted</Text>
-                          </View>
-                          <View style={[styles.wowNetRow, { backgroundColor: w.net >= 0 ? 'rgba(29,158,117,0.1)' : 'rgba(232,117,106,0.1)', borderRadius: 8 }]}>
-                            <Text style={[styles.wowNetVal, { color: w.net >= 0 ? colors.teal : '#E8756A' }]}>
-                              {w.net >= 0 ? '+' : ''}${Math.abs(w.net)} net
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                  {(goneGoodDollars !== lwGoodDollars || goneBadDollars !== lwBadDollars) && (
-                    <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 10, textAlign: 'center' }}>
-                      {netScore > lwNet
-                        ? `↑ $${netScore - lwNet} better than last week 🎉`
-                        : netScore < lwNet
-                          ? `↓ $${lwNet - netScore} behind last week — let's turn it around 💪`
-                          : 'Same as last week'}
-                    </Text>
-                  )}
-                </View>
-              )}
-
-              {/* ── Good Bot tip ── */}
-              <TouchableOpacity
-                style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                onPress={() => router.push('/(tabs)/goodbot')}
-                activeOpacity={0.75}
-              >
-                <View style={{ flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
-                  <View style={styles.botAvatar}>
-                    <Text style={{ fontSize: 20 }}>🤖</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.botLabel, { color: colors.teal }]}>GOOD BOT TIP</Text>
-                    <Text style={[styles.botText, { color: colors.text }]}>
-                      {goneBadCount > 0
-                        ? `${goneBadCount} thing${goneBadCount !== 1 ? 's' : ''} went bad ${periodLabelLower}. Let me check what's about to expire so we can rescue it before it's too late. 🌱`
-                        : `Nothing went bad ${periodLabelLower} — great work! Want tips on what to cook next? 🌱`}
-                    </Text>
-                    <Text style={[styles.botLink, { color: colors.teal }]}>ask Good Bot →</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-
-              {/* ── Smart Coaching Tips ── */}
-              {coachingTips.length > 0 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>Smart Insights</Text>
-                  <View style={{ gap: 10 }}>
-                    {coachingTips.map((tip, i) => (
-                      <View key={i} style={{ flexDirection: 'row', gap: 12, padding: 12, backgroundColor: colors.surfaceAlt, borderRadius: 12, alignItems: 'flex-start' }}>
-                        <Text style={{ fontSize: 20 }}>{tip.icon}</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 3 }}>{tip.title}</Text>
-                          <Text style={{ fontSize: 12, color: colors.textSub, lineHeight: 17 }}>{tip.body}</Text>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* ── Environmental impact ── */}
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Environmental impact</Text>
-                <Text style={{ fontSize: 10, color: colors.textMuted, marginBottom: 12 }}>Calculated by food type — beef saves ~17× more CO₂ than produce per item</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {[
-                    { icon: '🌍', val: `${totalCo2}kg`,    label: 'CO₂ avoided',   sub: 'based on food type' },
-                    { icon: '💧', val: `${totalWater}L`,   label: 'Water saved',   sub: 'based on food type' },
-                    { icon: '♻️', val: `${totalLbs}lb`,    label: 'Food rescued',  sub: 'kept from landfill' },
-                  ].map(s => (
-                    <View key={s.label} style={[styles.impactCell, { backgroundColor: colors.chipBg, borderRadius: 12 }]}>
-                      <Text style={{ fontSize: 22 }}>{s.icon}</Text>
-                      <Text style={[styles.impactVal, { color: colors.chipText }]}>{s.val}</Text>
-                      <Text style={[styles.impactLabel, { color: colors.teal }]}>{s.label}</Text>
-                      <Text style={[styles.impactSub, { color: '#6B9E8A' }]}>{s.sub}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {/* ── Annualized Projections ── */}
-              {totalTracked >= 3 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>At this rate, this year you'll…</Text>
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginBottom: 14 }}>
-                    Projected from {period === 'week' ? 'this week' : period === 'month' ? 'this month' : `${daysTracked} days tracked`}
-                  </Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <View style={{ flex: 1, backgroundColor: 'rgba(29,158,117,0.08)', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 }}>
-                      <Text style={{ fontSize: 9, fontWeight: '700', color: colors.teal, letterSpacing: 1, textTransform: 'uppercase' }}>Save</Text>
-                      <Text style={{ fontSize: 26, fontWeight: '800', color: colors.teal }}>${projSavedAnnual}</Text>
-                      <Text style={{ fontSize: 10, color: colors.textMuted, textAlign: 'center' }}>food rescued / yr</Text>
-                    </View>
-                    <View style={{ flex: 1, backgroundColor: 'rgba(232,117,106,0.08)', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 }}>
-                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#E8756A', letterSpacing: 1, textTransform: 'uppercase' }}>Waste</Text>
-                      <Text style={{ fontSize: 26, fontWeight: '800', color: '#E8756A' }}>${projWasteAnnual}</Text>
-                      <Text style={{ fontSize: 10, color: colors.textMuted, textAlign: 'center' }}>lost / yr</Text>
-                    </View>
-                    <View style={{ flex: 1, backgroundColor: projNetAnnual >= 0 ? 'rgba(29,158,117,0.08)' : 'rgba(232,117,106,0.08)', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 }}>
-                      <Text style={{ fontSize: 9, fontWeight: '700', color: projNetAnnual >= 0 ? colors.teal : '#E8756A', letterSpacing: 1, textTransform: 'uppercase' }}>Net</Text>
-                      <Text style={{ fontSize: 26, fontWeight: '800', color: projNetAnnual >= 0 ? colors.teal : '#E8756A' }}>
-                        {projNetAnnual >= 0 ? '+' : ''}${Math.abs(projNetAnnual)}
-                      </Text>
-                      <Text style={{ fontSize: 10, color: colors.textMuted, textAlign: 'center' }}>net / yr</Text>
-                    </View>
-                  </View>
-                  {projWasteAnnual > 200 && (
-                    <View style={{ marginTop: 12, backgroundColor: 'rgba(232,117,106,0.08)', borderRadius: 10, padding: 10 }}>
-                      <Text style={{ fontSize: 11, color: '#E8756A', textAlign: 'center', fontWeight: '500' }}>
-                        💸 Reducing waste by 50% could save you ~${Math.round(projWasteAnnual / 2)} extra per year.
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {/* ── Gone good goal (week & month only) ── */}
-              {period !== 'all' && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={styles.cardRow}>
-                    <View>
-                      <Text style={[styles.cardHeading, { color: colors.text }]}>Food Rescue Goal</Text>
-                      <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
-                        {period === 'week' ? 'WEEKLY TARGET' : 'MONTHLY TARGET'} · max $9,999
-                      </Text>
-                    </View>
-                    {editingGoal ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Text style={{ color: colors.textSub, fontSize: 13 }}>$</Text>
-                        <TextInput
-                          style={[styles.goalInput, { color: colors.text, borderColor: colors.teal }]}
-                          value={goalInput}
-                          onChangeText={v => setGoalInput(v.replace(/[^0-9]/g, '').slice(0, 4))}
-                          keyboardType="number-pad"
-                          autoFocus
-                          returnKeyType="done"
-                          onSubmitEditing={saveGoal}
-                          selectTextOnFocus
-                        />
-                        <TouchableOpacity onPress={saveGoal}>
-                          <Text style={{ color: colors.teal, fontSize: 13, fontWeight: '700' }}>save</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <TouchableOpacity onPress={() => { setGoalInput(String(goal)); setEditingGoal(true); }}>
-                        <Text style={{ color: colors.teal, fontSize: 13, fontWeight: '600' }}>edit</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  <View style={[styles.goalTrack, { backgroundColor: colors.border }]}>
-                    <View style={[styles.goalFill, { width: `${Math.round(goalProgress * 100)}%` }]} />
-                  </View>
-                  <View style={styles.cardRow}>
-                    <Text style={{ color: colors.teal, fontSize: 13, fontWeight: '600' }}>${goneGoodDollars} of ${goal} goal</Text>
-                    <Text style={{ color: colors.textSub, fontSize: 13 }}>
-                      {goalProgress >= 1 ? '🎉 goal reached!' : `$${Math.max(0, goal - goneGoodDollars)} to go`}
-                    </Text>
-                  </View>
                 </View>
               )}
 
@@ -1351,256 +1048,251 @@ export default function FoodReportScreen() {
                 />
               </View>
 
-              {/* ── Category breakdown ── */}
-              {catBreakdown.length > 0 && (
+              {/* ── Grade (details in the grade sheet) ── */}
+              {totalTracked >= 3 && (
+                <TouchableOpacity
+                  style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 14 }]}
+                  onPress={() => setGradeSheetVisible(true)}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: grade.color + '1F', alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 22, fontWeight: '800', color: grade.color }}>{grade.grade}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cardHeading, { color: colors.text }]}>{grade.label}</Text>
+                    <Text style={{ fontSize: 12, color: colors.textSub, marginTop: 2 }}>
+                      Score {efficiencyScore}/100
+                      {momentumDelta !== null && Math.abs(momentumDelta) >= 0.01
+                        ? ` · ${momentumDelta > 0 ? 'up' : 'down'} ${Math.round(Math.abs(momentumDelta) * 100)}% from last ${period === 'month' ? 'month' : 'week'}`
+                        : ''}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 20, color: colors.textMuted }}>›</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* ── Goal (week & month only) ── */}
+              {period !== 'all' && (
                 <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>By food category</Text>
-                  <View style={{ gap: 10 }}>
-                    {catBreakdown.map(c => (
-                      <View key={c.cat} style={{ gap: 4 }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                          <Text style={{ fontSize: 12, color: colors.text, fontWeight: '500' }}>{c.cat}</Text>
-                          <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                            {c.good > 0 && <Text style={{ color: colors.teal }}>{c.good} saved</Text>}
-                            {c.good > 0 && c.bad > 0 && '  '}
-                            {c.bad > 0 && <Text style={{ color: '#E8756A' }}>{c.bad} wasted</Text>}
-                          </Text>
+                  <View style={styles.cardRow}>
+                    <Text style={[styles.cardHeading, { color: colors.text }]}>{period === 'week' ? 'Weekly goal' : 'Monthly goal'}</Text>
+                    {editingGoal ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={{ color: colors.textSub, fontSize: 13 }}>$</Text>
+                        <TextInput
+                          style={[styles.goalInput, { color: colors.text, borderColor: colors.teal }]}
+                          value={goalInput}
+                          onChangeText={v => setGoalInput(v.replace(/[^0-9]/g, '').slice(0, 4))}
+                          keyboardType="number-pad"
+                          autoFocus
+                          returnKeyType="done"
+                          onSubmitEditing={saveGoal}
+                          selectTextOnFocus
+                        />
+                        <TouchableOpacity onPress={saveGoal}>
+                          <Text style={{ color: colors.teal, fontSize: 13, fontWeight: '700' }}>Save</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity onPress={() => { setGoalInput(String(goal)); setEditingGoal(true); }}>
+                        <Text style={{ color: colors.textSub, fontSize: 13, fontWeight: '600' }}>Edit</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={[styles.goalTrack, { backgroundColor: colors.surfaceAlt }]}>
+                    <View style={[styles.goalFill, { width: `${Math.round(goalProgress * 100)}%` }]} />
+                  </View>
+                  <View style={styles.cardRow}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>${goneGoodDollars} of ${goal} used</Text>
+                    <Text style={{ color: colors.textSub, fontSize: 13 }}>
+                      {goalProgress >= 1 ? 'Goal reached' : `$${Math.max(0, goal - goneGoodDollars)} to go`}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* ── More insights (collapsed so the screen stays calm) ── */}
+              <TouchableOpacity
+                style={[styles.insightsToggle, raised(isDark), { backgroundColor: colors.surface }]}
+                onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setShowInsights(v => !v); }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{showInsights ? 'Hide insights' : 'More insights'}</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>{showInsights ? '' : 'Trends, categories, impact and more'}</Text>
+              </TouchableOpacity>
+
+              {showInsights && (
+                <>
+                  {/* Week over week */}
+                  {period === 'week' && (
+                    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>Compared to last week</Text>
+                      {[
+                        { label: 'Used',      now: goneGoodDollars, prev: lwGoodDollars },
+                        { label: 'Went bad',  now: goneBadDollars,  prev: lwBadDollars },
+                      ].map((r, i) => (
+                        <View key={r.label} style={[styles.statRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                          <Text style={{ flex: 1, fontSize: 13, color: colors.textSub }}>{r.label}</Text>
+                          <Text style={{ fontSize: 13, color: colors.textMuted, marginRight: 12 }}>${r.prev} last week</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>${r.now}</Text>
                         </View>
-                        <View style={{ flexDirection: 'row', height: 7, borderRadius: 4, overflow: 'hidden', backgroundColor: colors.surfaceAlt }}>
-                          {c.good > 0 && (
-                            <View style={{ flex: c.good / maxCat, backgroundColor: colors.teal }} />
-                          )}
-                          {c.bad > 0 && (
-                            <View style={{ flex: c.bad / maxCat, backgroundColor: '#E8756A' }} />
-                          )}
-                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Category breakdown */}
+                  {catBreakdown.length > 0 && (
+                    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>By food category</Text>
+                      <View style={{ gap: 10 }}>
+                        {catBreakdown.map(c => (
+                          <View key={c.cat} style={{ gap: 4 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: 12, color: colors.text, fontWeight: '500' }}>{c.cat}</Text>
+                              <Text style={{ fontSize: 11, color: colors.textMuted }}>{c.good} used · {c.bad} went bad</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.surfaceAlt }}>
+                              {c.good > 0 && <View style={{ flex: c.good / maxCat, backgroundColor: GOOD }} />}
+                              {c.bad > 0 && <View style={{ flex: c.bad / maxCat, backgroundColor: BAD }} />}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Storage location breakdown */}
+                  {storageBreakdown.length > 0 && (
+                    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>By storage location</Text>
+                      <View style={{ gap: 10 }}>
+                        {storageBreakdown.map(s => {
+                          const locTotal = s.good + s.bad;
+                          const rate = locTotal > 0 ? Math.round(s.good / locTotal * 100) : 0;
+                          return (
+                            <View key={s.loc} style={{ gap: 4 }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={{ fontSize: 12, color: colors.text, fontWeight: '500' }}>{s.label}</Text>
+                                <Text style={{ fontSize: 11, color: colors.textMuted }}>{rate}% used</Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.surfaceAlt }}>
+                                {s.good > 0 && <View style={{ flex: s.good / maxStorage, backgroundColor: GOOD }} />}
+                                {s.bad > 0 && <View style={{ flex: s.bad / maxStorage, backgroundColor: BAD }} />}
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Timing, impact and projections as simple rows */}
+                  <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 6 }]}>Your impact</Text>
+                    {[
+                      { label: 'Food kept from the trash', val: `${totalLbs} lb` },
+                      { label: 'CO₂ avoided',               val: `${totalCo2} kg` },
+                      { label: 'Water saved',               val: `${totalWater} L` },
+                      ...(totalTracked >= 3 ? [
+                        { label: 'Projected savings this year', val: `$${projSavedAnnual}` },
+                        { label: 'Projected waste this year',   val: `$${projWasteAnnual}` },
+                      ] : []),
+                      ...(avgDaysWhenRescued !== null ? [{
+                        label: 'You usually use food',
+                        val: avgDaysWhenRescued >= 0 ? `${avgDaysWhenRescued}d before its date` : `${Math.abs(avgDaysWhenRescued)}d after its date`,
+                      }] : []),
+                    ].map((r, i) => (
+                      <View key={r.label} style={[styles.statRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                        <Text style={{ flex: 1, fontSize: 13, color: colors.textSub }}>{r.label}</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>{r.val}</Text>
                       </View>
                     ))}
                   </View>
-                </View>
-              )}
 
-              {/* ── Expiry Timing Insights ── */}
-              {(avgDaysWhenRescued !== null || avgDaysWhenWasted !== null) && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Expiry timing</Text>
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginBottom: 14 }}>
-                    Days before/after expiry label when items are used or wasted
-                  </Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {avgDaysWhenRescued !== null && (
-                      <View style={{ flex: 1, backgroundColor: 'rgba(29,158,117,0.08)', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontSize: 20 }}>🌱</Text>
-                        <Text style={{ fontSize: 22, fontWeight: '800', color: colors.teal }}>
-                          {avgDaysWhenRescued >= 0 ? `+${avgDaysWhenRescued}d` : `${avgDaysWhenRescued}d`}
-                        </Text>
-                        <Text style={{ fontSize: 10, fontWeight: '600', color: colors.teal, textAlign: 'center' }}>
-                          avg when rescued
-                        </Text>
-                        <Text style={{ fontSize: 9, color: colors.textMuted, textAlign: 'center' }}>
-                          {avgDaysWhenRescued >= 0 ? 'before expiry' : 'after expiry'}
-                        </Text>
-                      </View>
-                    )}
-                    {avgDaysWhenWasted !== null && (
-                      <View style={{ flex: 1, backgroundColor: 'rgba(232,117,106,0.08)', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontSize: 20 }}>🥀</Text>
-                        <Text style={{ fontSize: 22, fontWeight: '800', color: '#E8756A' }}>
-                          {avgDaysWhenWasted >= 0 ? `+${avgDaysWhenWasted}d` : `${avgDaysWhenWasted}d`}
-                        </Text>
-                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#E8756A', textAlign: 'center' }}>
-                          avg when wasted
-                        </Text>
-                        <Text style={{ fontSize: 9, color: colors.textMuted, textAlign: 'center' }}>
-                          {avgDaysWhenWasted >= 0 ? 'before expiry' : 'after expiry'}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  {avgDaysWhenRescued !== null && avgDaysWhenWasted !== null && (
-                    <View style={{ marginTop: 12, backgroundColor: colors.surfaceAlt, borderRadius: 10, padding: 10 }}>
-                      <Text style={{ fontSize: 11, color: colors.textSub, textAlign: 'center', lineHeight: 16 }}>
-                        {avgDaysWhenRescued > 1
-                          ? `You act early — ${avgDaysWhenRescued}d before expiry on average. Keep checking ahead!`
-                          : avgDaysWhenRescued <= 0
-                            ? 'Items are used after the expiry date. Try checking your inventory 2–3 days before the label.'
-                            : "Try checking your inventory 2–3 days early to rescue more before it's too late."}
-                      </Text>
+                  {/* Repeat offenders */}
+                  {repeatOffenders.length > 0 && (
+                    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Often goes bad</Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8 }}>Items that went bad more than once</Text>
+                      {repeatOffenders.map((r, i) => (
+                        <View key={r.name} style={[styles.statRow, { alignItems: 'flex-start' }, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                          <View style={{ flex: 1, paddingRight: 10 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{r.name}</Text>
+                            <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>{getTip(r.name)}</Text>
+                          </View>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textSub }}>{r.count}× · ${r.cost}</Text>
+                        </View>
+                      ))}
                     </View>
                   )}
-                </View>
-              )}
 
-              {/* ── Storage Location Breakdown ── */}
-              {storageBreakdown.length > 0 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>By storage location</Text>
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginBottom: 14 }}>
-                    Where your wins and losses are coming from
-                  </Text>
-                  <View style={{ gap: 12 }}>
-                    {storageBreakdown.map(s => {
-                      const locTotal = s.good + s.bad;
-                      const rescRate = locTotal > 0 ? Math.round(s.good / locTotal * 100) : 0;
-                      const rateColor = rescRate >= 70 ? colors.teal : rescRate >= 50 ? '#F5C842' : '#E8756A';
-                      return (
-                        <View key={s.loc} style={{ gap: 5 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <Text style={{ fontSize: 16 }}>{s.icon}</Text>
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{s.label}</Text>
-                            </View>
-                            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-                              {s.good > 0 && <Text style={{ fontSize: 11, color: colors.teal }}>{s.good} saved</Text>}
-                              {s.bad > 0 && <Text style={{ fontSize: 11, color: '#E8756A' }}>{s.bad} wasted</Text>}
-                              <Text style={{ fontSize: 12, fontWeight: '700', color: rateColor }}>{rescRate}%</Text>
-                            </View>
-                          </View>
-                          <View style={{ height: 7, borderRadius: 4, overflow: 'hidden', backgroundColor: colors.surfaceAlt, flexDirection: 'row' }}>
-                            {s.good > 0 && <View style={{ flex: s.good / maxStorage, backgroundColor: colors.teal }} />}
-                            {s.bad > 0 && <View style={{ flex: s.bad / maxStorage, backgroundColor: '#E8756A' }} />}
-                          </View>
+                  {/* Tips */}
+                  {coachingTips.length > 0 && (
+                    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 6 }]}>Tips</Text>
+                      {coachingTips.map((tip, i) => (
+                        <View key={i} style={[styles.statRow, { flexDirection: 'column', alignItems: 'flex-start' }, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text, marginBottom: 2 }}>{tip.title}</Text>
+                          <Text style={{ fontSize: 12, color: colors.textSub, lineHeight: 17 }}>{tip.body}</Text>
                         </View>
-                      );
-                    })}
-                  </View>
-                  {(() => {
-                    const worst = [...storageBreakdown]
-                      .filter(s => s.bad > 0)
-                      .sort((a, b) => (b.bad / (b.bad + b.good)) - (a.bad / (a.bad + a.good)))[0];
-                    if (!worst) return null;
-                    return (
-                      <View style={{ marginTop: 12, backgroundColor: colors.surfaceAlt, borderRadius: 10, padding: 10 }}>
-                        <Text style={{ fontSize: 11, color: colors.textSub, lineHeight: 16 }}>
-                          {'💡 Your '}
-                          <Text style={{ fontWeight: '700', color: colors.text }}>{worst.label}</Text>
-                          {' has the highest waste rate. Check it first when planning meals or shopping.'}
-                        </Text>
-                      </View>
-                    );
-                  })()}
-                </View>
-              )}
+                      ))}
+                    </View>
+                  )}
 
-              {/* ── Repeat Offenders ── */}
-              {repeatOffenders.length > 0 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Repeat waste (all time)</Text>
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginBottom: 14 }}>
-                    Items wasted more than once — the biggest habits to change
-                  </Text>
-                  {repeatOffenders.map((r, i) => (
-                    <View
-                      key={r.name}
-                      style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 0.5, borderTopColor: colors.border, gap: 12 }}
-                    >
-                      <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.goneBadBg, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ fontSize: 18 }}>{r.icon}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{r.name}</Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>{getTip(r.name)}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#E8756A' }}>🥀 ×{r.count}</Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted }}>${r.cost} lost</Text>
-                      </View>
+                  {/* Streak */}
+                  <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={styles.cardRow}>
+                      <Text style={[styles.cardHeading, { color: colors.text }]}>Daily streak</Text>
+                      <Text style={{ fontSize: 13, color: colors.textSub }}>{streak} day{streak !== 1 ? 's' : ''} · best {longestStreak}</Text>
                     </View>
-                  ))}
-                </View>
-              )}
-
-              {/* ── Daily streak ── */}
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={styles.cardRow}>
-                  <View>
-                    <Text style={[styles.cardHeading, { color: colors.text }]}>Daily streak</Text>
-                    <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
-                      best ever: {longestStreak}🔥
-                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                      {weekBoxes.map((box, i) => (
+                        <View
+                          key={i}
+                          style={[
+                            styles.streakBox,
+                            { backgroundColor: box.isFuture ? colors.surfaceAlt : box.active ? (box.isToday ? colors.btnPrimary : colors.goneGoodBg) : colors.surfaceAlt },
+                          ]}
+                        >
+                          <Text style={[styles.streakMark, { color: box.isFuture ? colors.textMuted : box.active ? (box.isToday ? 'white' : colors.goneGoodText) : colors.textMuted }]}>
+                            {box.isFuture ? '·' : box.active ? '✓' : '–'}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
-                  <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text }}>{streak}🔥</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 6, marginTop: 14 }}>
-                  {weekBoxes.map((box, i) => (
-                    <View
-                      key={i}
-                      style={[
-                        styles.streakBox,
-                        box.isFuture
-                          ? { backgroundColor: colors.surfaceAlt }
-                          : box.isToday && box.active
-                            ? { backgroundColor: colors.btnPrimary }
-                            : box.active
-                              ? { backgroundColor: colors.goneGoodBg }
-                              : { backgroundColor: colors.goneBadBg },
-                      ]}
-                    >
-                      <Text style={[
-                        styles.streakMark,
-                        box.isFuture
-                          ? { color: colors.border }
-                          : box.isToday && box.active
-                            ? { color: 'white' }
-                            : box.active
-                              ? { color: colors.goneGoodText }
-                              : { color: isDark ? '#F5A0A0' : '#E24B4A' },
-                      ]}>
-                        {box.isFuture ? '·' : box.active ? '✓' : '✗'}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                {/* All-time summary row */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginTop: 16, paddingTop: 14, borderTopWidth: 0.5, borderTopColor: colors.border }}>
-                  {[
-                    { val: String(stats.goneGood), label: 'total rescued' },
-                    { val: String(stats.goneBad),  label: 'total wasted'  },
-                    { val: String(stats.totalAdded || items.length + stats.goneGood + stats.goneBad), label: 'items added' },
-                  ].map(s => (
-                    <View key={s.label} style={{ alignItems: 'center' }}>
-                      <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>{s.val}</Text>
-                      <Text style={{ fontSize: 10, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>{s.label}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+                </>
+              )}
 
               {/* ── History ── */}
               <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>History</Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-                  <TouchableOpacity
-                    style={[styles.histPill, { backgroundColor: histTab === 'good' ? colors.goneGoodBg : colors.surfaceAlt }]}
-                    onPress={() => { setHistTab('good'); setHistShowAll(false); }}
-                  >
-                    <Text style={[styles.histPillText, { color: histTab === 'good' ? colors.goneGoodText : colors.textSub }]}>
-                      🌱 Gone good ({goodList.length || stats.goneGood})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.histPill, { backgroundColor: histTab === 'bad' ? colors.goneBadBg : colors.surfaceAlt }]}
-                    onPress={() => { setHistTab('bad'); setHistShowAll(false); }}
-                  >
-                    <Text style={[styles.histPillText, { color: histTab === 'bad' ? colors.goneBadText : colors.textSub }]}>
-                      🥀 Gone bad ({badList.length})
-                    </Text>
-                  </TouchableOpacity>
+                  {([
+                    { key: 'good', label: `Used (${goodList.length || stats.goneGood})` },
+                    { key: 'bad',  label: `Went bad (${badList.length})` },
+                  ] as const).map(t => (
+                    <TouchableOpacity
+                      key={t.key}
+                      style={[styles.histPill, raised(isDark), { backgroundColor: histTab === t.key ? colors.btnPrimary : colors.surface }]}
+                      onPress={() => { setHistTab(t.key); setHistShowAll(false); }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.histPillText, { color: histTab === t.key ? 'white' : colors.textSub }]}>{t.label}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
 
                 {histTab === 'good' ? (
                   displayGood.length === 0 ? (
                     <View style={{ alignItems: 'center', paddingVertical: 20, gap: 6 }}>
-                      <Text style={{ fontSize: 24 }}>🌱</Text>
-                      <Text style={{ color: colors.teal, fontSize: 14, fontWeight: '600' }}>
+                      <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>
                         {stats.goneGood > 0
-                          ? `${stats.goneGood} item${stats.goneGood !== 1 ? 's' : ''} rescued in total`
-                          : 'Nothing rescued yet this period'}
+                          ? `${stats.goneGood} item${stats.goneGood !== 1 ? 's' : ''} used in total`
+                          : 'Nothing used yet this period'}
                       </Text>
-                      <Text style={{ color: colors.textMuted, fontSize: 11, textAlign: 'center' }}>
-                        {stats.goneGood > 0
-                          ? 'History logging started — future rescues will appear here'
-                          : 'Mark items "gone good" on the inventory tab to start tracking'}
+                      <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center' }}>
+                        Items you use up from your inventory will show here.
                       </Text>
                     </View>
                   ) : displayGood.map((entry, i) => {
@@ -1623,9 +1315,8 @@ export default function FoodReportScreen() {
                   })
                 ) : (
                   displayBad.length === 0 ? (
-                    <View style={{ alignItems: 'center', paddingVertical: 20, gap: 6 }}>
-                      <Text style={{ fontSize: 24 }}>🌱</Text>
-                      <Text style={{ color: colors.textSub, fontSize: 13 }}>Nothing gone bad yet!</Text>
+                    <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                      <Text style={{ color: colors.textSub, fontSize: 13 }}>Nothing has gone bad. Nice work.</Text>
                     </View>
                   ) : displayBad.map((entry, i) => {
                     const hk = `bad-${entry.id}-${entry.date}`;
@@ -1647,39 +1338,30 @@ export default function FoodReportScreen() {
                   })
                 )}
 
-                {/* Show more / show less */}
                 {(() => {
                   const list = histTab === 'good' ? goodList : badList;
-                  if (list.length > HIST_PAGE) {
-                    return (
-                      <TouchableOpacity onPress={() => setHistShowAll(p => !p)} style={{ alignItems: 'center', paddingTop: 12 }}>
-                        <Text style={{ color: colors.teal, fontSize: 13, fontWeight: '600' }}>
-                          {histShowAll ? 'show less ↑' : `show all ${list.length} →`}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  }
-                  return null;
+                  if (list.length <= HIST_PAGE) return null;
+                  return (
+                    <TouchableOpacity onPress={() => setHistShowAll(p => !p)} style={{ alignItems: 'center', paddingTop: 12 }}>
+                      <Text style={{ color: colors.textSub, fontSize: 13, fontWeight: '600' }}>
+                        {histShowAll ? 'Show less' : `Show all ${list.length}`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
                 })()}
               </View>
 
-              {/* ── Share CTA ── */}
+              {/* ── Share ── */}
               <TouchableOpacity style={styles.shareCta} onPress={() => setShareVisible(true)} activeOpacity={0.85}>
-                <Text style={{ fontSize: 28 }}>🌱</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.shareCtaTitle}>Share your food report</Text>
-                  <Text style={styles.shareCtaSub}>The good and the bad — full picture</Text>
+                  <Text style={styles.shareCtaSub}>The good and the bad, the full picture</Text>
                 </View>
-                <Text style={{ color: 'white', fontSize: 20 }}>→</Text>
+                <Text style={{ color: 'white', fontSize: 22 }}>›</Text>
               </TouchableOpacity>
 
               {/* ── Clear all data ── */}
-              <TouchableOpacity
-                style={[styles.clearDataBtn, { borderColor: colors.border }]}
-                onPress={handleClearAllData}
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 14 }}>🗑️</Text>
+              <TouchableOpacity style={styles.clearDataBtn} onPress={handleClearAllData} activeOpacity={0.7}>
                 <Text style={[styles.clearDataText, { color: colors.textMuted }]}>Clear all data</Text>
               </TouchableOpacity>
 
@@ -1724,7 +1406,7 @@ export default function FoodReportScreen() {
 
                 {/* Top bar: branding + period pill */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.previewBrandTop}>go<Text style={{ color: '#5DCAA5' }}>good</Text></Text>
+                  <Text style={styles.previewBrandTop}>go<Text style={{ color: GOOD }}>good</Text></Text>
                   <View style={styles.previewPeriodPill}>
                     <Text style={styles.previewPeriodPillText}>{periodLabelLower.toUpperCase()}</Text>
                   </View>
@@ -1732,7 +1414,6 @@ export default function FoodReportScreen() {
 
                 {/* Hero section */}
                 <View style={{ alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}>
-                  <Text style={styles.previewHeroEmoji}>🌱</Text>
                   <Text style={styles.previewHeroLabel}>food rescued</Text>
                   <Text style={styles.previewHeroVal}>${goneGoodDollars}</Text>
                   <Text style={styles.previewHeroSub}>{goneGoodCount} item{goneGoodCount !== 1 ? 's' : ''} saved from the bin</Text>
@@ -1742,29 +1423,27 @@ export default function FoodReportScreen() {
                 <View style={{ gap: 8 }}>
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     <View style={styles.previewStatPillGood}>
-                      <Text style={styles.previewStatPillIcon}>✅</Text>
                       <View>
                         <Text style={styles.previewStatPillVal}>${goneGoodDollars}</Text>
                         <Text style={styles.previewStatPillLabel}>gone good</Text>
                       </View>
                     </View>
                     <View style={styles.previewStatPillBad}>
-                      <Text style={styles.previewStatPillIcon}>🥀</Text>
                       <View>
-                        <Text style={[styles.previewStatPillVal, { color: '#E8756A' }]}>${goneBadDollars}</Text>
+                        <Text style={[styles.previewStatPillVal, { color: BAD }]}>${goneBadDollars}</Text>
                         <Text style={styles.previewStatPillLabel}>gone bad</Text>
                       </View>
                     </View>
                   </View>
                   <View style={[styles.previewNetBadge, { backgroundColor: netScore >= 0 ? 'rgba(93,202,165,0.18)' : 'rgba(232,117,106,0.18)' }]}>
-                    <Text style={[styles.previewNetBadgeText, { color: netScore >= 0 ? '#5DCAA5' : '#E8756A' }]}>
-                      {netScore >= 0 ? '🏆' : '📉'} {netScore >= 0 ? '+' : ''}${Math.abs(netScore)} net score
+                    <Text style={[styles.previewNetBadgeText, { color: netScore >= 0 ? GOOD : BAD }]}>
+                      {netScore >= 0 ? '+' : '-'}${Math.abs(netScore)} net score
                     </Text>
                   </View>
                 </View>
               </View>
 
-              <Text style={[styles.shareTitle, { color: colors.text }]}>Share your food report 🌱</Text>
+              <Text style={[styles.shareTitle, { color: colors.text }]}>Share your food report</Text>
 
               <View style={[styles.captionBox, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
                 <Text style={[styles.captionLabel, { color: colors.teal }]}>CAPTION</Text>
@@ -1775,14 +1454,14 @@ export default function FoodReportScreen() {
 
               {[
                 [
-                  { icon: '📸', label: 'Instagram' },
-                  { icon: '𝕏',  label: 'Twitter/X'  },
-                  { icon: '📘', label: 'Facebook'  },
+                  { icon: '', label: 'Instagram' },
+                  { icon: '', label: 'Twitter/X' },
+                  { icon: '', label: 'Facebook' },
                 ],
                 [
-                  { icon: '🎵', label: 'TikTok'   },
-                  { icon: '💬', label: 'Messages'  },
-                  { icon: '⋯',  label: 'More'      },
+                  { icon: '', label: 'TikTok' },
+                  { icon: '', label: 'Messages' },
+                  { icon: '', label: 'More' },
                 ],
               ].map((row, ri) => (
                 <View key={ri} style={{ flexDirection: 'row', gap: 8 }}>
@@ -1793,7 +1472,6 @@ export default function FoodReportScreen() {
                       onPress={captureAndShare}
                       disabled={capturing}
                     >
-                      <Text style={{ fontSize: 22 }}>{p.icon}</Text>
                       <Text style={[styles.platformLabel, { color: colors.textSub }]}>{p.label}</Text>
                     </TouchableOpacity>
                   ))}
@@ -1822,7 +1500,6 @@ export default function FoodReportScreen() {
         </Text>
         {thisMonthBad.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 24, gap: 8 }}>
-            <Text style={{ fontSize: 36 }}>🎉</Text>
             <Text style={{ fontSize: 15, fontWeight: '600', color: colors.teal }}>Nothing wasted!</Text>
             <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>Keep up the great work this month.</Text>
           </View>
@@ -1833,16 +1510,13 @@ export default function FoodReportScreen() {
                 key={`waste-${entry.id}-${entry.date}`}
                 style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: i < thisMonthBad.length - 1 ? 0.5 : 0, borderBottomColor: colors.border, gap: 12 }}
               >
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.goneBadBg, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 18 }}>{entry.icon || '🥘'}</Text>
-                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>{entry.name}</Text>
                   <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
                     {timeAgo(entry.date)}{entry.category ? ` · ${entry.category}` : ''}
                   </Text>
                 </View>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#E8756A' }}>~${estimatePrice(entry.name)}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: BAD }}>~${estimatePrice(entry.name)}</Text>
               </View>
             ))}
           </ScrollView>
@@ -1850,7 +1524,7 @@ export default function FoodReportScreen() {
         {thisMonthBad.length > 0 && (
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 4, borderTopWidth: 0.5, borderTopColor: colors.border }}>
             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSub }}>Total wasted this month</Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#E8756A' }}>${thisMonthWastedDollars}</Text>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: BAD }}>${thisMonthWastedDollars}</Text>
           </View>
         )}
         <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 12, marginTop: 4 }} onPress={() => setWasteSheetVisible(false)}>
@@ -1880,8 +1554,7 @@ export default function FoodReportScreen() {
           {(['fridge', 'freezer', 'pantry'] as const).map(loc => (
             <TouchableOpacity key={loc} onPress={() => setRestoreLoc(loc)}
               style={{ flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: 'center', gap: 4, backgroundColor: restoreLoc === loc ? colors.btnPrimary : colors.surfaceAlt, borderWidth: 1, borderColor: restoreLoc === loc ? colors.btnPrimary : colors.border }}>
-              <Text style={{ fontSize: 18 }}>{loc === 'fridge' ? '❄️' : loc === 'freezer' ? '🧊' : '🥫'}</Text>
-              <Text style={{ fontSize: 11, fontWeight: '500', color: restoreLoc === loc ? 'white' : colors.textSub, textTransform: 'capitalize' }}>{loc}</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '500', color: restoreLoc === loc ? 'white' : colors.textSub, textTransform: 'capitalize' }}>{loc}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -1964,11 +1637,11 @@ export default function FoodReportScreen() {
 
             {gs && gs.improvements.length > 0 && (
               <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59642', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>How to improve</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: AMBER, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>How to improve</Text>
                 <View style={{ gap: 8 }}>
                   {gs.improvements.map((tip, i) => (
                     <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: colors.surfaceAlt, borderRadius: 10, padding: 10 }}>
-                      <Text style={{ fontSize: 13, color: '#F59642', fontWeight: '700', lineHeight: 19 }}>{i + 1}.</Text>
+                      <Text style={{ fontSize: 13, color: AMBER, fontWeight: '700', lineHeight: 19 }}>{i + 1}.</Text>
                       <Text style={{ fontSize: 13, color: colors.text, lineHeight: 19, flex: 1 }}>{tip}</Text>
                     </View>
                   ))}
@@ -1978,7 +1651,7 @@ export default function FoodReportScreen() {
 
             {gs && gs.improvements.length === 0 && (
               <View style={{ backgroundColor: 'rgba(93,202,165,0.08)', borderRadius: 10, padding: 12, alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: colors.teal, fontWeight: '600', textAlign: 'center' }}>You're doing everything right — keep it up! 🌱</Text>
+                <Text style={{ fontSize: 13, color: colors.teal, fontWeight: '600', textAlign: 'center' }}>You're doing everything right — keep it up!</Text>
               </View>
             )}
 
@@ -2009,6 +1682,7 @@ function HistRow({ entry, isLast, good, expanded, onToggle, onRestore, onEdit, o
   styles: ReturnType<typeof createStyles>;
 }) {
   const price = estimatePrice(entry.name);
+  const { isDark } = useTheme();
   return (
     <View>
       <TouchableOpacity
@@ -2016,15 +1690,12 @@ function HistRow({ entry, isLast, good, expanded, onToggle, onRestore, onEdit, o
         onPress={onToggle}
         activeOpacity={0.7}
       >
-        <View style={[styles.histIconWrap, { backgroundColor: good ? colors.goneGoodBg : colors.goneBadBg }]}>
-          <Text style={{ fontSize: 18 }}>{entry.icon || (good ? '🌱' : '🥘')}</Text>
-        </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.histName, { color: colors.text }]}>{entry.name}</Text>
           <Text style={[styles.histSub, { color: colors.textMuted }]}>
             {good
-              ? entry.portion ? `used ${entry.portion}` : 'rescued'
-              : 'gone bad'
+              ? entry.portion ? `used ${entry.portion}` : 'used'
+              : 'went bad'
             } · {timeAgo(entry.date)}
             {entry.category ? ` · ${entry.category}` : ''}
           </Text>
@@ -2032,35 +1703,28 @@ function HistRow({ entry, isLast, good, expanded, onToggle, onRestore, onEdit, o
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={[styles.histBadge, { backgroundColor: good ? colors.goneGoodBg : colors.goneBadBg }]}>
             <Text style={[styles.histBadgeText, { color: good ? colors.goneGoodText : colors.goneBadText }]}>
-              {good ? (entry.portion ? '💚' : '🌱') : '🥀'} ${price}
+              ${price}
             </Text>
           </View>
-          <Text style={{ fontSize: 11, color: colors.textMuted }}>{expanded ? '▲' : '▾'}</Text>
+          <Text style={{ fontSize: 18, color: colors.textMuted, transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}>›</Text>
         </View>
       </TouchableOpacity>
       {expanded && (
         <View style={{ flexDirection: 'row', gap: 7, paddingVertical: 10, paddingHorizontal: 2, borderBottomWidth: isLast ? 0 : 0.5, borderBottomColor: colors.border }}>
-          <TouchableOpacity
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.goneGoodBg }}
-            onPress={onRestore}
-          >
-            <Text style={{ fontSize: 13 }}>↩️</Text>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: colors.goneGoodText }}>Restore</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.surfaceAlt }}
-            onPress={onEdit}
-          >
-            <Text style={{ fontSize: 13 }}>✏️</Text>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textSub }}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.goneBadBg }}
-            onPress={onDelete}
-          >
-            <Text style={{ fontSize: 13 }}>🗑️</Text>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: colors.goneBadText }}>Delete</Text>
-          </TouchableOpacity>
+          {[
+            { label: 'Restore', onPress: onRestore },
+            { label: 'Edit',    onPress: onEdit },
+            { label: 'Delete',  onPress: onDelete },
+          ].map(b => (
+            <TouchableOpacity
+              key={b.label}
+              style={[{ flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 36, paddingVertical: 8, borderRadius: 12, backgroundColor: colors.surface }, raised(isDark)]}
+              onPress={b.onPress}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textSub }}>{b.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
       )}
     </View>
@@ -2077,24 +1741,33 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   logo:          { fontSize: 28, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   logoGreen:     { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
 
-  tabRow:        { flexDirection: 'row', marginHorizontal: 16, marginVertical: 12, borderRadius: 100, padding: 4, borderWidth: 0.5 },
-  tabBtn:        { flex: 1, paddingVertical: 8, borderRadius: 100, alignItems: 'center' },
-  tabBtnActive:  { backgroundColor: c.btnPrimary },
+  tabRow: { flexDirection: 'row', marginHorizontal: 16, marginVertical: 12, borderRadius: 14, padding: 4 },
+  tabBtn: { flex: 1, paddingVertical: 8, borderRadius: 11, alignItems: 'center' },
+  tabBtnActive: { backgroundColor: c.surface },
   tabBtnText:    { fontSize: 13 },
 
   // Hero
-  heroCard:      { backgroundColor: c.btnPrimary, borderRadius: 20, padding: 20, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 10 }, shadowOpacity: isDark ? 0.28 : 0.55, shadowRadius: 24, elevation: 12 },
+  heroCard: { backgroundColor: c.btnPrimary, borderRadius: 20, padding: 20, ...raisedGreen(isDark) },
   heroCircle1:   { position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)', top: -60, right: -60 },
   heroCircle2:   { position: 'absolute', width: 160, height: 160, borderRadius: 80,  backgroundColor: 'rgba(93,202,165,0.08)', bottom: -40, left: -40 },
   heroCircle3:   { position: 'absolute', width: 110, height: 110, borderRadius: 55,  backgroundColor: 'rgba(255,255,255,0.04)', top: 80, right: -20 },
-  heroPeriodTag: { fontSize: 9, color: 'rgba(255,255,255,0.45)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 18 },
-  heroSplit:     { flexDirection: 'row', marginBottom: 16 },
-  heroDivider:   { width: 0.5, backgroundColor: 'rgba(255,255,255,0.15)', marginHorizontal: 18, alignSelf: 'stretch' },
-  heroGoodTag:   { fontSize: 9, color: '#5DCAA5', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
-  heroBadTag:    { fontSize: 9, color: '#E8756A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  heroPeriodTag: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.7)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 14 },
+  heroSplit: { flexDirection: 'row', marginBottom: 18 },
+  heroDivider: { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 18, alignSelf: 'stretch' },
+  heroTag:       { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)', marginBottom: 4 },
+  heroVal:       { fontSize: 34, fontWeight: '700', color: 'white', lineHeight: 40 },
+  heroBarTrack:  { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.18)', overflow: 'hidden' },
+  heroBarFill:   { height: '100%', borderRadius: 3, backgroundColor: 'white' },
+  heroBarLabel:  { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 8 },
+  pill:          { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  pillText:      { fontSize: 12, fontWeight: '600' },
+  insightsToggle:{ borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center', gap: 2 },
+  statRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 11 },
+  heroGoodTag:   { fontSize: 9, color: GOOD, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  heroBadTag:    { fontSize: 9, color: BAD, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
   heroGoodVal:   { fontSize: 42, fontWeight: '700', color: 'white', lineHeight: 48 },
-  heroBadVal:    { fontSize: 42, fontWeight: '700', color: '#E8756A', lineHeight: 48 },
-  heroSub:       { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4 },
+  heroBadVal:    { fontSize: 42, fontWeight: '700', color: BAD, lineHeight: 48 },
+  heroSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
   netRow:        { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   netLabel:      { fontSize: 12, color: 'rgba(255,255,255,0.5)' },
   netVal:        { fontSize: 16, fontWeight: '700' },
@@ -2103,9 +1776,9 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   heroStatVal:   { fontSize: 16, fontWeight: '700', color: 'white' },
   heroStatLabel: { fontSize: 8, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  card:          { borderRadius: 16, borderWidth: 0.5, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.16, shadowRadius: 14, elevation: 5 },
+  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: isDark ? 0.3 : 0.07, shadowRadius: 10, elevation: 2 },
   cardRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  cardHeading:   { fontSize: 15, fontWeight: '600' },
+  cardHeading: { fontSize: 15, fontWeight: '700' },
 
   // Week-over-week
   wowCard:       { flex: 1, borderRadius: 12, padding: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.14, shadowRadius: 10, elevation: 4 },
@@ -2135,7 +1808,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   streakBox:     { flex: 1, aspectRatio: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   streakMark:    { fontSize: 14, fontWeight: '700' },
 
-  histPill:      { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center' },
+  histPill: { flex: 1, paddingVertical: 9, borderRadius: 12, alignItems: 'center' },
   histPillText:  { fontSize: 12, fontWeight: '600' },
   histRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 },
   histIconWrap:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
@@ -2144,9 +1817,9 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   histBadge:     { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   histBadgeText: { fontSize: 10, fontWeight: '600' },
 
-  shareCta:      { backgroundColor: c.btnPrimary, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 8 }, shadowOpacity: isDark ? 0.25 : 0.5, shadowRadius: 20, elevation: 10 },
+  shareCta: { backgroundColor: c.btnPrimary, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14, ...raisedGreen(isDark) },
   shareCtaTitle: { fontSize: 15, fontWeight: '700', color: 'white' },
-  shareCtaSub:   { fontSize: 12, color: 'rgba(255,255,255,0.55)', marginTop: 2 },
+  shareCtaSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
 
   shareSheet:          { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 14, maxHeight: '88%' },
   sharePreview:        { backgroundColor: '#085041', borderRadius: 24, aspectRatio: 4/5, width: '100%', overflow: 'hidden', padding: 22, justifyContent: 'space-between' }, // always dark forest green for branding
@@ -2156,15 +1829,15 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   previewBlob4:        { position: 'absolute', width: 80,  height: 80,  borderRadius: 40,  backgroundColor: 'rgba(93,202,165,0.1)',  top: 60,  left: 20 },
   previewBrandTop:     { fontSize: 20, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
   previewPeriodPill:   { backgroundColor: 'rgba(93,202,165,0.2)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(93,202,165,0.35)' },
-  previewPeriodPillText: { fontSize: 9, fontWeight: '700', color: '#5DCAA5', letterSpacing: 1.2 },
+  previewPeriodPillText: { fontSize: 9, fontWeight: '700', color: GOOD, letterSpacing: 1.2 },
   previewHeroEmoji:    { fontSize: 48 },
   previewHeroLabel:    { fontSize: 12, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 1.5, fontWeight: '600' },
-  previewHeroVal:      { fontSize: 64, fontWeight: '700', color: '#5DCAA5', lineHeight: 70, fontFamily: 'Fraunces_600SemiBold' },
+  previewHeroVal:      { fontSize: 64, fontWeight: '700', color: GOOD, lineHeight: 70, fontFamily: 'Fraunces_600SemiBold' },
   previewHeroSub:      { fontSize: 13, color: 'rgba(255,255,255,0.55)', fontFamily: 'Fraunces_400Regular' },
   previewStatPillGood: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(93,202,165,0.15)', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(93,202,165,0.25)' },
   previewStatPillBad:  { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(232,117,106,0.12)', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(232,117,106,0.25)' },
   previewStatPillIcon: { fontSize: 20 },
-  previewStatPillVal:  { fontSize: 17, fontWeight: '700', color: '#5DCAA5' },
+  previewStatPillVal:  { fontSize: 17, fontWeight: '700', color: GOOD },
   previewStatPillLabel:{ fontSize: 10, color: 'rgba(255,255,255,0.45)', fontWeight: '600', marginTop: 1 },
   previewNetBadge:     { borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, alignItems: 'center' },
   previewNetBadgeText: { fontSize: 15, fontWeight: '700' },
@@ -2177,6 +1850,6 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   platformBtn:     { flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 14, gap: 5, borderWidth: 0.5 },
   platformLabel:   { fontSize: 10, fontWeight: '600' },
 
-  clearDataBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 0.5, borderRadius: 12, paddingVertical: 13 },
+  clearDataBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   clearDataText:   { fontSize: 13, fontWeight: '500' },
 }); }

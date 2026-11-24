@@ -15,6 +15,7 @@ import { loadDraftsBySession, updateDraft, deleteSessionDrafts, draftToSyncItem,
 import { pushItems } from './lib/sync';
 import { HOUSEHOLD_KEY } from './lib/household';
 import { rescheduleExpiryNotifications } from './lib/notifications';
+import { raised, raisedGreen } from '@/components/raised';
 
 const CATEGORIES = ['fridge', 'freezer', 'pantry'] as const;
 
@@ -244,13 +245,13 @@ export default function ReceiptReviewScreen() {
         </ScrollView>
         <View style={[styles.confirmBar, { paddingBottom: insets.bottom + 12, backgroundColor: colors.bg, borderTopColor: colors.border }]}>
           <TouchableOpacity
-            style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, marginBottom: 10 }]}
+            style={[styles.confirmBtn, raisedGreen(isDark), { backgroundColor: colors.btnPrimary, marginBottom: 10 }]}
             onPress={() => router.replace('/(tabs)')}
           >
             <Text style={styles.confirmText}>Looks good — go to inventory</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.confirmBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+            style={[styles.confirmBtn, raised(isDark, 'md'), { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
             onPress={() => setSavedItems(null)}
           >
             <Text style={[styles.confirmText, { color: colors.textSub }]}>Go back to edit items</Text>
@@ -341,7 +342,7 @@ export default function ReceiptReviewScreen() {
                 ? "We couldn't spot any food items in that photo. Try a closer, well-lit shot."
                 : "We couldn't parse any grocery items from that receipt. Try a clearer photo."}
             </Text>
-            <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, marginTop: 24, alignSelf: 'stretch' }]} onPress={() => router.back()}>
+            <TouchableOpacity style={[styles.confirmBtn, raisedGreen(isDark), { backgroundColor: colors.btnPrimary, marginTop: 24, alignSelf: 'stretch' }]} onPress={() => router.back()}>
               <Text style={styles.confirmText}>Go back</Text>
             </TouchableOpacity>
           </View>
@@ -366,7 +367,7 @@ export default function ReceiptReviewScreen() {
                   { label: 'Expand all',   onPress: () => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setExpandedIds(new Set(visibleDrafts.map(d => d.id))); } },
                   { label: 'Collapse all', onPress: () => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setExpandedIds(new Set()); } },
                 ].map(b => (
-                  <TouchableOpacity key={b.label} style={[styles.grayBtn, { borderColor: colors.border, backgroundColor: colors.bg }]} onPress={b.onPress}>
+                  <TouchableOpacity key={b.label} style={[styles.grayBtn, raised(isDark), { borderColor: colors.border, backgroundColor: colors.bg }]} onPress={b.onPress}>
                     <Text style={[styles.grayBtnText, { color: colors.textSub }]}>{b.label}</Text>
                   </TouchableOpacity>
                 ))}
@@ -401,7 +402,7 @@ export default function ReceiptReviewScreen() {
                 </Text>
               )}
               <TouchableOpacity
-                style={[styles.confirmBtn, { backgroundColor: colors.btnPrimary, opacity: saving ? 0.7 : 1 }]}
+                style={[styles.confirmBtn, raisedGreen(isDark), { backgroundColor: colors.btnPrimary, opacity: saving ? 0.7 : 1 }]}
                 onPress={handleConfirm}
                 disabled={saving}
               >
@@ -554,7 +555,7 @@ function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, e
           <TouchableOpacity
             key={cat}
             onPress={() => onUpdate({ category: cat })}
-            style={[styles.grayBtn, {
+            style={[styles.grayBtn, raised(isDark), {
               flex: 1,
               backgroundColor: draft.category === cat ? colors.btnPrimary : colors.surface,
               borderColor: draft.category === cat ? colors.btnPrimary : colors.border,
@@ -572,7 +573,7 @@ function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, e
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
         <TouchableOpacity
           onPress={() => onUpdate({ foodCategory: null })}
-          style={[styles.grayBtn, { backgroundColor: !draft.foodCategory ? colors.btnPrimary : colors.surface, borderColor: !draft.foodCategory ? colors.btnPrimary : colors.border }]}
+          style={[styles.grayBtn, raised(isDark), { backgroundColor: !draft.foodCategory ? colors.btnPrimary : colors.surface, borderColor: !draft.foodCategory ? colors.btnPrimary : colors.border }]}
         >
           <Text style={[styles.grayBtnText, { color: !draft.foodCategory ? 'white' : colors.textSub }]}>Auto</Text>
         </TouchableOpacity>
@@ -580,7 +581,7 @@ function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, e
           <TouchableOpacity
             key={cat}
             onPress={() => onUpdate({ foodCategory: cat })}
-            style={[styles.grayBtn, { backgroundColor: draft.foodCategory === cat ? colors.btnPrimary : colors.surface, borderColor: draft.foodCategory === cat ? colors.btnPrimary : colors.border }]}
+            style={[styles.grayBtn, raised(isDark), { backgroundColor: draft.foodCategory === cat ? colors.btnPrimary : colors.surface, borderColor: draft.foodCategory === cat ? colors.btnPrimary : colors.border }]}
           >
             <Text style={[styles.grayBtnText, { color: draft.foodCategory === cat ? 'white' : colors.textSub }]}>
               {cat}
@@ -656,7 +657,7 @@ function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, e
       {draft.expiryDate && (
         <TouchableOpacity
           onPress={() => { setDateText(''); setAiEstimated(false); onUpdate({ expiryDate: null }); }}
-          style={[styles.grayBtn, { alignSelf: 'flex-start', marginTop: 8, borderColor: colors.border, backgroundColor: colors.surface }]}
+          style={[styles.grayBtn, raised(isDark), { alignSelf: 'flex-start', marginTop: 8, borderColor: colors.border, backgroundColor: colors.surface }]}
         >
           <Text style={[styles.grayBtnText, { color: colors.textSub }]}>Clear expiry</Text>
         </TouchableOpacity>
@@ -711,10 +712,10 @@ function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, e
 
       {/* Actions */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-        <TouchableOpacity onPress={onScanBarcode} style={[styles.grayBtn, { flex: 1, minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}>
+        <TouchableOpacity onPress={onScanBarcode} style={[styles.grayBtn, raised(isDark), { flex: 1, minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}>
           <Text style={[styles.grayBtnText, { color: colors.textSub }]}>Scan barcode</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleRemove} style={[styles.grayBtn, { flex: 1, minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}>
+        <TouchableOpacity onPress={handleRemove} style={[styles.grayBtn, raised(isDark), { flex: 1, minHeight: 36, borderColor: colors.border, backgroundColor: colors.surface }]}>
           <Text style={[styles.grayBtnText, { color: colors.textSub }]}>Remove</Text>
         </TouchableOpacity>
       </View>

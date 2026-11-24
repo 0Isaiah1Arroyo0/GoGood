@@ -17,6 +17,7 @@ export async function requestNotificationPermission(): Promise<boolean> {
     await Notifications.setNotificationChannelAsync('expiry', {
       name: 'Expiry Alerts',
       importance: Notifications.AndroidImportance.DEFAULT,
+      lightColor: '#0F7855',
     });
   }
   const { status } = await Notifications.requestPermissionsAsync();
@@ -52,6 +53,33 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 }
 
+// "Milk", "Milk and Eggs", "Milk, Eggs and Spinach", "Milk, Eggs and 3 more"
+function listNames(names: string[], max = 3): string {
+  const clean = names.map(n => n.trim()).filter(Boolean);
+  if (clean.length <= 1) return clean[0] ?? '';
+  if (clean.length <= max) return `${clean.slice(0, -1).join(', ')} and ${clean[clean.length - 1]}`;
+  return `${clean.slice(0, max - 1).join(', ')} and ${clean.length - (max - 1)} more`;
+}
+
+const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Shared look for every GoGood alert: grouped together on the lock screen, on the
+// expiry channel on Android, no emojis.
+function baseContent(group: string) {
+  return {
+    threadIdentifier: group,                       // iOS: stack GoGood alerts together
+    ...(Platform.OS === 'android' ? { color: '#0F7855' } : {}),
+    sound: false as const,
+  };
+}
+function trigger(date: Date) {
+  return {
+    type: Notifications.SchedulableTriggerInputTypes.DATE,
+    date,
+    ...(Platform.OS === 'android' ? { channelId: 'expiry' } : {}),
+  } as Notifications.DateTriggerInput;
+}
+
 // The local day an item counts as "gone bad" — the first midnight at least a full
 // day after its expiry date. Matches getDaysLeft() < 0 in the inventory screen.
 function goneBadDay(expiryDate: string): Date {
@@ -64,28 +92,32 @@ function goneBadDay(expiryDate: string): Date {
 
 // One notification per day that items go bad: "1 item has gone bad" / "3 items have gone bad".
 async function scheduleGoneBadNotifications(items: NotifItem[]) {
-  const counts = new Map<string, { date: Date; count: number }>();
+  const counts = new Map<string, { date: Date; names: string[] }>();
   for (const item of items) {
     if (!item.expiryDate) continue;
     const day = goneBadDay(item.expiryDate);
     if (isNaN(day.getTime())) continue;
     const key = day.toDateString();
-    const entry = counts.get(key) ?? { date: day, count: 0 };
-    entry.count += 1;
+    const entry = counts.get(key) ?? { date: day, names: [] };
+    entry.names.push(item.name);
     counts.set(key, entry);
   }
 
-  for (const { date, count } of counts.values()) {
+  for (const { date, names } of counts.values()) {
+    const count = names.length;
     const notifyAt = new Date(date);
     notifyAt.setHours(9, 0, 0, 0);
     if (notifyAt <= new Date()) continue;
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: `${count} item${count === 1 ? ' has' : 's have'} gone bad`,
-        body: 'Tap now to prevent future items from going bad.',
+        ...baseContent('gogood-gone-bad'),
+        title: count === 1 ? `${names[0]} went bad` : `${count} items went bad`,
+        body: count === 1
+          ? 'It passed its date. See what else is expiring so nothing else goes to waste.'
+          : `${listNames(names)} passed their dates. See what's expiring next so nothing else goes to waste.`,
         data: { type: 'gone_bad', count },
       },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: notifyAt },
+      trigger: trigger(notifyAt),
     });
   }
 }
@@ -120,26 +152,36 @@ async function doReschedule(items: NotifItem[], enabled: boolean) {
 
   await scheduleGoneBadNotifications(items);
 
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-
+  // One "expiring soon" alert per day, listing everything that expires in 3 days,
+  // instead of a separate notification for every item.
+  const byDay = new Map<string, { date: Date; expiry: Date; items: NotifItem[] }>();
   for (const item of items) {
     if (!item.expiryDate) continue;
     const expiry = new Date(item.expiryDate);
-    const daysLeft = Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
-
+    if (isNaN(expiry.getTime())) continue;
     const notifyDate = new Date(expiry);
     notifyDate.setDate(notifyDate.getDate() - 3);
     notifyDate.setHours(8, 0, 0, 0);
-
     if (notifyDate <= new Date()) continue;
+    const key = notifyDate.toDateString();
+    const entry = byDay.get(key) ?? { date: notifyDate, expiry, items: [] };
+    entry.items.push(item);
+    byDay.set(key, entry);
+  }
 
+  for (const { date, expiry, items: dayItems } of byDay.values()) {
+    const names = dayItems.map(i => i.name);
+    const day = WEEKDAY[expiry.getDay()];
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: `${item.icon} ${item.name} expires soon`,
-        body: `${item.name} expires in 3 days — use it before it goes bad.`,
-        data: { type: 'expiry', itemId: item.id },
+        ...baseContent('gogood-expiry'),
+        title: dayItems.length === 1 ? `${names[0]} expires in 3 days` : `${dayItems.length} items expire in 3 days`,
+        body: dayItems.length === 1
+          ? `Use it by ${day} so it doesn't go to waste.`
+          : `${listNames(names)}. Plan a meal around them before ${day}.`,
+        data: { type: 'expiry', itemIds: dayItems.map(i => i.id) },
       },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: notifyDate },
+      trigger: trigger(date),
     });
   }
 }

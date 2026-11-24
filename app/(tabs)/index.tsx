@@ -22,8 +22,11 @@ import { pushItems, pullItems, fromRow } from '../lib/sync';
 import { HOUSEHOLD_KEY, HOUSEHOLD_NAME_KEY, subscribeToHouseholdItems } from '../lib/household';
 import { useAppDrawer } from '../components/AppDrawer';
 import HeaderAddButton from '@/components/header-add-button';
+import BottomSheet from '@/components/bottom-sheet';
+import { unitWarning, UNIT_CHOICES } from '../lib/shopping-helpers';
 import { useSubscription } from '../context/subscription';
 import { seedSampleItems } from '../lib/seed-items';
+import { raised, raisedGreen } from '@/components/raised';
 
 type Badge = 'red' | 'amber' | 'green' | 'blue' | 'black';
 type Category = 'fridge' | 'freezer' | 'pantry';
@@ -879,99 +882,6 @@ const SCREEN_H      = Dimensions.get('window').height;
 const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL  ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: React.ReactNode }) {
-  const { colors } = useTheme();
-  const overlay        = useRef(new Animated.Value(0)).current;
-  const sheet          = useRef(new Animated.Value(600)).current;
-  const kbOffset       = useRef(new Animated.Value(0)).current;
-  const drag           = useRef(new Animated.Value(0)).current; // swipe-down offset
-  const measuredSheetH = useRef(0);
-  const [mounted, setMounted] = useState(false);
-
-  // Swipe down on the top handle area to close the sheet.
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  const panResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
-    onPanResponderMove: (_, g) => { drag.setValue(Math.max(0, g.dy)); },
-    onPanResponderRelease: (_, g) => {
-      if (g.dy > 100 || g.vy > 0.8) {
-        Keyboard.dismiss();
-        onCloseRef.current();
-      } else {
-        Animated.spring(drag, { toValue: 0, damping: 20, stiffness: 220, useNativeDriver: true }).start();
-      }
-    },
-    onPanResponderTerminate: () => {
-      Animated.spring(drag, { toValue: 0, damping: 20, stiffness: 220, useNativeDriver: true }).start();
-    },
-  })).current;
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      drag.setValue(0);
-      overlay.setValue(0); sheet.setValue(600);
-      Animated.parallel([
-        Animated.timing(overlay, { toValue: 1, duration: 320, useNativeDriver: true }),
-        Animated.spring(sheet,   { toValue: 0, damping: 36, stiffness: 130, useNativeDriver: true }),
-      ]).start();
-    } else if (mounted) {
-      kbOffset.setValue(0);
-      Animated.parallel([
-        Animated.timing(overlay, { toValue: 0, duration: 260, useNativeDriver: true }),
-        Animated.timing(sheet,   { toValue: 600, duration: 280, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
-    }
-  }, [visible]);
-
-  useEffect(() => {
-    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const onShow = (e: any) => {
-      const kbH = e.endCoordinates?.height ?? 0;
-      // Only push the sheet up as far as it can go without the top leaving the screen
-      const maxPush = Math.max(0, SCREEN_H - measuredSheetH.current - 60);
-      Animated.timing(kbOffset, { toValue: -Math.min(kbH, maxPush), duration: e.duration ?? 250, useNativeDriver: true }).start();
-    };
-    const onHide = (e: any) => {
-      Animated.timing(kbOffset, { toValue: 0, duration: e.duration ?? 200, useNativeDriver: true }).start();
-    };
-    const s1 = Keyboard.addListener(showEv, onShow);
-    const s2 = Keyboard.addListener(hideEv, onHide);
-    return () => { s1.remove(); s2.remove(); };
-  }, []);
-
-  if (!mounted) return null;
-  return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <View style={{ flex: 1 }}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: overlay }]} pointerEvents="none" />
-        <TouchableOpacity style={{ flex: 1 }} onPress={onClose} activeOpacity={1} />
-        <Animated.View
-          onLayout={e => { measuredSheetH.current = e.nativeEvent.layout.height; }}
-          style={{
-            backgroundColor: colors.bg,
-            borderTopLeftRadius: 24, borderTopRightRadius: 24,
-            padding: 20, maxHeight: SCREEN_H * 0.92,
-            transform: [{ translateY: Animated.add(Animated.add(sheet, kbOffset), drag) }],
-          }}
-        >
-          {/* Drag handle — the whole top strip is grabbable; swipe down to close */}
-          <View
-            {...panResponder.panHandlers}
-            style={{ marginTop: -20, marginHorizontal: -20, paddingTop: 20, paddingBottom: 12, alignItems: 'center' }}
-          >
-            <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999 }} />
-          </View>
-          {children}
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-}
-
 // Soft fade drawn over the top edge of a scroll area, so content dissolves into the
 // background instead of being cut off. Uses React Native's native CSS gradient
 // (New Architecture), so it's one smooth surface — no banding.
@@ -986,12 +896,14 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 // Eased stops (smoothstep) so the fade looks natural instead of linear.
-const FADE_STOPS = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1];
+const FADE_STOPS = [0, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 1];
 
 function TopFade({ color, height = TOP_FADE_H }: { color: string; height?: number }) {
   const [r, g, b] = hexToRgb(color);
   const stops = FADE_STOPS.map(t => {
-    const alpha = 1 - t * t * (3 - 2 * t);
+    // Solid for the first quarter so the clipped edge of the list never shows, then eased
+    const u = Math.min(1, Math.max(0, (t - 0.25) / 0.75));
+    const alpha = 1 - u * u * (3 - 2 * u);
     return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)}) ${Math.round(t * 100)}%`;
   }).join(', ');
   return (
@@ -1507,6 +1419,9 @@ export default function FridgeScreen() {
   const [editItem, setEditItem]         = useState<Item | null>(null);
   const [form, setForm]                 = useState(emptyForm());
   const [formErrors, setFormErrors]     = useState<Record<string, string>>({});
+  // Unit the user already saw the "doesn't usually fit" note for; saving again keeps it
+  const [unitNudgedFor, setUnitNudgedFor] = useState<string | null>(null);
+  const [showFormMore, setShowFormMore]   = useState(false); // category, serving size, nutrition
   // Update a form field and clear its error as soon as the user types in it.
   const setField = (key: string, value: string) => {
     setForm(f => ({ ...f, [key]: value }));
@@ -1717,6 +1632,7 @@ export default function FridgeScreen() {
   const [missedSummary, setMissedSummary] = useState<null | {
     goneBad: string[]; usedCount: number; expiring: Item[];
   }>(null);
+  const [missedOpen, setMissedOpen] = useState(false); // separate so the content stays put while the sheet slides away
   useEffect(() => {
     if (!hydrated) return;
     // Small delay so the automatic gone-bad sweep has logged anything new first.
@@ -1739,6 +1655,7 @@ export default function FridgeScreen() {
       if (goneBadList.length === 0 && usedCount === 0 && expiring.length === 0) return;
       await AsyncStorage.setItem('gogood_last_summary_at', String(now));
       setMissedSummary({ goneBad: goneBadList.map(e => e.name), usedCount, expiring });
+      setMissedOpen(true);
     }, 2500);
     return () => clearTimeout(t);
   }, [hydrated, activeTick]);
@@ -1775,11 +1692,12 @@ export default function FridgeScreen() {
     });
   }, [items, clockTick]);
 
-  // Tapping a "gone bad" notification opens Expiring Soon so the user can act
+  // Tapping a "gone bad" or "expiring soon" notification opens Expiring Soon so the user can act
   // on what's next. Also handles the app being launched from the notification.
   useEffect(() => {
     const handle = async (resp: Notifications.NotificationResponse | null) => {
-      if (!resp || (resp.notification.request.content.data as any)?.type !== 'gone_bad') return;
+      const type = (resp?.notification.request.content.data as any)?.type;
+      if (!resp || (type !== 'gone_bad' && type !== 'expiry')) return;
       const id = resp.notification.request.identifier;
       if ((await AsyncStorage.getItem('gogood_last_notif_handled')) === id) return;
       await AsyncStorage.setItem('gogood_last_notif_handled', id);
@@ -2549,6 +2467,11 @@ export default function FridgeScreen() {
     }));
   };
 
+  // Open the extra details when the item already has nutrition (editing, or filled by a scan)
+  useEffect(() => {
+    if (showAdd) setShowFormMore(!!(form.protein || form.carbs || form.fat || form.cal || form.servingSize));
+  }, [showAdd, form.protein, form.cal]);
+
   const saveItem = () => {
     const safeName   = (form.name || '').trim();
     const safeExpiry = (form.expiryDate || '').trim();
@@ -2567,6 +2490,13 @@ export default function FridgeScreen() {
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+    // Soft check: first save with an odd unit ("can" of butter) shows a note; saving again keeps it
+    const unitKey = `${safeName}|${form.unit}`.toLowerCase();
+    if (unitWarning(safeName, form.unit || '') && unitNudgedFor !== unitKey) {
+      setUnitNudgedFor(unitKey);
+      Haptics.selectionAsync();
       return;
     }
     const days  = getDaysLeft(safeExpiry);
@@ -2690,7 +2620,6 @@ export default function FridgeScreen() {
               onPress={() => toggleSection(key)}
               activeOpacity={0.7}
             >
-              <Text style={styles.categoryHeaderEmoji}>{CATEGORY_ICONS[cat] || '🥘'}</Text>
               <Text style={[styles.categoryHeaderText, { color: colors.textSub }]}>{cat}</Text>
               <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
               <Text style={[styles.categoryHeaderCount, { color: colors.textMuted }]}>{group.length}</Text>
@@ -2709,14 +2638,12 @@ export default function FridgeScreen() {
 
     // ── Flat / sorted mode ─────────────────────────────────────────
     if (isFlat) {
-      const LOC_ICON: Record<Category, string> = { fridge: '❄️', freezer: '🧊', pantry: '🥫' };
       return (
         <>
           {filtered.map(item => (
             <View key={item.id}>
               {activeTab === 'all' && (
                 <View style={styles.locationTag}>
-                  <Text style={{ fontSize: 9 }}>{LOC_ICON[item.category]}</Text>
                   <Text style={[styles.locationTagText, { color: colors.textMuted }]}>{item.category}</Text>
                 </View>
               )}
@@ -2990,22 +2917,20 @@ export default function FridgeScreen() {
             {/* Don't show "empty" until items have finished loading */}
             {filtered.length === 0 && !hydrated ? null : filtered.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>{activeTab === 'all' ? '🗂️' : activeTab === 'freezer' ? '🧊' : activeTab === 'pantry' ? '🥫' : '❄️'}</Text>
                 <Text style={styles.emptyTitle}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'No matches' : activeTab === 'all' ? 'Your kitchen is empty' : `Your ${activeTab} is empty`}</Text>
-                <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'Try adjusting your search or filters' : activeTab === 'all' ? 'Tap + to add your first item' : `Nothing in your ${activeTab} yet. Tap + to add something.`}</Text>
+                <Text style={styles.emptySub}>{searchQuery || filterFoodCats.length > 0 || filterExpiry.length > 0 || filterNutrition.length > 0 ? 'Try a different search, or clear your filters.' : activeTab === 'all' ? 'Tap + to add something, or scan a receipt to add a whole trip at once.' : `Nothing in your ${activeTab} yet. Tap + to add something.`}</Text>
                 {!searchQuery && filterFoodCats.length === 0 && filterExpiry.length === 0 && filterNutrition.length === 0 && items.length === 0 && (
                   <TouchableOpacity
                     onPress={async () => {
                       await seedSampleItems();
                       const raw = await AsyncStorage.getItem('gogood_items');
                       if (raw) setItems(JSON.parse(raw));
-                      showToast('25 sample items loaded 🥦');
+                      showToast('Sample items loaded');
                     }}
-                    style={{ marginTop: 8 }}
+                    style={[styles.sfChip, { flex: 0, marginTop: 20, paddingHorizontal: 16, backgroundColor: colors.surface }]}
+                    activeOpacity={0.8}
                   >
-                    <Text style={{ fontSize: 13, color: colors.teal, fontWeight: '600' }}>
-                      Load 25 sample items →
-                    </Text>
+                    <Text style={[styles.sfChipText, { color: colors.textSub }]}>Load sample items</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -3064,126 +2989,212 @@ export default function FridgeScreen() {
 
         {/* ── Add / Edit ── */}
         <BottomSheet visible={showAdd} onClose={() => setShowAdd(false)}>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ maxHeight: SCREEN_H * 0.72 }} contentContainerStyle={{ paddingBottom: 180 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <Text style={styles.modalTitle}>{editItem ? 'Edit item' : 'Add item'}</Text>
-            </View>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} bounces={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            <Text style={styles.sheetTitle}>{editItem ? 'Edit item' : 'Add item'}</Text>
+
+            {/* Fill the form from the package */}
             {editItem ? (
-              <>
-                <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode, { marginBottom: 6 }]} onPress={openBarcodeScanner}>
-                  <Text style={styles.scanBtnText}>Scan barcode to update nutrition</Text>
-                </TouchableOpacity>
-                <Text style={styles.scanHint}>Fills in nutrition, name, and quantity from the product barcode</Text>
-              </>
+              <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode, { flex: 0, paddingVertical: 11, marginBottom: 4 }]} onPress={openBarcodeScanner}>
+                <Text style={styles.scanBtnText}>Scan barcode to update nutrition</Text>
+              </TouchableOpacity>
             ) : (
-              <>
-                <View style={styles.scanRow}>
-                  <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode]} onPress={openBarcodeScanner}>
-                    <Text style={styles.scanBtnText}>Barcode</Text>
+              <View style={styles.scanRow}>
+                <TouchableOpacity style={[styles.scanBtn, styles.scanBtnBarcode]} onPress={openBarcodeScanner}>
+                  <Text style={styles.scanBtnText}>Barcode</Text>
+                </TouchableOpacity>
+                <Animated.View style={{ flex: 1, opacity: scanPulse }}>
+                  <TouchableOpacity style={[styles.scanBtn, { width: '100%' }]} onPress={scanLabel} disabled={scanning}>
+                    <Text style={styles.scanBtnText}>{scanning ? 'Scanning…' : 'Label'}</Text>
                   </TouchableOpacity>
-                  <Animated.View style={{ flex: 1, opacity: scanPulse }}>
-                    <TouchableOpacity style={[styles.scanBtn, { width: '100%' }]} onPress={scanLabel} disabled={scanning}>
-                      <Text style={styles.scanBtnText}>{scanning ? 'Scanning…' : 'Label'}</Text>
-                    </TouchableOpacity>
-                  </Animated.View>
-                  <TouchableOpacity
-                    style={styles.scanBtn}
-                    onPress={scanReceipt}
-                    disabled={scanningReceipt}
-                  >
-                    <Text style={styles.scanBtnText}>Receipt</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
+                </Animated.View>
+                <TouchableOpacity style={styles.scanBtn} onPress={scanReceipt} disabled={scanningReceipt}>
+                  <Text style={styles.scanBtnText}>Receipt</Text>
+                </TouchableOpacity>
+              </View>
             )}
-            {!editItem && itemHistory.length > 0 && (
-              <>
-                <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Recent items</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+
+            {/* Recent items */}
+            {!editItem && itemHistory.length > 0 && !form.name.trim() && (
+              <View style={{ marginTop: 14 }}>
+                <Text style={styles.formLabel}>Recent items</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingBottom: 6 }}>
                   {itemHistory.map(h => (
-                    <TouchableOpacity
-                      key={h.id}
-                      onPress={() => prefillFromHistory(h)}
-                      style={{ alignItems: 'center', padding: 8, borderRadius: 12, borderWidth: 0.5, borderColor: colors.border, backgroundColor: colors.surface, minWidth: 60, maxWidth: 84 }}
-                    >
-                      <Text numberOfLines={2} style={{ fontSize: 11, color: colors.text, fontWeight: '600', textAlign: 'center' }}>{h.name}</Text>
+                    <TouchableOpacity key={h.id} onPress={() => prefillFromHistory(h)} style={[styles.formChip, { backgroundColor: colors.surface }]} activeOpacity={0.8}>
+                      <Text style={styles.formChipText} numberOfLines={1}>{h.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
-              </>
+              </View>
             )}
-            <Text style={styles.fieldLabel}>Item name</Text>
-            <TextInput style={[styles.input, formErrors.name && styles.inputError]} placeholder="e.g. Ribeye steak" placeholderTextColor={colors.placeholder} value={form.name} onChangeText={v => setField('name', v)} returnKeyType="next" />
+
+            {/* Name */}
+            <Text style={[styles.formLabel, { marginTop: 14 }]}>Item name</Text>
+            <TextInput
+              style={[styles.formInput, formErrors.name && styles.inputError]}
+              placeholder="e.g. Ribeye steak"
+              placeholderTextColor={colors.placeholder}
+              keyboardAppearance={isDark ? 'dark' : 'light'}
+              value={form.name}
+              onChangeText={v => setField('name', v)}
+              returnKeyType="next"
+            />
             {formErrors.name ? <Text style={styles.fieldError}>{formErrors.name}</Text> : null}
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>Quantity</Text>
-                <TextInput style={[styles.input, formErrors.qty && styles.inputError]} placeholder="1" placeholderTextColor={colors.placeholder} value={form.qty} onChangeText={v => setField('qty', v)} keyboardType="numeric" returnKeyType="next" />
-                {formErrors.qty ? <Text style={styles.fieldError}>{formErrors.qty}</Text> : null}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>Unit</Text>
-                <TextInput style={[styles.input, formErrors.unit && styles.inputError]} placeholder="lbs" placeholderTextColor={colors.placeholder} value={form.unit} onChangeText={v => setField('unit', v)} returnKeyType="next" />
-                {formErrors.unit ? <Text style={styles.fieldError}>{formErrors.unit}</Text> : null}
-              </View>
+
+            {/* Quantity: type it or use − / + */}
+            <Text style={[styles.formLabel, { marginTop: 14 }]}>Quantity</Text>
+            <View style={styles.stepRow}>
+              <TouchableOpacity style={[styles.stepBtn, { backgroundColor: colors.surface }]} onPress={() => setField('qty', String(Math.max(0, Math.round(((parseFloat(form.qty) || 0) - 1) * 100) / 100) || ''))} activeOpacity={0.8}>
+                <Text style={styles.stepText}>−</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={[styles.formInput, styles.stepInput, formErrors.qty && styles.inputError]}
+                placeholder="1"
+                placeholderTextColor={colors.placeholder}
+                keyboardAppearance={isDark ? 'dark' : 'light'}
+                value={form.qty}
+                onChangeText={v => setField('qty', v.replace(/[^0-9.\/]/g, ''))}
+                keyboardType="decimal-pad"
+              />
+              <TouchableOpacity style={[styles.stepBtn, { backgroundColor: colors.surface }]} onPress={() => setField('qty', String(Math.round(((parseFloat(form.qty) || 0) + 1) * 100) / 100))} activeOpacity={0.8}>
+                <Text style={styles.stepText}>+</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.fieldLabel}>Expiry date (YYYY-MM-DD)</Text>
-            <TextInput style={[styles.input, formErrors.expiryDate && styles.inputError]} placeholder="2026-05-15" placeholderTextColor={colors.placeholder} value={form.expiryDate} onChangeText={v => setField('expiryDate', v)} keyboardType="numbers-and-punctuation" returnKeyType="next" />
-            {formErrors.expiryDate ? <Text style={styles.fieldError}>{formErrors.expiryDate}</Text> : null}
-            <Text style={styles.fieldLabel}>Serving size</Text>
-            <TextInput style={styles.input} placeholder="e.g. 1/4 cup, 1 tbsp, 100g" placeholderTextColor={colors.placeholder} value={form.servingSize} onChangeText={v => setForm(f => ({...f, servingSize: v}))} returnKeyType="next" />
-            <Text style={styles.fieldLabel}>Macros (per serving)</Text>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {[{key:'protein',label:'Protein g'},{key:'carbs',label:'Carbs g'},{key:'fat',label:'Fat g'},{key:'cal',label:'Cal'}].map(m => (
-                <View key={m.key} style={{ flex: 1 }}>
-                  <Text style={[styles.fieldLabel, { fontSize: 8 }]}>{m.label}</Text>
-                  <TextInput
-                    style={[styles.input, { padding: 9 }]}
-                    placeholder="0" placeholderTextColor={colors.placeholder}
-                    value={(form as any)[m.key]}
-                    onChangeText={v => setForm(f => ({...f, [m.key]: v}))}
-                    keyboardType="numeric" returnKeyType="next"
-                  />
+            {formErrors.qty ? <Text style={styles.fieldError}>{formErrors.qty}</Text> : null}
+
+            {/* Unit: pick one */}
+            <Text style={[styles.formLabel, { marginTop: 14 }]}>Unit</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingBottom: 6 }}>
+              {(form.unit && !UNIT_CHOICES.includes(form.unit) ? [form.unit, ...UNIT_CHOICES] : UNIT_CHOICES).map(u => {
+                const on = form.unit === u;
+                const nudged = !formErrors.unit && unitNudgedFor === `${(form.name || '').trim()}|${form.unit}`.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={u}
+                    style={[styles.formChip, { backgroundColor: on ? colors.btnPrimary : colors.surface }, formErrors.unit && { borderColor: '#E0574A' }, on && nudged && { borderColor: '#D69A2D', borderBottomColor: '#D69A2D' }]}
+                    onPress={() => setField('unit', on ? '' : u)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.formChipText, on && { color: 'white' }]}>{u}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            {formErrors.unit ? <Text style={styles.fieldError}>{formErrors.unit}</Text> : null}
+            {/* Soft check: a unit that doesn't usually fit this item ("1 can of butter") */}
+            {(() => {
+              const shown = unitNudgedFor === `${(form.name || '').trim()}|${form.unit}`.toLowerCase();
+              const warn = shown ? unitWarning((form.name || '').trim(), form.unit || '') : null;
+              if (!warn) return null;
+              return (
+                <View style={{ marginTop: 6 }}>
+                  <Text style={styles.fieldNudge}>{warn.message}</Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    {warn.suggestions.map(u => (
+                      <TouchableOpacity key={u} style={[styles.formChip, { backgroundColor: colors.surface }]} onPress={() => setField('unit', u)} activeOpacity={0.8}>
+                        <Text style={styles.formChipText}>Use {u}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
-              ))}
-            </View>
-            <Text style={styles.fieldLabel}>Location</Text>
-            <View style={styles.categoryRow}>
+              );
+            })()}
+
+            {/* Expiry */}
+            <Text style={[styles.formLabel, { marginTop: 14 }]}>Expiry date</Text>
+            <TextInput
+              style={[styles.formInput, formErrors.expiryDate && styles.inputError]}
+              placeholder="YYYY-MM-DD, e.g. 2026-05-15"
+              placeholderTextColor={colors.placeholder}
+              keyboardAppearance={isDark ? 'dark' : 'light'}
+              value={form.expiryDate}
+              onChangeText={v => setField('expiryDate', v)}
+              keyboardType="numbers-and-punctuation"
+              returnKeyType="done"
+            />
+            {formErrors.expiryDate ? <Text style={styles.fieldError}>{formErrors.expiryDate}</Text> : null}
+
+            {/* Where it's kept */}
+            <Text style={[styles.formLabel, { marginTop: 14 }]}>Location</Text>
+            <View style={styles.segment}>
               {(['fridge', 'freezer', 'pantry'] as const).map(cat => (
-                <TouchableOpacity key={cat} style={[styles.categoryBtn, form.category === cat && styles.categoryBtnActive]} onPress={() => setForm(f => ({...f, category: cat}))}>
-                  <Text style={[styles.categoryBtnText, form.category === cat && styles.categoryBtnTextActive]}>
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.segmentBtn, form.category === cat && [{ backgroundColor: colors.surface }, raised(isDark)]]}
+                  onPress={() => setForm(f => ({ ...f, category: cat }))}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.segmentText, { color: form.category === cat ? colors.text : colors.textSub }]}>
                     {cat.charAt(0).toUpperCase() + cat.slice(1)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={styles.fieldLabel}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginTop: 4 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
-              <TouchableOpacity
-                style={[styles.categoryBtn, { flex: 0, paddingHorizontal: 12 }, !form.foodCategory && styles.categoryBtnActive]}
-                onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, foodCategory: '' })); }}
-              >
-                <Text style={[styles.categoryBtnText, !form.foodCategory && styles.categoryBtnTextActive]}>Auto</Text>
-              </TouchableOpacity>
-              {CATEGORY_ORDER.map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.categoryBtn, { flex: 0, paddingHorizontal: 12 }, form.foodCategory === cat && styles.categoryBtnActive]}
-                  onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, foodCategory: cat })); }}
-                >
-                  <Text style={[styles.categoryBtnText, form.foodCategory === cat && styles.categoryBtnTextActive]}>
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.addConfirmBtn} onPress={saveItem}>
-              <Text style={styles.addConfirmText}>{editItem ? 'Save changes' : `Add to ${form.category}`}</Text>
+
+            {/* Optional extras, tucked away */}
+            <TouchableOpacity
+              style={styles.moreToggle}
+              onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setShowFormMore(v => !v); }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.moreToggleText}>{showFormMore ? 'Hide details' : 'Category, serving size and nutrition'}</Text>
+              <Text style={[styles.moreToggleText, { transform: [{ rotate: showFormMore ? '90deg' : '0deg' }] }]}>›</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
-              <Text style={styles.cancelText}>cancel</Text>
+            {showFormMore && (
+              <>
+                <Text style={styles.formLabel}>Category</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingBottom: 6 }}>
+                  {['', ...CATEGORY_ORDER].map(cat => {
+                    const on = (form.foodCategory || '') === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat || 'auto'}
+                        style={[styles.formChip, { backgroundColor: on ? colors.btnPrimary : colors.surface }]}
+                        onPress={() => { Haptics.selectionAsync(); setForm(f => ({ ...f, foodCategory: cat as any })); }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.formChipText, on && { color: 'white' }]}>{cat || 'Auto'}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                <Text style={[styles.formLabel, { marginTop: 14 }]}>Serving size</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. 1/4 cup, 1 tbsp, 100g"
+                  placeholderTextColor={colors.placeholder}
+                  keyboardAppearance={isDark ? 'dark' : 'light'}
+                  value={form.servingSize}
+                  onChangeText={v => setForm(f => ({ ...f, servingSize: v }))}
+                />
+
+                <Text style={[styles.formLabel, { marginTop: 14 }]}>Nutrition per serving</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {[{ key: 'protein', label: 'Protein g' }, { key: 'carbs', label: 'Carbs g' }, { key: 'fat', label: 'Fat g' }, { key: 'cal', label: 'Calories' }].map(m => (
+                    <View key={m.key} style={{ flex: 1 }}>
+                      <TextInput
+                        style={[styles.formInput, { paddingHorizontal: 8, textAlign: 'center' }]}
+                        placeholder="0"
+                        placeholderTextColor={colors.placeholder}
+                        keyboardAppearance={isDark ? 'dark' : 'light'}
+                        value={(form as any)[m.key]}
+                        onChangeText={v => setForm(f => ({ ...f, [m.key]: v }))}
+                        keyboardType="numeric"
+                      />
+                      <Text style={styles.macroLabel}>{m.label}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+
+            <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 18 }]} onPress={saveItem} activeOpacity={0.85}>
+              <Text style={styles.addConfirmText}>
+                {unitNudgedFor === `${(form.name || '').trim()}|${form.unit}`.toLowerCase() && unitWarning((form.name || '').trim(), form.unit || '')
+                  ? (editItem ? 'Save anyway' : 'Add anyway')
+                  : editItem ? 'Save changes' : `Add to ${form.category}`}
+              </Text>
             </TouchableOpacity>
-            <View style={{ height: 40 }} />
           </ScrollView>
         </BottomSheet>
 
@@ -3340,7 +3351,7 @@ export default function FridgeScreen() {
         )}
 
         {/* ── Here's what you missed ── */}
-        <BottomSheet visible={!!missedSummary} onClose={() => setMissedSummary(null)}>
+        <BottomSheet visible={missedOpen} onClose={() => setMissedOpen(false)}>
           {missedSummary && (
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={[styles.modalTitle, { textAlign: 'center', fontSize: 18 }]}>Here's what you missed</Text>
@@ -3393,14 +3404,14 @@ export default function FridgeScreen() {
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
                 <TouchableOpacity
                   style={[styles.sfFooterBtn, { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }]}
-                  onPress={() => setMissedSummary(null)}
+                  onPress={() => setMissedOpen(false)}
                 >
                   <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSub }}>Got it</Text>
                 </TouchableOpacity>
                 {missedSummary.expiring.length > 0 && (
                   <TouchableOpacity
                     style={[styles.sfFooterBtn, { flex: 2, backgroundColor: colors.btnPrimary }]}
-                    onPress={() => { setMissedSummary(null); setTimeout(() => setShowExpiringDetail(true), 400); }}
+                    onPress={() => { setMissedOpen(false); setTimeout(() => setShowExpiringDetail(true), 400); }}
                   >
                     <Text style={{ fontSize: 14, fontWeight: '700', color: 'white' }}>See expiring soon</Text>
                   </TouchableOpacity>
@@ -3486,7 +3497,7 @@ export default function FridgeScreen() {
                 <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{lastSaved.baseName}</Text>
                 <Text style={{ fontSize: 12, color: colors.textSub }}>
                   {lastSaved.category === 'fridge' ? '❄️' : lastSaved.category === 'freezer' ? '🧊' : '🥫'} {lastSaved.category.charAt(0).toUpperCase() + lastSaved.category.slice(1)}
-                  {lastSaved.foodCategory ? `  ·  ${CATEGORY_ICONS[lastSaved.foodCategory] ?? ''} ${lastSaved.foodCategory}` : ''}
+                  {lastSaved.foodCategory ? `  ·  ${lastSaved.foodCategory}` : ''}
                 </Text>
                 <Text style={{ fontSize: 12, color: colors.textSub }}>
                   📅 {lastSaved.expiryDate || 'No expiry set'}{lastSaved.qty ? `  ·  📦 ${lastSaved.qty}` : ''}
@@ -3525,12 +3536,12 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   toastText:             { color: 'white', fontSize: 11, fontWeight: '500' },
 
   // Header
-  header:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: 0.5, borderBottomColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
+  header:                { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: c.bg },
   logo:                  { fontSize: 30, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
   logoGreen:             { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
   menuBtn:               { width: 32, height: 32, justifyContent: 'center', gap: 5 },
   menuLine:              { width: 20, height: 1.5, backgroundColor: c.text, borderRadius: 999 },
-  expiringBadge:         { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+  expiringBadge:         { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, ...raised(isDark) },
   expiringBadgeText:     { fontSize: 12, fontWeight: '600', color: c.textSub },
   scanIconBtn:           { width: 34, height: 34, borderRadius: 17, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.4, shadowRadius: 12, elevation: 6 },
 
@@ -3550,23 +3561,23 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
 
   // Sort bar
   sortBar:               { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },
-  collapseAllBtn:        { alignSelf: 'flex-end', paddingHorizontal: 16, paddingBottom: 6, paddingTop: 0 },
+  collapseAllBtn:        { alignSelf: 'flex-end', paddingHorizontal: 16, paddingBottom: 6, paddingTop: 0, ...raised(isDark) },
   collapseAllText:       { fontSize: 12, fontWeight: '600' },
-  collapseAllBtn:        { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+  collapseAllBtn:        { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, ...raised(isDark) },
   sortBarLeft:           { flex: 1, alignItems: 'flex-start' },
   sortBarRight:          { flex: 1, alignItems: 'flex-end' },
   sortBarLabel:          { fontSize: 10, fontWeight: '700', color: c.text, letterSpacing: 0.5 },
-  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+  sortFilterBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, ...raised(isDark) },
   sortFilterBtnText:     { fontSize: 12, color: c.textSub, fontWeight: '600' },
   filterBadge:           { width: 16, height: 16, borderRadius: 8, backgroundColor: c.text, alignItems: 'center', justifyContent: 'center' },
   filterBadgeText:       { fontSize: 9, color: c.bg, fontWeight: '700' },
 
   // Items
   scroll:                { flex: 1, paddingHorizontal: 16 },
-  emptyState:            { alignItems: 'center', paddingTop: 60, gap: 8 },
-  emptyIcon:             { fontSize: 48 },
-  emptyTitle:            { fontSize: 16, fontWeight: '600', color: c.brand },
-  emptySub:              { fontSize: 13, color: c.textSub },
+  // Same look as the shopping list's empty message
+  emptyState:            { alignItems: 'center', paddingHorizontal: 24, paddingTop: 56 },
+  emptyTitle:            { fontSize: 20, fontWeight: '700', color: c.text, marginBottom: 8, fontFamily: 'Fraunces_600SemiBold' },
+  emptySub:              { fontSize: 14, color: c.textSub, textAlign: 'center', lineHeight: 21 },
 
   // Flat sort — location mini-tag shown before each item in All view
   locationTag:           { flexDirection: 'row', alignItems: 'center', gap: 3, paddingTop: 2, paddingBottom: 1 },
@@ -3592,13 +3603,13 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   locationContent:       { paddingLeft: 10 },
 
   // Category header (level 2 in All, level 1 in individual tabs)
-  categoryHeader:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 12, paddingBottom: 5 },
-  categoryHeaderNested:  { paddingTop: 8, paddingBottom: 4 },
+  categoryHeader:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 20, paddingBottom: 10 },
+  categoryHeaderNested:  { paddingTop: 14, paddingBottom: 8 },
   categoryHeaderEmoji:   { fontSize: 13 },
-  categoryHeaderText:    { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  categoryHeaderText:    { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.6 },
   categoryHeaderLine:    { flex: 1, height: 0.5 },
-  categoryChevron:       { fontSize: 13, fontWeight: '700', width: 16, textAlign: 'center' },
-  categoryHeaderCount:   { fontSize: 10, fontWeight: '600' },
+  categoryChevron:       { fontSize: 16, fontWeight: '700', width: 18, textAlign: 'center' },
+  categoryHeaderCount:   { fontSize: 13, fontWeight: '600' },
 
   // Item cards
   itemWrapMargin:        { height: compact ? 4 : 8 },
@@ -3618,7 +3629,7 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   itemDetail:            { paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 0.5, borderTopColor: c.border, gap: 10, paddingTop: 12 },
 
   // Good Bot CTA
-  goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.btnPrimary, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 30, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isDark ? 0.12 : 0.18, shadowRadius: 6, elevation: 4 },
+  goodBotBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.btnPrimary, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 30, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isDark ? 0.12 : 0.18, shadowRadius: 6, elevation: 4, ...raisedGreen(isDark) },
   goodBotLeft:           { flexDirection: 'row', alignItems: 'center', gap: 10 },
   goodBotAvatarWrap:     { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
   goodBotText:           { color: 'white', fontSize: 12, fontWeight: '700' },
@@ -3651,29 +3662,47 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   input:                 { backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder, borderRadius: 10, padding: 11, fontSize: 14, color: c.inputText },
   inputError:            { borderColor: '#E0574A' },
   fieldError:            { fontSize: 11, color: '#E0574A', marginTop: 4, lineHeight: 15 },
+  inputNudge:            { borderColor: '#D69A2D' },
+  fieldNudge:            { fontSize: 11, color: '#B7801F', marginTop: 4, lineHeight: 15 },
   sfGroupRow:            { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   sfRowLabel:            { width: 78, fontSize: 12, fontWeight: '600' },
-  sfChip:                { flex: 1, minHeight: 40, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  sfChip:                { flex: 1, minHeight: 40, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', ...raised(isDark) },
   sfChipText:            { fontSize: 12, fontWeight: '600' },
   sfSection:             { borderTopWidth: 0.5 },
   sfSectionHeader:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
   sfSectionTitle:        { fontSize: 14, fontWeight: '600' },
   sfSectionSummary:      { flex: 1, textAlign: 'right', fontSize: 12, fontWeight: '500', marginLeft: 12 },
-  sfFooterBtn:           { flex: 1, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  scanRow:               { flexDirection: 'row', gap: 8, marginBottom: 6, marginTop: 10 },
-  scanBtn:               { flex: 1, backgroundColor: c.btnPrimary, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
+  sfFooterBtn:           { flex: 1, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', ...raised(isDark, 'md') },
+  scanRow:               { flexDirection: 'row', gap: 8, marginTop: 2 },
+  // Add / Edit form — same look as the shopping list's Add item sheet
+  sheetTitle:            { fontSize: 18, fontWeight: '700', color: c.text, fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 },
+  formLabel:             { fontSize: 12, fontWeight: '600', color: c.textSub, marginBottom: 6 },
+  formInput:             { backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: c.inputText },
+  formChip:              { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, ...raised(isDark) },
+  formChipText:          { fontSize: 13, fontWeight: '600', color: c.textSub, maxWidth: 160 },
+  stepRow:               { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stepBtn:               { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center', ...raised(isDark) },
+  stepText:              { fontSize: 22, fontWeight: '500', color: c.text, lineHeight: 26 },
+  stepInput:             { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
+  segment:               { flexDirection: 'row', borderRadius: 14, padding: 4, backgroundColor: c.surfaceAlt },
+  segmentBtn:            { flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center' },
+  segmentText:           { fontSize: 13, fontWeight: '600' },
+  moreToggle:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, marginTop: 6 },
+  moreToggleText:        { fontSize: 13, fontWeight: '600', color: c.textSub },
+  macroLabel:            { fontSize: 10, color: c.textMuted, textAlign: 'center', marginTop: 4 },
+  scanBtn:               { flex: 1, backgroundColor: c.btnPrimary, paddingHorizontal: 10, paddingVertical: 11, borderRadius: 12, alignItems: 'center', ...raisedGreen(isDark, 'sm') },
   scanBtnBarcode:        { backgroundColor: c.btnPrimary },
-  scanBtnText:           { color: 'white', fontSize: 11, fontWeight: '600' },
+  scanBtnText:           { color: 'white', fontSize: 13, fontWeight: '700' },
   scanHint:              { fontSize: 10, color: c.textMuted, textAlign: 'center', marginBottom: 14 },
   barcodeFrame:          { width: 280, height: 160, borderRadius: 12, position: 'relative' },
   barcodeCorner:         { position: 'absolute', width: 24, height: 24, borderColor: '#5DCAA5', borderRadius: 2 },
   categoryRow:           { flexDirection: 'row', gap: 6, marginTop: 4 },
-  categoryBtn:           { flex: 1, padding: 8, borderRadius: 100, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center' },
+  categoryBtn:           { flex: 1, padding: 8, borderRadius: 100, backgroundColor: c.bg, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', ...raised(isDark) },
   categoryBtnActive:     { backgroundColor: c.btnPrimary, borderColor: c.btnPrimary },
   categoryBtnText:       { fontSize: 10, fontWeight: '500', color: c.textSub },
   categoryBtnTextActive: { color: 'white' },
-  addConfirmBtn:         { backgroundColor: c.btnPrimary, padding: 14, borderRadius: 14, alignItems: 'center', marginTop: 12 },
-  addConfirmText:        { color: 'white', fontSize: 14, fontWeight: '600' },
+  addConfirmBtn:         { backgroundColor: c.btnPrimary, paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginTop: 12, ...raisedGreen(isDark) },
+  addConfirmText:        { color: 'white', fontSize: 15, fontWeight: '700' },
   cancelBtn:             { alignItems: 'center', padding: 10 },
   cancelText:            { fontSize: 13, color: c.textMuted },
 

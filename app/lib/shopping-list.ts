@@ -70,6 +70,13 @@ export async function removeCheckedItems(): Promise<ShoppingItem[]> {
   return updated;
 }
 
+export async function removeShoppingItem(id: string): Promise<ShoppingItem[]> {
+  const items = await loadShoppingList();
+  const updated = items.filter(i => i.id !== id);
+  await persistShoppingList(updated);
+  return updated;
+}
+
 // ─── Household (Supabase) ─────────────────────────────────────────────────────
 
 function rowToItem(row: Record<string, any>): ShoppingItem {
@@ -150,6 +157,14 @@ export async function updateHouseholdShoppingItem(
   await supabase
     .from('household_shopping_list')
     .update(fields)
+    .eq('id', itemId)
+    .eq('household_id', householdId);
+}
+
+export async function removeHouseholdShoppingItem(householdId: string, itemId: string): Promise<void> {
+  await supabase
+    .from('household_shopping_list')
+    .delete()
     .eq('id', itemId)
     .eq('household_id', householdId);
 }

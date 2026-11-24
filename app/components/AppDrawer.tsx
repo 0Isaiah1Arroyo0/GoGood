@@ -19,6 +19,8 @@ import { useSubscription } from '../context/subscription';
 import { requestNotificationPermission, rescheduleExpiryNotifications } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 import { raised, raisedGreen } from '@/components/raised';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import BottomSheet from '@/components/bottom-sheet';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -111,9 +113,10 @@ function MenuGroup({ title, colors, isDark, children }: {
   );
 }
 
-function MenuRow({ label, sub, right, onPress, first, colors }: {
+function MenuRow({ label, sub, right, onPress, first, colors, icon, danger }: {
   label: string; sub?: string; right?: React.ReactNode;
   onPress: () => void; first?: boolean; colors: ThemeColors;
+  icon?: keyof typeof Ionicons.glyphMap; danger?: boolean;
 }) {
   return (
     <TouchableOpacity
@@ -121,11 +124,16 @@ function MenuRow({ label, sub, right, onPress, first, colors }: {
       onPress={onPress}
       activeOpacity={0.6}
     >
+      {icon ? (
+        <View style={[sharedStyles.rowIcon, { backgroundColor: danger ? colors.goneBadBg : colors.chipBg }]}>
+          <Ionicons name={icon} size={17} color={danger ? colors.goneBadText : colors.chipText} />
+        </View>
+      ) : null}
       <View style={{ flex: 1 }}>
-        <Text style={[sharedStyles.rowText, { color: colors.text }]}>{label}</Text>
-        {sub ? <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{sub}</Text> : null}
+        <Text style={[sharedStyles.rowText, { color: danger ? colors.goneBadText : colors.text }]}>{label}</Text>
+        {sub ? <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{sub}</Text> : null}
       </View>
-      {right ?? <Text style={[sharedStyles.chevron, { color: colors.textMuted }]}>›</Text>}
+      {right ?? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
     </TouchableOpacity>
   );
 }
@@ -136,7 +144,7 @@ export function useAppDrawer() {
   const router = useRouter();
   const { signOut, deleteAccount, user } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
-  const { showPaywall, paywallDemoMode, setPaywallDemoMode } = useSubscription();
+  const { showPaywall, paywallDemoMode, setPaywallDemoMode, isPremium } = useSubscription();
 
   // ── Drawer animation state ──────────────────────────────────────────────────
   const [visible, setVisible]   = useState(false);
@@ -179,41 +187,44 @@ export function useAppDrawer() {
     const authName     = (user?.user_metadata?.full_name as string) ?? '';
     const authUsername = (user?.user_metadata?.username  as string) ?? '';
 
-    // Logging out clears the local copy, so when it's missing (a fresh login)
-    // restore the saved profile from Supabase instead of losing it.
+    // The account's saved profile lives in Supabase. Check it on every load so a
+    // fresh login (or a new phone) gets the name, photo and preferences back,
+    // even if a blank local profile was written during sign-in.
     let remote: Partial<Profile> = {};
-    if (!profileVal) {
-      try {
-        const uid = user?.id ?? (await supabase.auth.getUser()).data.user?.id;
-        if (uid) {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('display_name, username, photo_url, dietary_preferences, household_size')
-            .eq('id', uid)
-            .maybeSingle();
-          if (!error && data) {
-            if (data.display_name) remote.name     = data.display_name;
-            if (data.username)     remote.username = data.username;
-            // Older versions saved a temporary file path from one phone — skip those.
-            if (data.photo_url && /^(data:|https?:)/.test(data.photo_url)) remote.photo = data.photo_url;
-            if (Array.isArray(data.dietary_preferences)) remote.dietary = data.dietary_preferences as string[];
-            if (typeof data.household_size === 'number') remote.household = data.household_size;
-          }
+    try {
+      const uid = user?.id ?? (await supabase.auth.getUser()).data.user?.id;
+      if (uid) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('display_name, username, photo_url, dietary_preferences, household_size')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!error && data) {
+          if (data.display_name) remote.name     = data.display_name;
+          if (data.username)     remote.username = data.username;
+          // Older versions saved a temporary file path from one phone — skip those.
+          if (data.photo_url && /^(data:|https?:)/.test(data.photo_url)) remote.photo = data.photo_url;
+          if (Array.isArray(data.dietary_preferences) && data.dietary_preferences.length) remote.dietary = data.dietary_preferences as string[];
+          if (typeof data.household_size === 'number') remote.household = data.household_size;
         }
-      } catch { /* offline / columns not migrated yet — fall back to local + auth */ }
-    }
+      }
+    } catch { /* offline — use what's on the phone */ }
 
+    // Anything filled in on the phone wins; empty fields come from the account.
+    const pick = <T,>(local: T | undefined, acct: T | undefined, empty: (v: T | undefined) => boolean) => (!empty(local) ? local : acct);
+    const blank = (v: any) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
     const p: Profile = {
       ...EMPTY_PROFILE,
-      ...remote,
-      ...stored,
-      email:    stored.email    || authEmail,
-      name:     stored.name     || remote.name     || authName,
-      username: stored.username || remote.username || authUsername,
+      email:     authEmail || stored.email || '',
+      name:      pick(stored.name, remote.name, blank) || authName,
+      username:  pick(stored.username, remote.username, blank) || authUsername,
+      photo:     pick(stored.photo, remote.photo, blank) ?? null,
+      dietary:   pick(stored.dietary, remote.dietary, blank) ?? [],
+      household: (stored.household && stored.household > 1 ? stored.household : remote.household) ?? stored.household ?? 1,
     };
     setProfile(p); setEditProfile(p);
-    // Cache the restored profile locally so it loads instantly next time.
-    if (Object.keys(remote).length) await AsyncStorage.setItem('gogood_profile', JSON.stringify(p));
+    // Keep the phone's copy up to date so it loads instantly next time.
+    await AsyncStorage.setItem('gogood_profile', JSON.stringify(p));
     if (statsVal)  setStats(JSON.parse(statsVal));
     if (notifsVal) { const n = { ...EMPTY_NOTIFS, ...JSON.parse(notifsVal) }; setNotifs(n); setEditNotifs(n); }
     setBiometricEnabled(bioVal === 'enabled');
@@ -414,7 +425,7 @@ export function useAppDrawer() {
               <View style={sharedStyles.drawerHeader}>
                 <Text style={[sharedStyles.drawerLogo, { color: colors.brand }]}>go<Text style={{ color: colors.teal, fontFamily: 'Fraunces_600SemiBold' }}>good</Text></Text>
                 <TouchableOpacity onPress={close} style={[sharedStyles.closeBtn, raised(isDark), { backgroundColor: colors.surface }]} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={[sharedStyles.closeText, { color: colors.textSub }]}>✕</Text>
+                  <Ionicons name="close" size={18} color={colors.textSub} />
                 </TouchableOpacity>
               </View>
 
@@ -426,57 +437,73 @@ export function useAppDrawer() {
               >
                 <View style={[sharedStyles.avatar, { backgroundColor: colors.chipBg }]}>
                   {profile.photo
-                    ? <Image source={{ uri: profile.photo }} style={{ width: 48, height: 48, borderRadius: 24 }} />
-                    : <Text style={{ fontSize: 20, fontWeight: '700', color: colors.chipText }}>{profile.name ? profile.name[0].toUpperCase() : '?'}</Text>}
+                    ? <Image source={{ uri: profile.photo }} style={{ width: 52, height: 52, borderRadius: 26 }} />
+                    : <Text style={{ fontSize: 21, fontWeight: '700', color: colors.chipText }}>{profile.name ? profile.name[0].toUpperCase() : '?'}</Text>}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[sharedStyles.profileName, { color: colors.text }]} numberOfLines={1}>
-                    {profile.name || 'Set up your profile'}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[sharedStyles.profileName, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>
+                      {profile.name || 'Set up your profile'}
+                    </Text>
+                    {isPremium && (
+                      <View style={{ backgroundColor: colors.chipBg, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.chipText }}>PRO</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 13, color: colors.textSub }} numberOfLines={1}>
+                    {profile.username ? `@${profile.username.replace(/^@/, '')}` : profile.email || 'Edit profile'}
                   </Text>
-                  <Text style={{ fontSize: 12, color: colors.textSub }}>Edit profile</Text>
                 </View>
-                <Text style={[sharedStyles.chevron, { color: colors.textMuted }]}>›</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
-              {/* Go to */}
-              <MenuGroup title="Go to" colors={colors} isDark={isDark}>
-                {[
-                  { label: 'Inventory',      route: '/(tabs)' },
-                  { label: 'GoodBot',        route: '/(tabs)/goodbot' },
-                  { label: 'Food Report',    route: '/(tabs)/foodreport' },
-                  { label: 'Household',      route: '/(tabs)/household' },
-                ].map((item, i) => (
-                  <MenuRow key={item.label} first={i === 0} label={item.label} colors={colors}
-                    onPress={() => { close(); router.navigate(item.route as any); }} />
-                ))}
+              {/* Upgrade (free plan only) */}
+              {!isPremium && (
+                <TouchableOpacity
+                  style={[sharedStyles.proCard, { backgroundColor: colors.btnPrimary }, raisedGreen(isDark)]}
+                  onPress={() => { close(); setTimeout(showPaywall, 400); }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="sparkles" size={20} color="white" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={sharedStyles.proTitle}>Upgrade to Go Good Pro</Text>
+                    <Text style={sharedStyles.proSub}>Good Bot, Food Reports, receipt scans and more</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
+                </TouchableOpacity>
+              )}
+
+              {/* Settings */}
+              <MenuGroup title="Settings" colors={colors} isDark={isDark}>
+                <MenuRow first icon="notifications-outline" label="Notifications" sub={notifs.expiry ? 'Expiry alerts on' : 'Expiry alerts off'} colors={colors}
+                  onPress={() => openModal(setShowNotifications)} />
+                <MenuRow icon="scan-outline" label="Face ID" sub="Unlock the app with your face" colors={colors} onPress={toggleBiometric}
+                  right={<Switch value={biometricEnabled} onValueChange={toggleBiometric} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
+                <MenuRow icon="moon-outline" label="Dark mode" colors={colors} onPress={toggleTheme}
+                  right={<Switch value={isDark} onValueChange={toggleTheme} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
+              </MenuGroup>
+
+              {/* Sharing */}
+              <MenuGroup title="Sharing" colors={colors} isDark={isDark}>
+                <MenuRow first icon="home-outline" label="Household" sub="Share your kitchen with family" colors={colors}
+                  onPress={() => { close(); router.navigate('/(tabs)/household' as any); }} />
+                <MenuRow icon="storefront-outline" label="Store accounts" sub="Bring in purchases from Kroger" colors={colors}
+                  onPress={() => { close(); setTimeout(() => router.push('/store-connections' as any), 300); }} />
               </MenuGroup>
 
               {/* Account */}
               <MenuGroup title="Account" colors={colors} isDark={isDark}>
-                <MenuRow first label="Profile" colors={colors} onPress={() => openModal(setShowProfile)} />
-                <MenuRow label="Go Good Pro" colors={colors}
+                <MenuRow first icon="card-outline" label="Subscription" sub={isPremium ? 'Go Good Pro' : 'Free plan'} colors={colors}
                   onPress={() => { close(); setTimeout(showPaywall, 400); }} />
-                <MenuRow label="Notifications" colors={colors} onPress={() => openModal(setShowNotifications)} />
-                <MenuRow label="Face ID" colors={colors} onPress={toggleBiometric}
-                  right={<Switch value={biometricEnabled} onValueChange={toggleBiometric} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
-              </MenuGroup>
-
-              {/* Preferences */}
-              <MenuGroup title="Preferences" colors={colors} isDark={isDark}>
-                <MenuRow first label="Dark mode" colors={colors} onPress={toggleTheme}
-                  right={<Switch value={isDark} onValueChange={toggleTheme} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
-              </MenuGroup>
-
-              {/* Support */}
-              <MenuGroup title="Support" colors={colors} isDark={isDark}>
-                <MenuRow first label="Help & Feedback" colors={colors} onPress={() => openModal(setShowHelp)} />
-                <MenuRow label="Rate Go Good" colors={colors} onPress={() => openModal(setShowRate)} />
+                <MenuRow icon="help-circle-outline" label="Help & feedback" colors={colors} onPress={() => openModal(setShowHelp)} />
+                <MenuRow icon="star-outline" label="Rate Go Good" colors={colors} onPress={() => openModal(setShowRate)} />
               </MenuGroup>
 
               {/* Testing tools — only in development builds, never in the App Store version */}
               {__DEV__ && (
                 <MenuGroup title="Developer" colors={colors} isDark={isDark}>
-                  <MenuRow first label="Paywall demo mode" sub="Show the paywall on locked features" colors={colors}
+                  <MenuRow first icon="construct-outline" label="Paywall demo mode" sub="Show the paywall on locked features" colors={colors}
                     onPress={() => setPaywallDemoMode(!paywallDemoMode)}
                     right={<Switch value={paywallDemoMode} onValueChange={setPaywallDemoMode} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
                 </MenuGroup>
@@ -498,39 +525,45 @@ export function useAppDrawer() {
         </View>
       </Modal>
 
-      {/* ── Profile modal ── */}
-      <Sheet visible={showProfile} onClose={() => setShowProfile(false)} colors={colors}>
-        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <Text style={[sharedStyles.modalTitle, { color: colors.text }]}>Profile</Text>
-            <TouchableOpacity onPress={() => setShowProfile(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-          </View>
+      {/* ── Edit profile ── */}
+      <BottomSheet visible={showProfile} onClose={() => setShowProfile(false)}>
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" bounces={false} style={{ flexGrow: 0 }}>
+          <Text style={[sharedStyles.sheetTitle, { color: colors.text }]}>Edit profile</Text>
 
           {/* Photo */}
-          <View style={{ alignItems: 'center', marginBottom: 20 }}>
-            <TouchableOpacity onPress={pickPhoto}>
-              <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <View style={{ alignItems: 'center', marginBottom: 18 }}>
+            <TouchableOpacity onPress={pickPhoto} activeOpacity={0.85} accessibilityLabel="Change photo">
+              <View style={[{ width: 96, height: 96, borderRadius: 48, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, raised(isDark, 'md')]}>
                 {editProfile.photo
-                  ? <Image source={{ uri: editProfile.photo }} style={{ width: 84, height: 84 }} />
-                  : <Text style={{ fontSize: 34, fontWeight: '700', color: '#085041' }}>{editProfile.name ? editProfile.name[0].toUpperCase() : '?'}</Text>}
+                  ? <Image source={{ uri: editProfile.photo }} style={{ width: 96, height: 96 }} />
+                  : <Text style={{ fontSize: 36, fontWeight: '700', color: colors.chipText }}>{editProfile.name ? editProfile.name[0].toUpperCase() : '?'}</Text>}
               </View>
-              <View style={{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 16, color: 'white', fontWeight: '600', lineHeight: 18 }}>+</Text>
+              <View style={[sharedStyles.cameraBadge, { backgroundColor: colors.btnPrimary, borderColor: colors.bg }]}>
+                <Ionicons name="camera" size={14} color="white" />
               </View>
             </TouchableOpacity>
-            <Text style={{ fontSize: 10, color: '#aaa', marginTop: 6 }}>tap to change photo</Text>
+            <View style={{ flexDirection: 'row', gap: 18, marginTop: 10 }}>
+              <TouchableOpacity onPress={pickPhoto} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={[sharedStyles.link, { color: isDark ? colors.tealLight : colors.brand }]}>{editProfile.photo ? 'Change photo' : 'Add photo'}</Text>
+              </TouchableOpacity>
+              {editProfile.photo ? (
+                <TouchableOpacity onPress={() => setEditProfile(p => ({ ...p, photo: null }))} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={[sharedStyles.link, { color: colors.textSub }]}>Remove</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </View>
 
           {/* Stats */}
-          <View style={{ flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: 12, padding: 12, marginBottom: 20 }}>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
             {[
-              { val: itemCount,       label: 'in storage', color: '#085041' },
-              { val: stats.goneGood,  label: 'gone good',  color: '#1D9E75' },
-              { val: stats.goneBad,   label: 'gone bad',   color: '#E24B4A' },
-            ].map((s, i) => (
-              <View key={s.label} style={{ flex: 1, alignItems: 'center', borderLeftWidth: i > 0 ? 0.5 : 0, borderLeftColor: colors.border }}>
-                <Text style={{ fontSize: 22, fontWeight: '700', color: s.color }}>{s.val}</Text>
-                <Text style={{ fontSize: 9, color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>{s.label}</Text>
+              { val: itemCount,      label: 'In storage', color: colors.text },
+              { val: stats.goneGood, label: 'Gone good',  color: '#23B385' },
+              { val: stats.goneBad,  label: 'Gone bad',   color: '#D0644F' },
+            ].map(s => (
+              <View key={s.label} style={[sharedStyles.statCard, { backgroundColor: colors.surface }, raised(isDark)]}>
+                <Text style={{ fontSize: 20, fontWeight: '700', color: s.color }}>{s.val}</Text>
+                <Text style={{ fontSize: 12, color: colors.textSub, marginTop: 2 }}>{s.label}</Text>
               </View>
             ))}
           </View>
@@ -538,59 +571,63 @@ export function useAppDrawer() {
           {/* Fields */}
           <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Name</Text>
           <TextInput style={[sharedStyles.input, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.inputText }]}
-            placeholder="Your name" placeholderTextColor={colors.placeholder}
-            value={editProfile.name} onChangeText={v => setEditProfile(p => ({ ...p, name: v }))} />
+            placeholder="Your name" placeholderTextColor={colors.placeholder} keyboardAppearance={isDark ? 'dark' : 'light'}
+            value={editProfile.name} onChangeText={v => setEditProfile(p => ({ ...p, name: v }))}
+            textContentType="name" autoComplete="name" />
 
           <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Username</Text>
           <TextInput style={[sharedStyles.input, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.inputText }]}
-            placeholder="@username" placeholderTextColor={colors.placeholder}
+            placeholder="@username" placeholderTextColor={colors.placeholder} keyboardAppearance={isDark ? 'dark' : 'light'}
             value={editProfile.username} onChangeText={v => setEditProfile(p => ({ ...p, username: v }))}
             autoCapitalize="none" autoCorrect={false} />
 
           <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Email</Text>
-          <TextInput style={[sharedStyles.input, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.inputText }]}
-            placeholder="your@email.com" placeholderTextColor={colors.placeholder}
-            value={editProfile.email} onChangeText={v => setEditProfile(p => ({ ...p, email: v }))}
-            keyboardType="email-address" autoCapitalize="none" />
+          <View style={[sharedStyles.input, { backgroundColor: colors.surfaceAlt, borderColor: 'transparent', flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+            <Text style={{ flex: 1, fontSize: 15, color: colors.textSub }} numberOfLines={1}>{editProfile.email || 'No email'}</Text>
+            <Ionicons name="lock-closed-outline" size={15} color={colors.textMuted} />
+          </View>
+          <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>This is the email you sign in with.</Text>
 
           <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Household size</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 10, padding: 11 }}>
-            <Text style={{ fontSize: 14, color: colors.inputText }}>{editProfile.household} {editProfile.household === 1 ? 'person' : 'people'}</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity style={[sharedStyles.qtyBtn, editProfile.household <= 1 && { backgroundColor: '#ccc' }]}
-                onPress={() => setEditProfile(p => ({ ...p, household: Math.max(1, p.household - 1) }))}>
-                <Text style={sharedStyles.qtyBtnText}>−</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[sharedStyles.qtyBtn, editProfile.household >= 10 && { backgroundColor: '#ccc' }]}
-                onPress={() => setEditProfile(p => ({ ...p, household: Math.min(10, p.household + 1) }))}>
-                <Text style={sharedStyles.qtyBtnText}>+</Text>
-              </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TouchableOpacity
+              style={[sharedStyles.stepBtn, { backgroundColor: colors.surface, opacity: editProfile.household <= 1 ? 0.4 : 1 }, raised(isDark)]}
+              disabled={editProfile.household <= 1}
+              onPress={() => setEditProfile(p => ({ ...p, household: Math.max(1, p.household - 1) }))}>
+              <Ionicons name="remove" size={20} color={colors.text} />
+            </TouchableOpacity>
+            <View style={[sharedStyles.input, { flex: 1, alignItems: 'center', marginBottom: 0, backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: colors.inputText }}>{editProfile.household} {editProfile.household === 1 ? 'person' : 'people'}</Text>
             </View>
+            <TouchableOpacity
+              style={[sharedStyles.stepBtn, { backgroundColor: colors.surface, opacity: editProfile.household >= 10 ? 0.4 : 1 }, raised(isDark)]}
+              disabled={editProfile.household >= 10}
+              onPress={() => setEditProfile(p => ({ ...p, household: Math.min(10, p.household + 1) }))}>
+              <Ionicons name="add" size={20} color={colors.text} />
+            </TouchableOpacity>
           </View>
+          <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>Good Bot sizes recipes for this many people.</Text>
 
           <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Dietary preferences</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {DIETARY_OPTIONS.map(pref => {
               const on = editProfile.dietary.includes(pref);
               return (
                 <TouchableOpacity key={pref}
                   onPress={() => setEditProfile(p => ({ ...p, dietary: on ? p.dietary.filter(d => d !== pref) : [...p.dietary, pref] }))}
-                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: on ? '#085041' : colors.surface, borderWidth: 1, borderColor: on ? '#085041' : colors.border }}>
-                  <Text style={{ fontSize: 11, fontWeight: '500', color: on ? 'white' : colors.textSub }}>{pref}</Text>
+                  style={[sharedStyles.chip, { backgroundColor: on ? colors.btnPrimary : colors.surface }, raised(isDark)]}
+                  activeOpacity={0.8}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: on ? 'white' : colors.text }}>{pref}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
 
-          <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 20 }]} onPress={saveProfile}>
+          <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 24, backgroundColor: colors.btnPrimary }, raisedGreen(isDark)]} onPress={saveProfile} activeOpacity={0.85}>
             <Text style={sharedStyles.confirmBtnText}>Save profile</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={sharedStyles.cancelBtn} onPress={() => setShowProfile(false)}>
-            <Text style={sharedStyles.cancelText}>cancel</Text>
-          </TouchableOpacity>
-          <View style={{ height: 20 }} />
         </ScrollView>
-      </Sheet>
+      </BottomSheet>
 
       {/* ── Notifications modal ── */}
       <Sheet visible={showNotifications} onClose={() => setShowNotifications(false)} colors={colors}>
@@ -726,7 +763,7 @@ const sharedStyles = StyleSheet.create({
 
   // Profile card
   profileCard:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 20, marginBottom: 8, padding: 14, borderRadius: 18 },
-  avatar:       { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatar:       { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   profileName:  { fontSize: 16, fontWeight: '700', marginBottom: 2 },
   chevron:      { fontSize: 20, fontWeight: '400', marginLeft: 4 },
 
@@ -734,7 +771,17 @@ const sharedStyles = StyleSheet.create({
   group:        { marginTop: 18, paddingHorizontal: 20 },
   groupTitle:   { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.1, marginBottom: 8, marginLeft: 6 },
   groupCard:    { borderRadius: 16 },
-  row:          { flexDirection: 'row', alignItems: 'center', minHeight: 50, paddingVertical: 10, paddingHorizontal: 16 },
+  row:          { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 54, paddingVertical: 10, paddingHorizontal: 14 },
+  rowIcon:      { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  proCard:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 20, marginTop: 14, padding: 16, borderRadius: 18 },
+  proTitle:     { color: 'white', fontSize: 15, fontWeight: '700' },
+  proSub:       { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 },
+  sheetTitle:   { fontSize: 20, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold', marginBottom: 16 },
+  cameraBadge:  { position: 'absolute', bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  link:         { fontSize: 14, fontWeight: '600' },
+  statCard:     { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 14 },
+  stepBtn:      { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  chip:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
   rowText:      { fontSize: 15, fontWeight: '500' },
 
   // Logout + version
@@ -746,8 +793,8 @@ const sharedStyles = StyleSheet.create({
 
   // Modal shared
   modalTitle:   { fontSize: 20, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
-  fieldLabel:   { fontSize: 11, fontWeight: '600', marginBottom: 6, marginTop: 14, textTransform: 'uppercase', letterSpacing: 0.5 },
-  input:        { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, marginBottom: 4 },
+  fieldLabel:   { fontSize: 12, fontWeight: '600', marginBottom: 6, marginTop: 16 },
+  input:        { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 4 },
   qtyBtn:       { width: 32, height: 32, borderRadius: 16, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' },
   qtyBtnText:   { color: 'white', fontSize: 18, lineHeight: 22 },
   confirmBtn:   { backgroundColor: '#085041', borderRadius: 14, paddingVertical: 14, alignItems: 'center', ...raisedGreen(false) },

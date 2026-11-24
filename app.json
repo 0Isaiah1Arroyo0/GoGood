@@ -13,6 +13,10 @@
       "bundleIdentifier": "com.isaiaharroyo.gogood",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "icon": {
+        "light": "./assets/images/icon.png",
+        "dark": "./assets/images/icon-dark.png"
       }
     },
     "android": {
@@ -62,14 +66,19 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
           "backgroundColor": "#FAF8F3",
           "dark": {
+            "image": "./assets/images/splash-icon-dark.png",
             "backgroundColor": "#141414"
           }
         }
       ],
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -81,6 +90,12 @@
         "projectId": "1850809f-3bec-4268-8130-0749c708d824"
       }
     },
-    "owner": "arroyoi"
+    "owner": "arroyoi",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/1850809f-3bec-4268-8130-0749c708d824"
+    }
   }
 }

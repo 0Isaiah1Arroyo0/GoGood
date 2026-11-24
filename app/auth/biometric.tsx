@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -6,11 +6,16 @@ import * as SecureStore from 'expo-secure-store';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/auth';
+import { useAuthStyles } from '@/components/auth-ui';
+import { raised } from '@/components/raised';
+import type { ThemeColors } from '../context/theme';
 
 type AuthState = 'idle' | 'success' | 'fail';
 
 export default function BiometricScreen() {
   const router      = useRouter();
+  const { styles: auth, c, isDark } = useAuthStyles();
+  const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const { signOut } = useAuth();
   const [label, setLabel]         = useState('Face ID');
   const [authState, setAuthState] = useState<AuthState>('idle');
@@ -93,7 +98,7 @@ export default function BiometricScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style={c.statusBar} />
       <SafeAreaView style={styles.safe}>
         <Animated.View style={[styles.screen, { opacity: screenFade, transform: [{ translateY: screenSlide }] }]}>
 
@@ -108,7 +113,7 @@ export default function BiometricScreen() {
                   <Ionicons
                     name={iconName as any}
                     size={40}
-                    color={isFail ? '#FF6B6B' : '#5DCAA5'}
+                    color={isFail ? c.goneBadText : (isDark ? c.tealLight : c.brand)}
                   />
                 </View>
               </Animated.View>
@@ -118,15 +123,15 @@ export default function BiometricScreen() {
               <Text style={styles.title}>Welcome back</Text>
               <Text style={[styles.subtitle, isFail && styles.subtitleFail]}>
                 {isFail
-                  ? `${label} failed — tap to try again`
+                  ? `${label} didn't work. Tap to try again.`
                   : `Tap to unlock with ${label}`}
               </Text>
             </Animated.View>
           </View>
 
           <Animated.View style={[styles.bottom, { opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }]}>
-            <TouchableOpacity onPress={authenticate} style={styles.unlockBtn} activeOpacity={0.85}>
-              <Text style={styles.unlockBtnText}>Unlock with {label}</Text>
+            <TouchableOpacity onPress={authenticate} style={auth.btnPrimary} activeOpacity={0.85}>
+              <Text style={auth.btnPrimaryText}>Unlock with {label}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={signInDifferently} activeOpacity={0.7} style={styles.switchPressable}>
               <Text style={styles.switchText}>Sign in with a different account</Text>
@@ -139,7 +144,7 @@ export default function BiometricScreen() {
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFillObject, {
-          backgroundColor: 'white',
+          backgroundColor: c.bg,
           opacity: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }),
         }]}
       />
@@ -147,44 +152,35 @@ export default function BiometricScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#085041' },
-  safe:   { flex: 1 },
-  screen: { flex: 1, paddingHorizontal: 32, justifyContent: 'space-between' },
+function createStyles(c: ThemeColors, isDark: boolean) {
+  return StyleSheet.create({
+    root:   { flex: 1, backgroundColor: c.bg },
+    safe:   { flex: 1 },
+    screen: { flex: 1, paddingHorizontal: 24, justifyContent: 'space-between' },
 
-  top: { paddingTop: 36, alignItems: 'center' },
-  logo:     { fontSize: 48, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
-  logoTeal: { color: '#5DCAA5' },
+    top:      { paddingTop: 36, alignItems: 'center' },
+    logo:     { fontSize: 48, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
+    logoTeal: { color: c.teal },
 
-  middle: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 32 },
+    middle: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 32 },
 
-  heroPressable: {},
-  heroCircle: {
-    width: 92, height: 92, borderRadius: 46,
-    borderWidth: 1.5,
-    borderColor: 'rgba(93,202,165,0.45)',
-    backgroundColor: 'rgba(93,202,165,0.07)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  heroCircleFail: {
-    borderColor: 'rgba(255,107,107,0.5)',
-    backgroundColor: 'rgba(255,107,107,0.07)',
-  },
+    heroPressable: {},
+    heroCircle: {
+      width: 96, height: 96, borderRadius: 48,
+      backgroundColor: c.surface,
+      alignItems: 'center', justifyContent: 'center',
+      ...raised(isDark, 'md'),
+    },
+    heroCircleFail: { backgroundColor: c.goneBadBg },
 
-  textBlock:    { alignItems: 'center', gap: 8 },
-  title:        { fontSize: 26, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
-  subtitle:     { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
-  subtitleFail: { color: 'rgba(255,107,107,0.75)' },
+    textBlock:    { alignItems: 'center', gap: 8 },
+    title:        { fontSize: 26, fontWeight: '700', color: c.text, fontFamily: 'Fraunces_600SemiBold' },
+    subtitle:     { fontSize: 14, color: c.textSub, textAlign: 'center' },
+    subtitleFail: { color: c.goneBadText },
 
-  bottom: { paddingBottom: 28, gap: 14 },
-  unlockBtn: {
-    backgroundColor: '#1D9E75',
-    paddingVertical: 15,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  unlockBtnText: { color: 'white', fontSize: 15, fontWeight: '600' },
+    bottom: { paddingBottom: 28, gap: 14 },
 
-  switchPressable: { alignItems: 'center', paddingVertical: 4 },
-  switchText:      { fontSize: 13, color: 'rgba(255,255,255,0.28)', textDecorationLine: 'underline' },
-});
+    switchPressable: { alignItems: 'center', paddingVertical: 6 },
+    switchText:      { fontSize: 14, color: c.textSub, fontWeight: '600' },
+  });
+}

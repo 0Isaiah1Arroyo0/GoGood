@@ -4,11 +4,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '../lib/supabase';
+import { useAuthStyles, IconBadge } from '@/components/auth-ui';
 
 type ResetState = 'loading' | 'form' | 'success' | 'error';
 
 export default function ResetScreen() {
   const router = useRouter();
+  const { styles: auth, c, isDark } = useAuthStyles();
   const params = useLocalSearchParams<{
     code?: string;
     token_hash?: string;
@@ -65,27 +67,28 @@ export default function ResetScreen() {
   const goToLogin = () => router.replace('/auth/login' as any);
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar style="light" />
+    <SafeAreaView style={auth.safeArea}>
+      <StatusBar style={c.statusBar} />
       <View style={styles.container}>
 
         {state === 'loading' && (
           <>
-            <ActivityIndicator size="large" color="#5DCAA5" />
-            <Text style={styles.loadingText}>Verifying reset link…</Text>
+            <ActivityIndicator size="large" color={c.teal} />
+            <Text style={[styles.loadingText, { color: c.textSub }]}>Verifying reset link…</Text>
           </>
         )}
 
         {state === 'form' && (
           <>
-            <Text style={styles.icon}>🔑</Text>
-            <Text style={styles.title}>New password</Text>
-            <Text style={styles.sub}>Choose a strong password for your Go Good account.</Text>
+            <IconBadge name="key-outline" size={72} />
+            <Text style={auth.messageTitle}>New password</Text>
+            <Text style={auth.messageText}>Choose a strong password for your Go Good account.</Text>
             <View style={styles.inputWrap}>
               <TextInput
-                style={styles.input}
+                style={auth.input}
                 placeholder="New password"
-                placeholderTextColor="rgba(255,255,255,0.35)"
+                placeholderTextColor={c.placeholder}
+                keyboardAppearance={isDark ? 'dark' : 'light'}
                 value={password}
                 onChangeText={v => { setPassword(v); setMessage(''); }}
                 secureTextEntry={!showPw}
@@ -96,9 +99,10 @@ export default function ResetScreen() {
             </View>
             <View style={styles.inputWrap}>
               <TextInput
-                style={styles.input}
+                style={auth.input}
                 placeholder="Confirm password"
-                placeholderTextColor="rgba(255,255,255,0.35)"
+                placeholderTextColor={c.placeholder}
+                keyboardAppearance={isDark ? 'dark' : 'light'}
                 value={confirm}
                 onChangeText={v => { setConfirm(v); setMessage(''); }}
                 secureTextEntry={!showPw}
@@ -109,35 +113,35 @@ export default function ResetScreen() {
               />
             </View>
             <TouchableOpacity onPress={() => setShowPw(p => !p)} style={{ alignSelf: 'flex-end' }}>
-              <Text style={styles.showHide}>{showPw ? 'hide passwords' : 'show passwords'}</Text>
+              <Text style={auth.eyeText}>{showPw ? 'Hide passwords' : 'Show passwords'}</Text>
             </TouchableOpacity>
-            {message ? <Text style={styles.errorText}>{message}</Text> : null}
-            <TouchableOpacity style={styles.btn} onPress={handleSave} disabled={saving}>
+            {message ? <Text style={auth.errorText}>{message}</Text> : null}
+            <TouchableOpacity style={[auth.btnPrimary, styles.btn]} onPress={handleSave} disabled={saving}>
               {saving
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.btnText}>save new password →</Text>}
+                ? <ActivityIndicator color="white" />
+                : <Text style={auth.btnPrimaryText}>Save new password</Text>}
             </TouchableOpacity>
           </>
         )}
 
         {state === 'success' && (
           <>
-            <Text style={styles.icon}>🎉</Text>
-            <Text style={styles.title}>Password updated!</Text>
-            <Text style={styles.sub}>Your password has been changed. Sign in with your new password.</Text>
-            <TouchableOpacity style={styles.btn} onPress={goToLogin}>
-              <Text style={styles.btnText}>go to sign in →</Text>
+            <IconBadge name="checkmark" size={72} />
+            <Text style={auth.messageTitle}>Password updated</Text>
+            <Text style={auth.messageText}>Your password has been changed. Sign in with your new password.</Text>
+            <TouchableOpacity style={[auth.btnPrimary, styles.btn]} onPress={goToLogin}>
+              <Text style={auth.btnPrimaryText}>Go to sign in</Text>
             </TouchableOpacity>
           </>
         )}
 
         {state === 'error' && (
           <>
-            <Text style={styles.icon}>😕</Text>
-            <Text style={styles.title}>Link expired</Text>
-            <Text style={styles.sub}>{message || 'The reset link may have expired. Request a new one from the sign in screen.'}</Text>
-            <TouchableOpacity style={styles.btn} onPress={goToLogin}>
-              <Text style={styles.btnText}>go to sign in →</Text>
+            <IconBadge name="alert-outline" size={72} tone="bad" />
+            <Text style={auth.messageTitle}>Link expired</Text>
+            <Text style={auth.messageText}>{message || 'The reset link may have expired. Request a new one from the sign in screen.'}</Text>
+            <TouchableOpacity style={[auth.btnPrimary, styles.btn]} onPress={goToLogin}>
+              <Text style={auth.btnPrimaryText}>Go to sign in</Text>
             </TouchableOpacity>
           </>
         )}
@@ -148,16 +152,8 @@ export default function ResetScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe:        { flex: 1, backgroundColor: '#085041' },
-  container:   { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
-  icon:        { fontSize: 64 },
-  title:       { fontSize: 26, fontWeight: '700', color: '#fff', textAlign: 'center', fontFamily: 'Fraunces_600SemiBold' },
-  sub:         { fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22, maxWidth: 300 },
-  loadingText: { fontSize: 14, color: 'rgba(255,255,255,0.5)', marginTop: 16 },
+  container:   { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 },
+  loadingText: { fontSize: 14, marginTop: 16 },
   inputWrap:   { width: '100%' },
-  input:       { backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 14, fontSize: 14, color: 'white', width: '100%' },
-  showHide:    { fontSize: 12, color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
-  errorText:   { fontSize: 12, color: '#FF8A8A', textAlign: 'center' },
-  btn:         { marginTop: 8, backgroundColor: '#1D9E75', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, alignItems: 'center', width: '100%' },
-  btnText:     { color: '#fff', fontSize: 15, fontWeight: '600' },
+  btn:         { marginTop: 8, paddingHorizontal: 40, alignSelf: 'stretch' },
 });

@@ -1,11 +1,17 @@
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Animated, Easing } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Accelerometer } from 'expo-sensors';
+import { useAuthStyles } from '@/components/auth-ui';
+import { raised } from '@/components/raised';
+import type { ThemeColors } from '../context/theme';
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const { styles: auth, c, isDark } = useAuthStyles();
+  const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
 
   // Floating bubble animations
   const bubble1Y = useRef(new Animated.Value(0)).current;
@@ -83,7 +89,7 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style={c.statusBar} />
 
       {/* Floating circles with gyro parallax */}
       <Animated.View style={[styles.circle1, { transform: [
@@ -119,15 +125,15 @@ export default function WelcomeScreen() {
           {/* Feature pills stagger in from below */}
           <View style={styles.pills}>
             <Animated.View style={[styles.pill, pillStyle(pill1Anim)]}>
-              <Text style={styles.pillIcon}>📷</Text>
+              <View style={styles.pillIcon}><Ionicons name="camera-outline" size={20} color={c.chipText} /></View>
               <Text style={styles.pillText}>Scan your fridge & track what's <Text style={styles.pillBold}>expiring first</Text></Text>
             </Animated.View>
             <Animated.View style={[styles.pill, pillStyle(pill2Anim)]}>
-              <Text style={styles.pillIcon}>🤖</Text>
+              <View style={styles.pillIcon}><Ionicons name="sparkles-outline" size={20} color={c.chipText} /></View>
               <Text style={styles.pillText}><Text style={styles.pillBold}>Good Bot</Text> builds recipes before anything goes to waste</Text>
             </Animated.View>
             <Animated.View style={[styles.pill, pillStyle(pill3Anim)]}>
-              <Text style={styles.pillIcon}>💰</Text>
+              <View style={styles.pillIcon}><Ionicons name="wallet-outline" size={20} color={c.chipText} /></View>
               <Text style={styles.pillText}>Watch your money <Text style={styles.pillBold}>go good</Text> instead of in the trash</Text>
             </Animated.View>
           </View>
@@ -138,22 +144,22 @@ export default function WelcomeScreen() {
             transform: [{ translateY: btnsAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
           }]}>
             <TouchableOpacity
-              style={styles.btnPrimary}
+              style={auth.btnPrimary}
               onPress={() => router.navigate('/auth/signup' as any)}
               activeOpacity={0.8}
             >
-              <Text style={styles.btnPrimaryText}>create an account →</Text>
+              <Text style={auth.btnPrimaryText}>Create an account</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.btnSecondary}
+              style={auth.btnSecondary}
               onPress={() => router.navigate('/auth/login' as any)}
               activeOpacity={0.8}
             >
-              <Text style={styles.btnSecondaryText}>i already have an account</Text>
+              <Text style={auth.btnSecondaryText}>I already have an account</Text>
             </TouchableOpacity>
 
-            <Text style={styles.hint}>free to join · no spam · cancel anytime</Text>
+            <Text style={styles.hint}>Free to join · No spam · Cancel anytime</Text>
           </Animated.View>
 
         </View>
@@ -162,25 +168,25 @@ export default function WelcomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root:             { flex: 1, backgroundColor: '#085041' },
-  safeArea:         { flex: 1 },
-  container:        { flex: 1, paddingHorizontal: 28, paddingTop: 32, paddingBottom: 32, justifyContent: 'space-between' },
-  circle1:          { position: 'absolute', width: 320, height: 320, borderRadius: 160, backgroundColor: 'rgba(255,255,255,0.05)', top: -40, right: -80 },
-  circle2:          { position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(93,202,165,0.08)', bottom: 200, left: -60 },
-  circle3:          { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.04)', top: 220, right: -40 },
-  logoSection:      { alignItems: 'center', paddingTop: 16 },
-  logo:             { fontSize: 56, fontWeight: '700', color: 'white', letterSpacing: -2, lineHeight: 62, textAlign: 'center', fontFamily: 'Fraunces_600SemiBold' },
-  logoTeal:         { color: '#5DCAA5', fontFamily: 'Fraunces_600SemiBold' },
-  pills:            { gap: 10 },
-  pill:             { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 16, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.12)' },
-  pillIcon:         { fontSize: 22 },
-  pillText:         { flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 20 },
-  pillBold:         { color: 'white', fontWeight: '600' },
-  buttons:          { gap: 12 },
-  btnPrimary:       { backgroundColor: '#1D9E75', padding: 16, borderRadius: 14, alignItems: 'center' },
-  btnPrimaryText:   { color: 'white', fontSize: 15, fontWeight: '600' },
-  btnSecondary:     { backgroundColor: '#085041', padding: 15, borderRadius: 14, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' },
-  btnSecondaryText: { color: 'white', fontSize: 15, fontWeight: '500' },
-  hint:             { textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.35)' },
-});
+function createStyles(c: ThemeColors, isDark: boolean) {
+  // Soft green circles drifting in the background
+  const tint = isDark ? 'rgba(79,120,97,' : 'rgba(35,179,133,';
+  return StyleSheet.create({
+    root:        { flex: 1, backgroundColor: c.bg },
+    safeArea:    { flex: 1 },
+    container:   { flex: 1, paddingHorizontal: 24, paddingTop: 32, paddingBottom: 32, justifyContent: 'space-between' },
+    circle1:     { position: 'absolute', width: 320, height: 320, borderRadius: 160, backgroundColor: tint + '0.07)', top: -40, right: -80 },
+    circle2:     { position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: tint + '0.10)', bottom: 200, left: -60 },
+    circle3:     { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: tint + '0.06)', top: 220, right: -40 },
+    logoSection: { alignItems: 'center', paddingTop: 16 },
+    logo:        { fontSize: 56, fontWeight: '700', color: c.brand, letterSpacing: -2, lineHeight: 62, textAlign: 'center', fontFamily: 'Fraunces_600SemiBold' },
+    logoTeal:    { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
+    pills:       { gap: 12 },
+    pill:        { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: c.surface, borderRadius: 16, padding: 16, ...raised(isDark, 'md') },
+    pillIcon:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.chipBg, alignItems: 'center', justifyContent: 'center' },
+    pillText:    { flex: 1, fontSize: 14, color: c.textSub, lineHeight: 20 },
+    pillBold:    { color: c.text, fontWeight: '600' },
+    buttons:     { gap: 12 },
+    hint:        { textAlign: 'center', fontSize: 12, color: c.textMuted },
+  });
+}

@@ -9,9 +9,11 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/auth';
+import { useAuthStyles, IconBadge, BackButton } from '@/components/auth-ui';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { styles, c, isDark, link } = useAuthStyles();
   const { signIn, resetPassword } = useAuth();
 
   const [email, setEmail]       = useState('');
@@ -80,10 +82,7 @@ export default function LoginScreen() {
         : err.message);
       return;
     }
-    await AsyncStorage.setItem('gogood_profile', JSON.stringify({
-      photo: null, dietary: [], household: 1, username: '', name: '',
-      email: email.trim().toLowerCase(),
-    }));
+    // The menu restores the saved profile (name, photo, preferences) from the account.
     await promptBiometric();
     router.replace('/(tabs)' as any);
   };
@@ -153,23 +152,21 @@ export default function LoginScreen() {
   if (forgotMode) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
+        <StatusBar style={c.statusBar} />
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => { setForgotMode(false); setResetSent(false); setError(''); }} style={styles.backBtn}>
-            <Text style={styles.backText}>←</Text>
-          </TouchableOpacity>
+          <BackButton onPress={() => { setForgotMode(false); setResetSent(false); setError(''); }} />
           <Text style={styles.headerTitle}>Reset password</Text>
           <View style={{ width: 36 }} />
         </View>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
           {resetSent ? (
-            <View style={styles.successBox}>
-              <Text style={[styles.confirmIcon]}>📬</Text>
-              <Text style={styles.successTitle}>Check your inbox</Text>
-              <Text style={styles.successText}>We sent a reset link to{'\n'}<Text style={{ color: '#5DCAA5', fontWeight: '600' }}>{email}</Text></Text>
+            <View style={styles.messageBox}>
+              <IconBadge name="mail-outline" size={64} />
+              <Text style={styles.messageTitle}>Check your inbox</Text>
+              <Text style={styles.messageText}>We sent a reset link to{'\n'}<Text style={{ color: link, fontWeight: '600' }}>{email}</Text></Text>
               <TouchableOpacity onPress={() => { setForgotMode(false); setResetSent(false); }} style={styles.btnPrimary}>
-                <Text style={styles.btnPrimaryText}>back to sign in →</Text>
+                <Text style={styles.btnPrimaryText}>Back to sign in</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -180,7 +177,8 @@ export default function LoginScreen() {
                 <TextInput
                   style={[styles.input, error ? styles.inputError : null]}
                   placeholder="you@example.com"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  placeholderTextColor={c.placeholder}
+                  keyboardAppearance={isDark ? 'dark' : 'light'}
                   value={email}
                   onChangeText={v => { setEmail(v); setError(''); }}
                   autoCapitalize="none"
@@ -190,7 +188,7 @@ export default function LoginScreen() {
                 {error ? <Text style={styles.errorText}>{error}</Text> : null}
               </View>
               <TouchableOpacity style={styles.btnPrimary} onPress={handleForgot} disabled={loading}>
-                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>send reset link →</Text>}
+                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>Send reset link</Text>}
               </TouchableOpacity>
             </>
           )}
@@ -203,23 +201,21 @@ export default function LoginScreen() {
   if (forgotUsernameMode) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
+        <StatusBar style={c.statusBar} />
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => { setForgotUsernameMode(false); setUsernameSent(false); setError(''); }} style={styles.backBtn}>
-            <Text style={styles.backText}>←</Text>
-          </TouchableOpacity>
+          <BackButton onPress={() => { setForgotUsernameMode(false); setUsernameSent(false); setError(''); }} />
           <Text style={styles.headerTitle}>Forgot username</Text>
           <View style={{ width: 36 }} />
         </View>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
           {usernameSent ? (
-            <View style={styles.successBox}>
-              <Text style={styles.confirmIcon}>📬</Text>
-              <Text style={styles.successTitle}>Check your inbox</Text>
-              <Text style={styles.successText}>If a Go Good account exists for{'\n'}<Text style={{ color: '#5DCAA5', fontWeight: '600' }}>{email}</Text>{'\n'}we've sent your username there.</Text>
+            <View style={styles.messageBox}>
+              <IconBadge name="mail-outline" size={64} />
+              <Text style={styles.messageTitle}>Check your inbox</Text>
+              <Text style={styles.messageText}>If a Go Good account exists for{'\n'}<Text style={{ color: link, fontWeight: '600' }}>{email}</Text>{'\n'}we've sent your username there.</Text>
               <TouchableOpacity onPress={() => { setForgotUsernameMode(false); setUsernameSent(false); }} style={styles.btnPrimary}>
-                <Text style={styles.btnPrimaryText}>back to sign in →</Text>
+                <Text style={styles.btnPrimaryText}>Back to sign in</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -230,7 +226,8 @@ export default function LoginScreen() {
                 <TextInput
                   style={[styles.input, error ? styles.inputError : null]}
                   placeholder="you@example.com"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  placeholderTextColor={c.placeholder}
+                  keyboardAppearance={isDark ? 'dark' : 'light'}
                   value={email}
                   onChangeText={v => { setEmail(v); setError(''); }}
                   autoCapitalize="none"
@@ -240,7 +237,7 @@ export default function LoginScreen() {
                 {error ? <Text style={styles.errorText}>{error}</Text> : null}
               </View>
               <TouchableOpacity style={styles.btnPrimary} onPress={handleForgotUsername} disabled={loading}>
-                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>send my username →</Text>}
+                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>Send my username</Text>}
               </TouchableOpacity>
             </>
           )}
@@ -252,33 +249,31 @@ export default function LoginScreen() {
   // ── Main login screen ───────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar style={c.statusBar} />
       <Animated.View style={[{ flex: 1 }, {
         opacity: enterAnim,
         transform: [{ translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
       }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} />
         <Text style={styles.headerTitle}>Welcome back</Text>
         <View style={{ width: 36 }} />
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
-        <Text style={styles.subtitle}>Good to see you again 🌱</Text>
+        <Text style={styles.subtitle}>Good to see you again</Text>
 
         {/* Face ID fast login */}
         {biometricLabel && (
           <TouchableOpacity onPress={handleBiometricLogin} disabled={scanning} activeOpacity={0.85}>
-            <Animated.View style={[styles.biometricBtn, { transform: [{ scale: scanPulse }] }]}>
-              <Text style={styles.biometricIcon}>{biometricLabel === 'Face ID' ? '🔐' : biometricLabel === 'Touch ID' ? '👆' : '🔑'}</Text>
+            <Animated.View style={[styles.card, { transform: [{ scale: scanPulse }] }]}>
+              <IconBadge name={biometricLabel === 'Face ID' ? 'scan-outline' : biometricLabel === 'Touch ID' ? 'finger-print-outline' : 'lock-closed-outline'} size={44} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.biometricTitle}>
+                <Text style={styles.cardTitle}>
                   {scanning ? 'Scanning...' : `Sign in with ${biometricLabel}`}
                 </Text>
-                <Text style={styles.biometricSub}>
+                <Text style={styles.cardSub}>
                   {scanning ? `Verifying your ${biometricLabel}` : 'Tap to unlock instantly'}
                 </Text>
               </View>
@@ -291,7 +286,8 @@ export default function LoginScreen() {
           <TextInput
             style={[styles.input, error ? styles.inputError : null]}
             placeholder="you@example.com"
-            placeholderTextColor="rgba(255,255,255,0.3)"
+            placeholderTextColor={c.placeholder}
+            keyboardAppearance={isDark ? 'dark' : 'light'}
             value={email}
             onChangeText={v => { setEmail(v); setError(''); }}
             autoCapitalize="none"
@@ -307,7 +303,8 @@ export default function LoginScreen() {
             <TextInput
               style={[styles.input, error ? styles.inputError : null, { paddingRight: 56 }]}
               placeholder="Your password"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor={c.placeholder}
+              keyboardAppearance={isDark ? 'dark' : 'light'}
               value={password}
               onChangeText={v => { setPassword(v); setError(''); }}
               secureTextEntry={!showPassword}
@@ -316,29 +313,29 @@ export default function LoginScreen() {
               textContentType="password"
             />
             <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPassword(p => !p)}>
-              <Text style={styles.eyeText}>{showPassword ? 'hide' : 'show'}</Text>
+              <Text style={styles.eyeText}>{showPassword ? 'Hide' : 'Show'}</Text>
             </TouchableOpacity>
           </View>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: -6 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: -4 }}>
           <TouchableOpacity onPress={() => setForgotUsernameMode(true)}>
-            <Text style={styles.forgotText}>forgot username?</Text>
+            <Text style={styles.forgotText}>Forgot username?</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setForgotMode(true)}>
-            <Text style={styles.forgotText}>forgot password?</Text>
+            <Text style={styles.forgotText}>Forgot password?</Text>
           </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.btnPrimary} onPress={handleLogin} disabled={loading}>
-          {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>sign in →</Text>}
+          {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>Sign in</Text>}
         </TouchableOpacity>
 
         <View style={styles.switchRow}>
-          <Text style={styles.switchText}>don't have an account? </Text>
+          <Text style={styles.switchText}>Don't have an account? </Text>
           <TouchableOpacity onPress={() => router.push('/auth/signup' as any)}>
-            <Text style={styles.switchLink}>sign up</Text>
+            <Text style={styles.switchLink}>Sign up</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -346,37 +343,3 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea:       { flex: 1, backgroundColor: '#085041' },
-  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.1)' },
-  backBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
-  backText:       { fontSize: 18, color: 'white' },
-  headerTitle:    { fontSize: 16, fontWeight: '600', color: 'white' },
-  scroll:         { flex: 1, backgroundColor: '#085041' },
-  body:           { padding: 28, gap: 16, paddingBottom: 48 },
-  logo:           { fontSize: 36, fontWeight: '700', color: 'white', textAlign: 'center', fontFamily: 'Fraunces_600SemiBold' },
-  logoGreen:      { color: '#5DCAA5', fontFamily: 'Fraunces_600SemiBold' },
-  subtitle:       { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginTop: -8 },
-  biometricBtn:   { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: 'rgba(93,202,165,0.12)', borderWidth: 1, borderColor: 'rgba(93,202,165,0.3)', borderRadius: 14, padding: 16 },
-  biometricIcon:  { fontSize: 30 },
-  biometricTitle: { fontSize: 15, fontWeight: '600', color: 'white' },
-  biometricSub:   { fontSize: 11, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
-  field:          { gap: 6 },
-  fieldLabel:     { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 1 },
-  input:          { backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 14, fontSize: 14, color: 'white' },
-  inputError:     { borderColor: '#FF6B6B' },
-  errorText:      { fontSize: 11, color: '#FF8A8A', marginTop: 2 },
-  forgotText:     { fontSize: 12, color: '#5DCAA5', fontWeight: '500' },
-  eyeBtn:         { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
-  eyeText:        { fontSize: 12, color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
-  btnPrimary:     { backgroundColor: '#1D9E75', padding: 16, borderRadius: 14, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
-  btnPrimaryText: { color: 'white', fontSize: 15, fontWeight: '600' },
-  switchRow:      { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  switchText:     { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
-  switchLink:     { fontSize: 13, color: '#5DCAA5', fontWeight: '600' },
-  successBox:     { gap: 16, alignItems: 'center' },
-  confirmIcon:    { fontSize: 52, textAlign: 'center' },
-  successTitle:   { fontSize: 20, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
-  successText:    { fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22 },
-});

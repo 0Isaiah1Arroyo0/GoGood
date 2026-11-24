@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type PurchasesPackage } from 'react-native-purchases';
 import { useSubscription } from '../context/subscription';
 import { TERMS_URL, PRIVACY_URL } from '../../constants/legal';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 const STORE = Platform.OS === 'android'
   ? { account: 'Google Play account', settings: 'Google Play subscription settings' }
@@ -17,15 +18,15 @@ const { height: SCREEN_H } = Dimensions.get('window');
 
 type CellVal = boolean | string;
 
-const FEATURES: { icon: string; name: string; free: CellVal; monthly: CellVal; annual: CellVal }[] = [
-  { icon: '📦', name: 'Inventory',        free: '10 items',   monthly: 'Unlimited', annual: 'Unlimited' },
-  { icon: '📷', name: 'Barcode scan',     free: false,         monthly: true,        annual: true        },
-  { icon: '🔔', name: 'Expiry alerts',    free: true,          monthly: true,        annual: true        },
-  { icon: '🤖', name: 'Good Bot AI',      free: false,         monthly: true,        annual: true        },
-  { icon: '📊', name: 'Food Report',      free: false,         monthly: true,        annual: true        },
-  { icon: '🏠', name: 'Household',        free: false,         monthly: true,        annual: true        },
-  { icon: '📚', name: 'Collections',      free: false,         monthly: true,        annual: true        },
-  { icon: '🧾', name: 'Receipt scan',     free: false,         monthly: false,       annual: true        },
+const FEATURES: { icon: keyof typeof Ionicons.glyphMap; name: string; free: CellVal; monthly: CellVal; annual: CellVal }[] = [
+  { icon: 'nutrition-outline', name: 'Inventory',        free: '10 items',   monthly: 'Unlimited', annual: 'Unlimited' },
+  { icon: 'barcode-outline', name: 'Barcode scan',     free: false,         monthly: true,        annual: true        },
+  { icon: 'notifications-outline', name: 'Expiry alerts',    free: true,          monthly: true,        annual: true        },
+  { icon: 'sparkles-outline', name: 'Good Bot AI',      free: false,         monthly: true,        annual: true        },
+  { icon: 'stats-chart-outline', name: 'Food Report',      free: false,         monthly: true,        annual: true        },
+  { icon: 'home-outline', name: 'Household',        free: false,         monthly: true,        annual: true        },
+  { icon: 'book-outline', name: 'Collections',      free: false,         monthly: true,        annual: true        },
+  { icon: 'receipt-outline', name: 'Receipt scan',     free: false,         monthly: false,       annual: true        },
 ];
 
 function Cell({ val, col }: { val: CellVal; col: 'free' | 'monthly' | 'annual' }) {
@@ -284,7 +285,7 @@ export default function PaywallModal() {
             {FEATURES.map((f, i) => (
               <View key={f.name} style={[styles.row, i % 2 === 0 && styles.rowAlt]}>
                 <View style={styles.featureCol}>
-                  <Text style={styles.rowIcon}>{f.icon}</Text>
+                  <Ionicons name={f.icon} size={15} color="rgba(255,255,255,0.75)" />
                   <Text style={styles.rowName}>{f.name}</Text>
                 </View>
                 <View style={styles.planCol}><Cell val={f.free}    col="free"    /></View>

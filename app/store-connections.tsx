@@ -12,6 +12,7 @@ import { useTheme } from './context/theme';
 import { useAuth } from './context/auth';
 import { useSubscription } from './context/subscription';
 import { supabase } from './lib/supabase';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -105,7 +106,7 @@ export default function StoreConnectionsScreen() {
       });
       const data = await res.json();
       if (data.ok) {
-        Alert.alert('Kroger connected! 🛒', 'Your Kroger account is linked. Tap "Sync Purchases" to import recent items.');
+        Alert.alert('Kroger connected', 'Your Kroger account is linked. Tap "Sync Purchases" to import recent items.');
         loadConnections();
       } else {
         Alert.alert('Connection failed', data.error ?? 'Could not connect Kroger account.');
@@ -174,7 +175,7 @@ export default function StoreConnectionsScreen() {
 
           {/* Receipt scan tip */}
           <View style={[styles.tipCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={{ fontSize: 15 }}>🧾</Text>
+            <Ionicons name="receipt-outline" size={18} color={colors.textSub} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>Receipt scanning works for all stores</Text>
               <Text style={{ fontSize: 12, color: colors.textSub, marginTop: 2, lineHeight: 17 }}>
@@ -192,7 +193,9 @@ export default function StoreConnectionsScreen() {
             return (
               <View key={key} style={[styles.storeCard, { backgroundColor: colors.surface, borderColor: isConnected ? '#1D9E75' : colors.border }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <Text style={{ fontSize: 28 }}>{info.emoji}</Text>
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.chipText }}>{info.name.charAt(0)}</Text>
+                  </View>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{info.name}</Text>
@@ -216,7 +219,7 @@ export default function StoreConnectionsScreen() {
                         style={[styles.actionBtn, { backgroundColor: '#FFD166', flex: 1 }]}
                         onPress={showPaywall}
                       >
-                        <Text style={{ color: '#085041', fontWeight: '800', fontSize: 13 }}>⭐ Annual Plan Required</Text>
+                        <Text style={{ color: '#085041', fontWeight: '800', fontSize: 13 }}>Annual plan required</Text>
                       </TouchableOpacity>
                     ) : isConnected ? (
                       <>
@@ -227,7 +230,7 @@ export default function StoreConnectionsScreen() {
                         >
                           {syncing
                             ? <ActivityIndicator color="white" size="small" />
-                            : <Text style={{ color: 'white', fontWeight: '700', fontSize: 13 }}>🔄 Sync Purchases</Text>
+                            : <Text style={{ color: 'white', fontWeight: '700', fontSize: 13 }}>Sync purchases</Text>
                           }
                         </TouchableOpacity>
                         <TouchableOpacity

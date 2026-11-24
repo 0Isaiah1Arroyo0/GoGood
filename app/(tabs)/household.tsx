@@ -2,9 +2,11 @@ import EdgeFade from '@/components/edge-fade';
 import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Modal, Animated, Easing,
-  KeyboardAvoidingView, Platform,
+  TextInput, Alert, ActivityIndicator, Animated, Easing,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import BottomSheet from '@/components/bottom-sheet';
+import { raised, raisedGreen } from '@/components/raised';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -54,52 +56,6 @@ function ScaleBtn({ style, onPress, disabled, children }: {
   );
 }
 
-// ── Slide-up sheet ─────────────────────────────────────────────────────────────
-
-function SlideSheet({ visible, onClose, children, colors }: {
-  visible: boolean; onClose: () => void; children: React.ReactNode; colors: any;
-}) {
-  const slideAnim = useRef(new Animated.Value(600)).current;
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      slideAnim.setValue(600); fadeAnim.setValue(0);
-      Animated.parallel([
-        Animated.timing(fadeAnim,  { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.spring(slideAnim, { toValue: 0, damping: 36, stiffness: 130, useNativeDriver: true }),
-      ]).start();
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(fadeAnim,  { toValue: 0, duration: 240, useNativeDriver: true }),
-        Animated.timing(slideAnim, { toValue: 600, duration: 260, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
-    }
-  }, [visible]);
-
-  if (!mounted) return null;
-  return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: fadeAnim }]} />
-          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
-          <Animated.View style={{
-            backgroundColor: colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-            padding: 20, paddingBottom: 40, maxHeight: '90%',
-            transform: [{ translateY: slideAnim }],
-          }}>
-            <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999, alignSelf: 'center', marginBottom: 16 }} />
-            {children}
-          </Animated.View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 // ── Lava lamp hero card ────────────────────────────────────────────────────────
 
 function LavaLampHeroCard({ colors, isDark, children }: {
@@ -116,6 +72,7 @@ function LavaLampHeroCard({ colors, isDark, children }: {
   const b4x = useRef(new Animated.Value(0)).current;
   const b4y = useRef(new Animated.Value(0)).current;
   const b4s = useRef(new Animated.Value(1)).current;
+  const tint = isDark ? 'rgba(79,120,97,' : 'rgba(35,179,133,';
 
   useEffect(() => {
     const ease = Easing.inOut(Easing.sin);
@@ -142,11 +99,12 @@ function LavaLampHeroCard({ colors, isDark, children }: {
   }, []);
 
   return (
-    <View style={[styles.heroCard, { backgroundColor: colors.btnPrimary, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOpacity: isDark ? 0.28 : 0.55 }]}>
-      <Animated.View style={[styles.blob1, { transform: [{ translateX: b1x }, { translateY: b1y }, { scale: b1s }] }]} />
-      <Animated.View style={[styles.blob2, { transform: [{ translateX: b2x }, { translateY: b2y }, { scale: b2s }] }]} />
-      <Animated.View style={[styles.blob3, { transform: [{ translateX: b3x }, { translateY: b3y }] }]} />
-      <Animated.View style={[styles.blob4, { transform: [{ translateX: b4x }, { translateY: b4y }, { scale: b4s }] }]} />
+    // Soft green blobs drifting behind a raised card
+    <View style={[styles.heroCard, { backgroundColor: colors.surface }, raised(isDark, 'md')]}>
+      <Animated.View style={[styles.blob1, { backgroundColor: tint + '0.10)', transform: [{ translateX: b1x }, { translateY: b1y }, { scale: b1s }] }]} />
+      <Animated.View style={[styles.blob2, { backgroundColor: tint + '0.08)', transform: [{ translateX: b2x }, { translateY: b2y }, { scale: b2s }] }]} />
+      <Animated.View style={[styles.blob3, { backgroundColor: tint + '0.06)', transform: [{ translateX: b3x }, { translateY: b3y }] }]} />
+      <Animated.View style={[styles.blob4, { backgroundColor: tint + '0.05)', transform: [{ translateX: b4x }, { translateY: b4y }, { scale: b4s }] }]} />
       {children}
     </View>
   );
@@ -376,13 +334,18 @@ export default function HouseholdScreen() {
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
+  const card = [styles.card, { backgroundColor: colors.surface }, raised(isDark, 'md')];
+  const input = [styles.input, { color: colors.inputText, backgroundColor: colors.inputBg, borderColor: colors.inputBorder }];
+  const kb = isDark ? 'dark' as const : 'light' as const;
+  const link = isDark ? colors.tealLight : colors.brand;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <StatusBar style={colors.statusBar} backgroundColor={colors.bg} />
       <Animated.View style={{ flex: 1, opacity: screenFade, transform: [{ translateY: screenSlide }] }}>
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.bg, borderBottomColor: colors.border, paddingTop: insets.top + 12 }]}>
+      <View style={[styles.header, { backgroundColor: colors.bg, paddingTop: insets.top + 12 }]}>
         {menuBtn}
         <Text style={[styles.logo, { color: colors.brand }]}>
           house<Text style={{ color: colors.teal }}>hold</Text>
@@ -398,7 +361,8 @@ export default function HouseholdScreen() {
         <View style={{ flex: 1 }}>
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 12, paddingBottom: tabSpace + 24 }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 14, paddingBottom: tabSpace + 24 }}
         >
 
           {household ? (
@@ -407,66 +371,58 @@ export default function HouseholdScreen() {
               {/* Household header card */}
               <Animated.View style={{ transform: [{ scale: heroScale }] }}>
               <LavaLampHeroCard colors={colors} isDark={isDark}>
-                <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>YOUR HOUSEHOLD</Text>
-                <Text style={{ fontSize: 28, fontWeight: '700', color: 'white', marginBottom: 4 }}>{household.name}</Text>
-                <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>
-                  {members.length} member{members.length !== 1 ? 's' : ''} · inventory · recipes · shopping
+                <Text style={[styles.label, { color: colors.textSub }]}>Your household</Text>
+                <Text style={[styles.heroName, { color: colors.text }]}>{household.name}</Text>
+                <Text style={{ fontSize: 13, color: colors.textSub }}>
+                  {members.length} member{members.length !== 1 ? 's' : ''} sharing inventory, recipes and shopping
                 </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 14 }}>
-                  <TouchableOpacity
-                    style={{ backgroundColor: 'rgba(93,202,165,0.2)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
-                    onPress={() => router.push('/(tabs)/' as any)}
-                  >
-                    <Text style={{ fontSize: 12, color: '#5DCAA5', fontWeight: '600' }}>🥗 inventory</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ backgroundColor: 'rgba(93,202,165,0.2)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
-                    onPress={() => router.push('/(tabs)/collections' as any)}
-                  >
-                    <Text style={{ fontSize: 12, color: '#5DCAA5', fontWeight: '600' }}>📚 recipes</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ backgroundColor: 'rgba(93,202,165,0.2)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
-                    onPress={() => router.push('/(tabs)/shopping' as any)}
-                  >
-                    <Text style={{ fontSize: 12, color: '#5DCAA5', fontWeight: '600' }}>🛒 shopping</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
-                    onPress={() => { setRenameName(household.name); setEditVisible(true); }}
-                  >
-                    <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', fontWeight: '600' }}>⚙️ edit</Text>
-                  </TouchableOpacity>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
+                  {([
+                    { icon: 'nutrition-outline', label: 'Inventory', onPress: () => router.push('/(tabs)/' as any) },
+                    { icon: 'book-outline',      label: 'Recipes',   onPress: () => router.push('/(tabs)/collections' as any) },
+                    { icon: 'cart-outline',      label: 'Shopping',  onPress: () => router.push('/(tabs)/shopping' as any) },
+                    { icon: 'settings-outline',  label: 'Edit',      onPress: () => { setRenameName(household.name); setEditVisible(true); } },
+                  ] as const).map(l => (
+                    <TouchableOpacity
+                      key={l.label}
+                      style={[styles.chip, { backgroundColor: colors.surface }, raised(isDark)]}
+                      onPress={l.onPress}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name={l.icon} size={14} color={colors.textSub} />
+                      <Text style={[styles.chipText, { color: colors.text }]}>{l.label}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </LavaLampHeroCard>
               </Animated.View>
 
-              <Animated.View style={{ gap: 12, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
+              <Animated.View style={{ gap: 14, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
               {/* Members */}
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>Members</Text>
+              <View style={card}>
+                <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 6 }]}>Members</Text>
                 {members.map((m, i) => (
                   <View key={m.userId} style={{
                     flexDirection: 'row', alignItems: 'center', gap: 12,
-                    paddingVertical: 10,
-                    borderBottomWidth: i < members.length - 1 ? 0.5 : 0, borderBottomColor: colors.border,
+                    paddingVertical: 11,
+                    borderTopWidth: i > 0 ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.border,
                   }}>
-                    <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: m.role === 'owner' ? colors.btnPrimary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 16, fontWeight: '700', color: m.role === 'owner' ? 'white' : colors.textSub }}>
+                    <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: m.role === 'owner' ? colors.chipBg : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: m.role === 'owner' ? colors.chipText : colors.textSub }}>
                         {initials(m.email)}
                       </Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }} numberOfLines={1}>
                         {m.email}{m.userId === user?.id ? ' (you)' : ''}
                       </Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
-                        {m.role === 'owner' ? 'owner · ' : ''}{timeAgo(m.joinedAt)}
+                      <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                        {m.role === 'owner' ? 'Owner · ' : 'Joined '}{timeAgo(m.joinedAt)}
                       </Text>
                     </View>
                     {isOwner && m.userId !== user?.id && (
-                      <TouchableOpacity onPress={() => handleRemoveMember(m)} style={{ padding: 4 }}>
-                        <Text style={{ fontSize: 16 }}>✕</Text>
+                      <TouchableOpacity onPress={() => handleRemoveMember(m)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityLabel="Remove member">
+                        <Ionicons name="close" size={18} color={colors.textMuted} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -474,39 +430,41 @@ export default function HouseholdScreen() {
               </View>
 
               {/* Invite by email (any member can invite) */}
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={card}>
                 <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Invite someone</Text>
-                <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
-                  Enter their email — they'll get an invite code to paste in their Household tab.
+                <Text style={[styles.cardSub, { color: colors.textSub }]}>
+                  Enter their email. They'll get a code to paste on their Household screen.
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TextInput
-                    style={[styles.input, { flex: 1, color: colors.inputText, backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}
+                    style={[input, { flex: 1 }]}
                     value={inviteEmail}
                     onChangeText={setInviteEmail}
                     placeholder="email@example.com"
                     placeholderTextColor={colors.placeholder}
+                    keyboardAppearance={kb}
                     keyboardType="email-address"
                     autoCapitalize="none"
                     returnKeyType="send"
                     onSubmitEditing={handleInvite}
                   />
                   <ScaleBtn
-                    style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }]}
+                    style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }, raisedGreen(isDark, 'sm')]}
                     onPress={handleInvite}
                     disabled={inviting || !inviteEmail.trim()}
                   >
-                    {inviting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>invite</Text>}
+                    {inviting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Invite</Text>}
                   </ScaleBtn>
                 </View>
                 {sentToken && (
                   <TouchableOpacity
                     onPress={() => handleCopyToken(sentToken)}
-                    style={{ marginTop: 12, backgroundColor: 'rgba(29,158,117,0.1)', borderRadius: 10, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                    style={{ marginTop: 12, backgroundColor: colors.chipBg, borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                    activeOpacity={0.8}
                   >
-                    <Text style={{ fontSize: 18 }}>📋</Text>
+                    <Ionicons name="copy-outline" size={18} color={colors.chipText} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 11, color: colors.teal, fontWeight: '700', marginBottom: 2 }}>INVITE CODE — TAP TO COPY</Text>
+                      <Text style={{ fontSize: 12, color: colors.chipText, fontWeight: '700', marginBottom: 2 }}>Invite code · tap to copy</Text>
                       <Text style={{ fontSize: 12, color: colors.text, fontFamily: 'monospace' }} numberOfLines={1}>{sentToken}</Text>
                     </View>
                   </TouchableOpacity>
@@ -515,27 +473,28 @@ export default function HouseholdScreen() {
 
               {/* Pending invites (show to all members) */}
               {invites.length > 0 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 12 }]}>Pending invites</Text>
+                <View style={card}>
+                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 6 }]}>Pending invites</Text>
                   {invites.map((inv, i) => (
                     <View key={inv.id} style={{
                       flexDirection: 'row', alignItems: 'center', gap: 12,
-                      paddingVertical: 10,
-                      borderBottomWidth: i < invites.length - 1 ? 0.5 : 0, borderBottomColor: colors.border,
+                      paddingVertical: 11,
+                      borderTopWidth: i > 0 ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.border,
                     }}>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 13, color: colors.text }}>{inv.invitedEmail}</Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>sent {timeAgo(inv.createdAt)}</Text>
+                        <Text style={{ fontSize: 14, color: colors.text }} numberOfLines={1}>{inv.invitedEmail}</Text>
+                        <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>Sent {timeAgo(inv.createdAt)}</Text>
                       </View>
                       <TouchableOpacity
                         onPress={() => handleCopyToken(inv.token)}
-                        style={{ backgroundColor: colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}
+                        style={[styles.chip, { backgroundColor: colors.surface }, raised(isDark)]}
+                        activeOpacity={0.8}
                       >
-                        <Text style={{ fontSize: 11, color: colors.textSub, fontWeight: '600' }}>copy code</Text>
+                        <Text style={[styles.chipText, { color: colors.text }]}>Copy code</Text>
                       </TouchableOpacity>
                       {isOwner && (
-                        <TouchableOpacity onPress={() => handleCancelInvite(inv)} style={{ padding: 4 }}>
-                          <Text style={{ fontSize: 15 }}>✕</Text>
+                        <TouchableOpacity onPress={() => handleCancelInvite(inv)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityLabel="Cancel invite">
+                          <Ionicons name="close" size={18} color={colors.textMuted} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -545,24 +504,21 @@ export default function HouseholdScreen() {
 
               {/* Free joiner nudge — shown after 3 days */}
               {showNudge && (
-                <View style={[styles.nudgeCard, { backgroundColor: isDark ? colors.surface : '#0A6650', shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOpacity: isDark ? 0.22 : 0.45 }]}>
-                  <View style={styles.nudgeCircle1} />
-                  <View style={styles.nudgeCircle2} />
-                  <Text style={{ fontSize: 22, marginBottom: 10 }}>✨</Text>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: 'white', marginBottom: 6 }}>
+                <View style={card}>
+                  <View style={[styles.iconCircle, { backgroundColor: colors.chipBg, marginBottom: 12 }]}>
+                    <Ionicons name="sparkles-outline" size={20} color={colors.chipText} />
+                  </View>
+                  <Text style={[styles.cardHeading, { color: colors.text, fontSize: 16, marginBottom: 6 }]}>
                     Loving the shared inventory?
                   </Text>
-                  <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 19, marginBottom: 16 }}>
-                    You've been sharing with your household for {joinedDays} day{joinedDays !== 1 ? 's' : ''}. Unlock Good Bot, Food Reports, unlimited items, and more.
+                  <Text style={[styles.cardSub, { color: colors.textSub, lineHeight: 19, marginBottom: 16 }]}>
+                    You've been sharing with your household for {joinedDays} day{joinedDays !== 1 ? 's' : ''}. Unlock Good Bot, Food Reports, unlimited items and more.
                   </Text>
-                  <TouchableOpacity
-                    style={{ backgroundColor: '#5DCAA5', borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginBottom: 10 }}
-                    onPress={showPaywall}
-                  >
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: colors.teal }}>Go Premium →</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 4 }} onPress={dismissNudge}>
-                    <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>maybe later</Text>
+                  <ScaleBtn style={[styles.btn, { backgroundColor: colors.btnPrimary }, raisedGreen(isDark)]} onPress={showPaywall}>
+                    <Text style={styles.btnText}>Go Premium</Text>
+                  </ScaleBtn>
+                  <TouchableOpacity style={{ alignItems: 'center', paddingTop: 12 }} onPress={dismissNudge}>
+                    <Text style={{ fontSize: 13, color: colors.textSub, fontWeight: '600' }}>Maybe later</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -572,97 +528,106 @@ export default function HouseholdScreen() {
           ) : (
             /* ── Not in a household ── */
             <>
-              {/* Illustration */}
+              {/* Intro */}
               <Animated.View style={{ transform: [{ scale: heroScale }] }}>
-              <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-                <Text style={{ fontSize: 56 }}>🏠</Text>
-                <Text style={{ fontSize: 20, fontWeight: '700', color: colors.teal, marginTop: 12 }}>Household sharing</Text>
-                <Text style={{ fontSize: 13, color: colors.textSub, textAlign: 'center', marginTop: 6, lineHeight: 20, maxWidth: 280 }}>
-                  Share your inventory with family or roommates. See and edit the same list in real time.
+              <View style={{ alignItems: 'center', paddingTop: 16, paddingBottom: 8 }}>
+                <View style={[styles.iconCircle, { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.chipBg }]}>
+                  <Ionicons name="home-outline" size={32} color={colors.chipText} />
+                </View>
+                <Text style={[styles.introTitle, { color: colors.text }]}>Household sharing</Text>
+                <Text style={{ fontSize: 14, color: colors.textSub, textAlign: 'center', marginTop: 8, lineHeight: 21, maxWidth: 300 }}>
+                  Share your inventory with family or roommates. Everyone sees and edits the same list in real time.
                 </Text>
               </View>
               </Animated.View>
 
-              <Animated.View style={{ gap: 12, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
+              <Animated.View style={{ gap: 14, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
               {/* Pending invites for this email */}
               {pendingForMe.length > 0 && (
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.teal, borderWidth: 1.5 }]}>
-                  <Text style={[styles.cardHeading, { color: colors.teal, marginBottom: 12 }]}>🎉 You have an invite!</Text>
+                <View style={[card, { borderColor: colors.teal, borderWidth: 1.5 }]}>
+                  <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 10 }]}>You have an invite</Text>
                   {pendingForMe.map(inv => (
-                    <View key={inv.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <View>
-                        <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{inv.householdName}</Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>invited {timeAgo(inv.createdAt)}</Text>
+                    <View key={inv.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.text }}>{inv.householdName}</Text>
+                        <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>Invited {timeAgo(inv.createdAt)}</Text>
                       </View>
-                      <TouchableOpacity
-                        style={[styles.btn, { backgroundColor: colors.btnPrimary }]}
+                      <ScaleBtn
+                        style={[styles.btn, { backgroundColor: colors.btnPrimary }, raisedGreen(isDark, 'sm')]}
                         onPress={() => handleAcceptPending(inv)}
                       >
-                        <Text style={styles.btnText}>join →</Text>
-                      </TouchableOpacity>
+                        <Text style={styles.btnText}>Join</Text>
+                      </ScaleBtn>
                     </View>
                   ))}
                 </View>
               )}
 
               {/* Create a household */}
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={card}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <Text style={[styles.cardHeading, { color: colors.text }]}>Create a household</Text>
                   {!isPremium && (
-                    <View style={{ backgroundColor: '#FFD166', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#085041', letterSpacing: 0.4 }}>PREMIUM</Text>
+                    <View style={{ backgroundColor: colors.chipBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.chipText }}>Premium</Text>
                     </View>
                   )}
                 </View>
-                <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
-                  {isPremium ? 'Start a shared list and invite others to join.' : 'Start a shared list and invite your household. Free to join for members.'}
+                <Text style={[styles.cardSub, { color: colors.textSub }]}>
+                  {isPremium ? 'Start a shared list and invite others to join.' : 'Start a shared list and invite your household. Joining is free for members.'}
                 </Text>
                 <TextInput
-                  style={[styles.input, { color: colors.inputText, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, marginBottom: 10 }]}
+                  style={[input, { marginBottom: 12 }]}
                   value={createName}
                   onChangeText={setCreateName}
-                  placeholder="Household name (e.g. The Johnsons)"
+                  placeholder="Household name, e.g. The Johnsons"
                   placeholderTextColor={colors.placeholder}
+                  keyboardAppearance={kb}
                   returnKeyType="done"
                   onSubmitEditing={handleCreate}
                 />
                 <ScaleBtn
-                  style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: creating || !createName.trim() ? 0.5 : 1 }]}
+                  style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: creating || !createName.trim() ? 0.5 : 1 }, raisedGreen(isDark)]}
                   onPress={handleCreate}
                   disabled={creating || !createName.trim()}
                 >
                   {creating
                     ? <ActivityIndicator color="white" size="small" />
-                    : <Text style={styles.btnText}>{isPremium ? 'create household →' : '🔒 create household'}</Text>}
+                    : (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {!isPremium && <Ionicons name="lock-closed" size={14} color="white" />}
+                        <Text style={styles.btnText}>Create household</Text>
+                      </View>
+                    )}
                 </ScaleBtn>
               </View>
 
               {/* Join with invite code */}
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={card}>
                 <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Join with an invite code</Text>
-                <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
+                <Text style={[styles.cardSub, { color: colors.textSub }]}>
                   Got a code from a household member? Paste it below.
                 </Text>
                 <TextInput
-                  style={[styles.input, { color: colors.inputText, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, marginBottom: 10, fontFamily: 'monospace' }]}
+                  style={[input, { marginBottom: 12, fontFamily: 'monospace' }]}
                   value={joinCode}
                   onChangeText={setJoinCode}
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                   placeholderTextColor={colors.placeholder}
+                  keyboardAppearance={kb}
                   autoCapitalize="none"
                   autoCorrect={false}
                   returnKeyType="done"
                   onSubmitEditing={handleJoin}
                 />
                 <ScaleBtn
-                  style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: joining || !joinCode.trim() ? 0.5 : 1 }]}
+                  style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: joining || !joinCode.trim() ? 0.5 : 1 }, raisedGreen(isDark)]}
                   onPress={handleJoin}
                   disabled={joining || !joinCode.trim()}
                 >
                   {joining
                     ? <ActivityIndicator color="white" size="small" />
-                    : <Text style={styles.btnText}>join household →</Text>}
+                    : <Text style={styles.btnText}>Join household</Text>}
                 </ScaleBtn>
               </View>
               </Animated.View>
@@ -674,66 +639,63 @@ export default function HouseholdScreen() {
         </View>
       )}
 
-      {/* Edit household sheet */}
-      <SlideSheet visible={editVisible} onClose={() => setEditVisible(false)} colors={colors}>
-        <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 }}>
-          Edit household
-        </Text>
+      {/* Edit household (same sheet as the rest of the app) */}
+      <BottomSheet visible={editVisible} onClose={() => setEditVisible(false)}>
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>Edit household</Text>
         {isOwner ? (
           <>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
-              All members will see the new name.
-            </Text>
+            <Text style={[styles.label, { color: colors.textSub }]}>Name</Text>
             <TextInput
-              style={[styles.input, { color: colors.inputText, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, marginBottom: 16 }]}
+              style={[input, { marginBottom: 6 }]}
               value={renameName}
               onChangeText={setRenameName}
               placeholder="Household name"
               placeholderTextColor={colors.placeholder}
-              autoFocus
+              keyboardAppearance={kb}
               returnKeyType="done"
               onSubmitEditing={handleRename}
             />
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>All members will see the new name.</Text>
             <ScaleBtn
-              style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: !renameName.trim() ? 0.5 : 1, marginBottom: 24 }]}
+              style={[styles.btn, { backgroundColor: colors.btnPrimary, opacity: !renameName.trim() ? 0.5 : 1, marginBottom: 20 }, raisedGreen(isDark)]}
               onPress={async () => { await handleRename(); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }}
               disabled={!renameName.trim()}
             >
-              <Text style={styles.btnText}>save name →</Text>
+              <Text style={styles.btnText}>Save name</Text>
             </ScaleBtn>
-            <View style={{ height: 0.5, backgroundColor: colors.border, marginBottom: 16 }} />
             <TouchableOpacity
-              style={[styles.dangerBtn, { borderColor: '#E8756A' }]}
-              onPress={() => { setEditVisible(false); setTimeout(handleDelete, 300); }}
+              style={[styles.dangerBtn, { backgroundColor: colors.surface }, raised(isDark, 'md')]}
+              onPress={() => { setEditVisible(false); setTimeout(handleDelete, 350); }}
+              activeOpacity={0.8}
             >
-              <Text style={{ fontSize: 14 }}>🗑️</Text>
-              <Text style={[styles.dangerText, { color: '#E8756A' }]}>Delete household</Text>
+              <Ionicons name="trash-outline" size={18} color={DANGER} />
+              <Text style={[styles.dangerText, { color: DANGER }]}>Delete household</Text>
             </TouchableOpacity>
           </>
         ) : (
           <>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 24 }}>
-              You're a member of this household. Leaving will remove your access to the shared inventory, recipes, and shopping list.
+            <Text style={{ fontSize: 14, color: colors.textSub, lineHeight: 21, marginBottom: 20 }}>
+              You're a member of this household. Leaving removes your access to the shared inventory, recipes and shopping list.
             </Text>
             <TouchableOpacity
-              style={[styles.dangerBtn, { borderColor: '#E8756A' }]}
-              onPress={() => { setEditVisible(false); setTimeout(handleLeave, 300); }}
+              style={[styles.dangerBtn, { backgroundColor: colors.surface }, raised(isDark, 'md')]}
+              onPress={() => { setEditVisible(false); setTimeout(handleLeave, 350); }}
+              activeOpacity={0.8}
             >
-              <Text style={{ fontSize: 14 }}>🚪</Text>
-              <Text style={[styles.dangerText, { color: '#E8756A' }]}>Leave household</Text>
+              <Ionicons name="exit-outline" size={18} color={DANGER} />
+              <Text style={[styles.dangerText, { color: DANGER }]}>Leave household</Text>
             </TouchableOpacity>
           </>
         )}
-        <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 12, marginTop: 8 }} onPress={() => setEditVisible(false)}>
-          <Text style={{ fontSize: 13, color: colors.textMuted }}>cancel</Text>
-        </TouchableOpacity>
-      </SlideSheet>
+      </BottomSheet>
 
       {drawerEl}
       </Animated.View>
     </View>
   );
 }
+
+const DANGER = '#E0574A';
 
 const styles = StyleSheet.create({
   header: {
@@ -743,31 +705,28 @@ const styles = StyleSheet.create({
   },
   logo: { fontSize: 28, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold' },
 
-  heroCard: {
-    borderRadius: 20, padding: 20,
-    shadowOffset: { width: 0, height: 10 }, shadowRadius: 24, elevation: 12,
-    overflow: 'hidden',
-  },
-  blob1: { position: 'absolute', width: 160, height: 160, borderRadius: 80,  backgroundColor: 'rgba(93,202,165,0.15)', top: -50,  right: -40 },
-  blob2: { position: 'absolute', width: 130, height: 130, borderRadius: 65,  backgroundColor: 'rgba(93,202,165,0.10)', bottom: -35, left: -35 },
-  blob3: { position: 'absolute', width: 80,  height: 80,  borderRadius: 40,  backgroundColor: 'rgba(255,255,255,0.08)', top: 10,   left: -10 },
-  blob4: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.04)', bottom: -80, right: -60 },
+  heroCard: { borderRadius: 20, padding: 20, overflow: 'hidden' },
+  heroName: { fontSize: 26, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold', marginBottom: 4 },
+  blob1: { position: 'absolute', width: 160, height: 160, borderRadius: 80,  top: -50,  right: -40 },
+  blob2: { position: 'absolute', width: 130, height: 130, borderRadius: 65,  bottom: -35, left: -35 },
+  blob3: { position: 'absolute', width: 80,  height: 80,  borderRadius: 40,  top: 10,   left: -10 },
+  blob4: { position: 'absolute', width: 200, height: 200, borderRadius: 100, bottom: -80, right: -60 },
 
-  card: { borderRadius: 16, borderWidth: 0.5, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
-  cardHeading: { fontSize: 15, fontWeight: '600' },
+  label:       { fontSize: 12, fontWeight: '600', marginBottom: 6 },
+  card:        { borderRadius: 16, padding: 16 },
+  cardHeading: { fontSize: 15, fontWeight: '700' },
+  cardSub:     { fontSize: 13, marginBottom: 12 },
+  introTitle:  { fontSize: 22, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold', marginTop: 14 },
+  sheetTitle:  { fontSize: 18, fontWeight: '700', fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 },
+  iconCircle:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14 },
-  btn:   { borderRadius: 14, paddingVertical: 13, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', minHeight: 46 },
-  btnText: { color: 'white', fontWeight: '700', fontSize: 14 },
+  chip:     { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  chipText: { fontSize: 13, fontWeight: '600' },
 
-  dangerBtn:  { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 14, padding: 14 },
-  dangerText: { fontSize: 14, fontWeight: '600' },
+  input:   { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  btn:     { borderRadius: 14, paddingVertical: 13, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', minHeight: 48 },
+  btnText: { color: 'white', fontWeight: '700', fontSize: 15 },
 
-  nudgeCard: {
-    borderRadius: 20, padding: 20,
-    shadowOffset: { width: 0, height: 10 }, shadowRadius: 20, elevation: 10,
-    overflow: 'hidden',
-  },
-  nudgeCircle1: { position: 'absolute', width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(93,202,165,0.1)', top: -50, right: -50 },
-  nudgeCircle2: { position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.04)', bottom: -30, left: -30 },
+  dangerBtn:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, padding: 14 },
+  dangerText: { fontSize: 15, fontWeight: '600' },
 });

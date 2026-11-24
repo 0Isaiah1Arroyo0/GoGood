@@ -10,6 +10,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import RecipeView, { parseRecipe } from '@/components/recipe-view';
 import { useAppDrawer } from '../components/AppDrawer';
 import HeaderAddButton from '@/components/header-add-button';
 import EdgeFade from '@/components/edge-fade';
@@ -33,10 +35,11 @@ import {
 } from '../lib/collections-sync';
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
 import { raised, raisedGreen } from '@/components/raised';
+import FoodIcon from '@/components/food-icon';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const EMOJIS = ['🍳','🥗','🍝','🥘','🍲','🥩','🐟','🥦','🍜','🌮','🍱','🫕','🥐','🌯','🍛','🍣'];
+const EMOJIS = ['🍳','🥗','🍝','🥘','🥩','🍗','🐟','🥕','🌮','🍚','🍕','🥐','🍎','🧁','🍦','☕']; // shown as line icons
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -232,16 +235,16 @@ function CookItSheet({ visible, onClose, onConfirm, colors }: {
 
           <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 10 }}>
             <Text style={{ fontSize: 18, fontWeight: '700', color: colors.brand, fontFamily: 'Fraunces_600SemiBold' }}>
-              🍳 What did you use?
+              What did you use?
             </Text>
             <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>
-              Check items you used — they'll be marked gone good 🌱
+              Check the items you used. They'll be marked as gone good.
             </Text>
           </View>
 
           {items.length === 0 ? (
             <View style={{ alignItems: 'center', padding: 36, gap: 10 }}>
-              <Text style={{ fontSize: 36 }}>🛒</Text>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="cart-outline" size={28} color={colors.chipText} /></View>
               <Text style={{ fontSize: 14, color: colors.textSub, textAlign: 'center', lineHeight: 20 }}>
                 Your inventory is empty.{'\n'}Add items on the Home tab first.
               </Text>
@@ -270,7 +273,7 @@ function CookItSheet({ visible, onClose, onConfirm, colors }: {
                     }}>
                       {checked && <Text style={{ fontSize: 12, color: 'white', fontWeight: '800', lineHeight: 16 }}>✓</Text>}
                     </View>
-                    <Text style={{ fontSize: 20 }}>{item.icon || '🥘'}</Text>
+                    <FoodIcon emoji={item.icon} size={34} />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>
                         {item.baseName || item.name || 'Item'}
@@ -299,7 +302,7 @@ function CookItSheet({ visible, onClose, onConfirm, colors }: {
                 ? <ActivityIndicator color="white" />
                 : <Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>
                     {selected.size > 0
-                      ? `✓ Mark ${selected.size} item${selected.size !== 1 ? 's' : ''} gone good`
+                      ? `Mark ${selected.size} item${selected.size !== 1 ? 's' : ''} gone good`
                       : 'Done — nothing used from inventory'}
                   </Text>
               }
@@ -374,7 +377,7 @@ function MoveSheet({ visible, onClose, collections, currentId, onMove, onCreateC
                 disabled={isCurrent}
                 activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 24 }}>{col.emoji}</Text>
+                <FoodIcon emoji={col.emoji} size={36} />
                 <Text style={{ flex: 1, fontSize: 15, fontWeight: isCurrent ? '700' : '500', color: isCurrent ? colors.teal : colors.text }}>
                   {col.name}
                 </Text>
@@ -417,6 +420,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
   colors: ThemeColors;
 }) {
   const insets          = useSafeAreaInsets();
+  const { isDark }      = useTheme();
   const fadeAnim        = useRef(new Animated.Value(0)).current;
   const slideAnim       = useRef(new Animated.Value(24)).current;
   const heroScale       = useRef(new Animated.Value(0.94)).current;
@@ -465,6 +469,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
 
   const scaleFactor   = baseServings > 0 ? targetServings / baseServings : 1;
   const scaledContent = scaleContent(recipe.content, scaleFactor);
+  const parsed = parseRecipe(scaledContent);
   const m             = recipe.recipeMacros;
   const scaledMacros  = m && Math.abs(scaleFactor - 1) > 0.05 ? {
     ...m,
@@ -499,17 +504,17 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
         <View style={{
           flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16,
           paddingTop: insets.top + 12, paddingBottom: 12,
-          backgroundColor: colors.bg, borderBottomWidth: 0.5, borderBottomColor: colors.border,
+          backgroundColor: colors.bg,
         }}>
           <TouchableOpacity
             onPress={onClose}
-            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 0.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }}
+            style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' }, raised(isDark)]}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={{ fontSize: 20, color: colors.brand, lineHeight: 24 }}>‹</Text>
+            <Ionicons name="chevron-back" size={20} color={colors.text} />
           </TouchableOpacity>
           <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 8 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: colors.brand, fontFamily: 'Fraunces_600SemiBold' }} numberOfLines={1}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, fontFamily: 'Fraunces_600SemiBold' }} numberOfLines={1}>
               {recipe.name}
             </Text>
           </View>
@@ -523,7 +528,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
             }
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={{ fontSize: 20 }}>🗑</Text>
+            <Ionicons name="trash-outline" size={20} color={colors.textSub} />
           </TouchableOpacity>
         </View>
         </Animated.View>
@@ -541,7 +546,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
               <Text style={{ fontSize: 11, color: colors.textMuted }}>Saved {timeAgo(recipe.savedAt)}</Text>
               {recipe.cookedCount ? (
                 <Text style={{ fontSize: 11, color: colors.teal, fontWeight: '600' }}>
-                  🍳 cooked {recipe.cookedCount}×{recipe.lastCooked ? ` · last ${timeAgo(recipe.lastCooked)}` : ''}
+                  Cooked {recipe.cookedCount}×{recipe.lastCooked ? ` · last ${timeAgo(recipe.lastCooked)}` : ''}
                 </Text>
               ) : null}
             </View>
@@ -560,24 +565,25 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
                 onPress={onCookRequest}
                 style={{
                   flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  backgroundColor: colors.btnPrimary, borderRadius: 12, paddingVertical: 10,
+                  backgroundColor: colors.btnPrimary, borderRadius: 12, paddingVertical: 11,
+                  ...raisedGreen(isDark, 'sm'),
                 }}
                 activeOpacity={0.85}
               >
-                <Text style={{ fontSize: 15 }}>🍳</Text>
+                <Ionicons name="flame-outline" size={16} color="white" />
                 <Text style={{ color: 'white', fontWeight: '700', fontSize: 13 }}>Cook this</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={onMoveRequest}
                 style={{
                   flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  backgroundColor: colors.surface, borderRadius: 12, paddingVertical: 10,
-                  borderWidth: 0.5, borderColor: colors.border,
+                  backgroundColor: colors.surface, borderRadius: 12, paddingVertical: 11,
+                  ...raised(isDark),
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={{ fontSize: 15 }}>📁</Text>
-                <Text style={{ color: colors.textSub, fontWeight: '600', fontSize: 13 }}>Move to…</Text>
+                <Ionicons name="folder-outline" size={16} color={colors.textSub} />
+                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>Move to…</Text>
               </TouchableOpacity>
             </View>
             {householdId && !recipe.sharedBy && (
@@ -586,12 +592,12 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
                 style={{
                   flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
                   borderRadius: 12, paddingVertical: 10,
-                  backgroundColor: recipe.sharedWithHousehold ? 'rgba(29,158,117,0.1)' : colors.surface,
-                  borderWidth: 0.5, borderColor: recipe.sharedWithHousehold ? colors.teal : colors.border,
+                  backgroundColor: recipe.sharedWithHousehold ? colors.chipBg : colors.surface,
+                  ...raised(isDark),
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={{ fontSize: 15 }}>{recipe.sharedWithHousehold ? '🏠' : '🔗'}</Text>
+                <Ionicons name={recipe.sharedWithHousehold ? 'home' : 'people-outline'} size={16} color={recipe.sharedWithHousehold ? colors.chipText : colors.textSub} />
                 <Text style={{ color: recipe.sharedWithHousehold ? colors.teal : colors.textSub, fontWeight: '600', fontSize: 13 }}>
                   {recipe.sharedWithHousehold ? 'Shared with household' : 'Share with household'}
                 </Text>
@@ -603,8 +609,8 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
           {scaledMacros && (
             <View style={{
               flexDirection: 'row', marginBottom: 14,
-              backgroundColor: colors.surface, borderRadius: 14, borderWidth: 0.5,
-              borderColor: colors.border, padding: 12,
+              backgroundColor: colors.surface, borderRadius: 14, padding: 12,
+              ...raised(isDark, 'md'),
             }}>
               {[
                 { label: 'PROTEIN', val: scaledMacros.protein + 'g', color: colors.teal },
@@ -624,7 +630,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
           )}
 
           {/* Serving scaler */}
-          <View style={{ marginBottom: 16, padding: 12, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 0.5, borderColor: colors.border }}>
+          <View style={{ marginBottom: 20, padding: 12, backgroundColor: colors.surface, borderRadius: 14, ...raised(isDark, 'md') }}>
             <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSub, letterSpacing: 1, marginBottom: 10 }}>
               SERVINGS
               {Math.abs(scaleFactor - 1) > 0.05
@@ -652,29 +658,33 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
             </View>
             {Math.abs(scaleFactor - 1) > 0.05 && (
               <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 8 }}>
-                ℹ️ Ingredient amounts are scaled. Some rounding may apply.
+                Ingredient amounts are scaled. Some rounding may apply.
               </Text>
             )}
           </View>
 
-          {/* Recipe body */}
-          <Markdown
-            text={scaledContent}
-            style={{ fontSize: 14, color: colors.text, lineHeight: 22, fontFamily: 'Fraunces_400Regular' }}
-            boldStyle={{ fontWeight: '700', color: colors.text, fontFamily: 'Fraunces_600SemiBold' }}
-          />
+          {/* Recipe body: structured when it reads as a recipe, plain text otherwise */}
+          {parsed ? (
+            <RecipeView key={targetServings} recipe={parsed} />
+          ) : (
+            <Markdown
+              text={scaledContent}
+              style={{ fontSize: 14, color: colors.text, lineHeight: 22, fontFamily: 'Fraunces_400Regular' }}
+              boldStyle={{ fontWeight: '700', color: colors.text, fontFamily: 'Fraunces_600SemiBold' }}
+            />
+          )}
 
           {/* Notes section */}
-          <View style={{ marginTop: 20, padding: 14, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 0.5, borderColor: colors.border }}>
+          <View style={{ marginTop: 24, padding: 14, backgroundColor: colors.surface, borderRadius: 14, ...raised(isDark, 'md') }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSub, letterSpacing: 0.8 }}>📝 MY NOTES</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text, fontFamily: 'Fraunces_600SemiBold' }}>My notes</Text>
               {!editingNotes && (
                 <TouchableOpacity onPress={() => {
                   setEditingNotes(true);
                   setTimeout(() => notesRef.current?.focus(), 80);
                 }}>
                   <Text style={{ fontSize: 12, color: colors.teal, fontWeight: '600' }}>
-                    {recipe.notes ? 'edit' : '+ add'}
+                    {recipe.notes ? 'Edit' : '+ Add'}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -753,7 +763,7 @@ function CollectionModal({ visible, onClose, onSave, renaming, colors }: {
 
             {!renaming && (
               <>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSub, letterSpacing: 1, marginBottom: 10 }}>PICK AN EMOJI</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSub, letterSpacing: 1, marginBottom: 10 }}>PICK AN ICON</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
                   {EMOJIS.map(e => (
                     <TouchableOpacity
@@ -765,7 +775,7 @@ function CollectionModal({ visible, onClose, onSave, renaming, colors }: {
                         borderColor: emoji === e ? colors.teal : colors.border,
                       }}
                     >
-                      <Text style={{ fontSize: 22 }}>{e}</Text>
+                      <FoodIcon emoji={e} size={24} bare color={emoji === e ? colors.chipText : colors.textSub} />
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -970,7 +980,7 @@ export default function CollectionsScreen() {
       const ok = await shareRecipeWithHousehold(selectedRecipe.id, user.id, householdId);
       if (ok) {
         await handleUpdateRecipe({ ...selectedRecipe, sharedWithHousehold: true });
-        Alert.alert('Shared! 🏠', 'Your household can now see this recipe.');
+        Alert.alert('Shared', 'Your household can now see this recipe.');
       }
     }
   };
@@ -980,7 +990,7 @@ export default function CollectionsScreen() {
     const dest = collections.find(c => c.id === collectionId);
     await handleUpdateRecipe({ ...selectedRecipe, collectionId });
     setMoveVisible(false);
-    Alert.alert('Moved! 📁', `Recipe moved to ${dest?.name ?? 'Uncategorized'}.`);
+    Alert.alert('Moved', `Recipe moved to ${dest?.name ?? 'Uncategorized'}.`);
   };
 
   const saveDishToFridge = async (name: string, days: number, servings: number, macros?: SavedRecipe['recipeMacros']) => {
@@ -1111,7 +1121,7 @@ export default function CollectionsScreen() {
           <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 36, paddingHorizontal: 20 }}>
             <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999, alignSelf: 'center', marginVertical: 12 }} />
             <Text style={{ fontSize: 17, fontWeight: '700', color: colors.brand, marginBottom: 4, fontFamily: 'Fraunces_600SemiBold' }}>
-              Save leftovers to fridge 🍽️
+              Save leftovers to fridge
             </Text>
             <Text style={{ fontSize: 12, color: colors.textSub, marginBottom: 16 }}>
               Track your portions — each serving appears in your fridge inventory and deducts as you eat.
@@ -1151,7 +1161,7 @@ export default function CollectionsScreen() {
             {/* Preview pill */}
             {saveDishName.trim() ? (
               <View style={{ backgroundColor: colors.surface, borderRadius: 12, borderWidth: 0.5, borderColor: colors.border, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Text style={{ fontSize: 22 }}>🍽️</Text>
+                <FoodIcon emoji="🍽️" size={34} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }} numberOfLines={1}>{saveDishName.trim()}</Text>
                   <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>
@@ -1169,18 +1179,18 @@ export default function CollectionsScreen() {
                 const days = Math.max(1, parseInt(saveDishDays) || 3);
                 await saveDishToFridge(saveDishName.trim(), days, servings, selectedRecipe?.recipeMacros);
                 setSaveDishVisible(false);
-                Alert.alert('Saved to fridge! 🍽️', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
+                Alert.alert('Saved to fridge', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
               }}
             >
               <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 15 }}>
-                Save {parseInt(saveDishServings) > 1 ? `${parseInt(saveDishServings) || 2} servings` : 'to'} fridge 🧊
+                Save {parseInt(saveDishServings) > 1 ? `${parseInt(saveDishServings) || 2} servings` : 'to'} fridge
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={{ alignItems: 'center', paddingVertical: 10 }}
               onPress={() => {
                 setSaveDishVisible(false);
-                Alert.alert('🍳 Enjoy your meal!', 'Recipe logged as cooked!');
+                Alert.alert('Enjoy your meal', 'Logged as cooked.');
               }}
             >
               <Text style={{ color: colors.textMuted, fontSize: 13 }}>Skip — I'll eat it all now</Text>
@@ -1227,7 +1237,7 @@ export default function CollectionsScreen() {
           <Animated.View style={{ flex: 1, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
           {/* Search bar */}
           <View style={styles.searchBar}>
-            <Text style={{ fontSize: 15, color: colors.textMuted }}>🔍</Text>
+            <Ionicons name="search-outline" size={17} color={colors.textMuted} />
             <TextInput
               style={{ flex: 1, fontSize: 14, color: colors.text }}
               placeholder={activeCollection === 'all' ? 'Search all recipes…' : 'Search this category…'}
@@ -1387,10 +1397,10 @@ export default function CollectionsScreen() {
                 {collections.length ? ` · ${collections.length} categor${collections.length !== 1 ? 'ies' : 'y'}` : ''}
               </Text>
             </View>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 22 }}>›</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 22 }}>›</Text>
           </TouchableOpacity>
 
-          {/* Import from social — same green button */}
+          {/* Import from social — same gray button */}
           <TouchableOpacity
             style={styles.allCard}
             onPress={() => { if (!isPremium) { showPaywall(); return; } router.push('/social-recipe-import'); }}
@@ -1400,7 +1410,7 @@ export default function CollectionsScreen() {
               <Text style={styles.allCardTitle}>Import from TikTok & More</Text>
               <Text style={styles.allCardSub}>Paste a link and AI pulls out the recipe</Text>
             </View>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 22 }}>›</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 22 }}>›</Text>
           </TouchableOpacity>
 
           {recipes.length === 0 && householdRecipes.length === 0 && (
@@ -1457,9 +1467,9 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
 
   searchBar:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginVertical: 10, backgroundColor: c.surfaceAlt, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 0.5, borderColor: c.border },
 
-  allCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.btnPrimary, borderRadius: 18, padding: 18, shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 6 }, shadowOpacity: isDark ? 0.18 : 0.35, shadowRadius: 14, elevation: 6, ...raisedGreen(isDark) },
-  allCardTitle:  { fontSize: 16, fontWeight: '700', color: 'white', fontFamily: 'Fraunces_600SemiBold' },
-  allCardSub:    { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 3 },
+  allCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surfaceAlt, borderRadius: 18, padding: 18, ...raised(isDark, 'md') },
+  allCardTitle:  { fontSize: 16, fontWeight: '700', color: c.text, fontFamily: 'Fraunces_600SemiBold' },
+  allCardSub:    { fontSize: 12, color: c.textSub, marginTop: 3 },
   sectionLabel:  { fontSize: 11, fontWeight: '700', color: c.textSub, letterSpacing: 0.8, marginTop: 4, marginBottom: 2 },
 
   colCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 16, padding: 16, borderWidth: 0.5, borderColor: c.border, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },

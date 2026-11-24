@@ -10,6 +10,8 @@ import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/auth';
+import { useTheme } from '../context/theme';
+import { useAuthStyles, IconBadge, BackButton } from '@/components/auth-ui';
 
 // ── Password strength ────────────────────────────────────────────────────────
 
@@ -45,6 +47,7 @@ function getStrength(pw: string): StrengthResult {
 }
 
 function StrengthBar({ password }: { password: string }) {
+  const { colors: tc } = useTheme();
   const s = useMemo(() => getStrength(password), [password]);
   return (
     <View style={{ gap: 8, marginTop: 6 }}>
@@ -55,7 +58,7 @@ function StrengthBar({ password }: { password: string }) {
             key={i}
             style={{
               flex: 1, height: 4, borderRadius: 99,
-              backgroundColor: i < s.bars ? s.color : 'rgba(255,255,255,0.12)',
+              backgroundColor: i < s.bars ? s.color : tc.borderStrong,
             }}
           />
         ))}
@@ -74,9 +77,9 @@ function StrengthBar({ password }: { password: string }) {
         ].map(({ key, label }) => {
           const met = s.checks[key as keyof typeof s.checks];
           return (
-            <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, opacity: met ? 1 : 0.45 }}>
-              <Text style={{ fontSize: 10, color: met ? '#1D9E75' : 'rgba(255,255,255,0.5)' }}>{met ? '✓' : '○'}</Text>
-              <Text style={{ fontSize: 10, color: met ? '#5DCAA5' : 'rgba(255,255,255,0.4)' }}>{label}</Text>
+            <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, opacity: met ? 1 : 0.7 }}>
+              <Text style={{ fontSize: 11, color: met ? tc.teal : tc.textMuted }}>{met ? '✓' : '○'}</Text>
+              <Text style={{ fontSize: 11, color: met ? tc.textSub : tc.textMuted }}>{label}</Text>
             </View>
           );
         })}
@@ -89,6 +92,7 @@ function StrengthBar({ password }: { password: string }) {
 
 export default function SignupScreen() {
   const router = useRouter();
+  const { styles, c, isDark, link } = useAuthStyles();
   const { signUp } = useAuth();
 
   const [name, setName]         = useState('');
@@ -188,19 +192,19 @@ export default function SignupScreen() {
   if (confirming) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
+        <StatusBar style={c.statusBar} />
         <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, { justifyContent: 'center', flex: 1 }]}>
           <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
-          <View style={styles.confirmBox}>
-            <Text style={styles.confirmIcon}>📬</Text>
-            <Text style={styles.confirmTitle}>Check your inbox</Text>
-            <Text style={styles.confirmSub}>
+          <View style={styles.messageBox}>
+            <IconBadge name="mail-outline" size={64} />
+            <Text style={styles.messageTitle}>Check your inbox</Text>
+            <Text style={styles.messageText}>
               We sent a confirmation link to{'\n'}
-              <Text style={{ color: '#5DCAA5', fontWeight: '600' }}>{email}</Text>
+              <Text style={{ color: link, fontWeight: '600' }}>{email}</Text>
             </Text>
-            <Text style={styles.confirmHint}>Tap the link in that email to activate your account, then sign in here.</Text>
+            <Text style={styles.messageHint}>Tap the link in that email to activate your account, then sign in here.</Text>
             <TouchableOpacity style={styles.btnPrimary} onPress={() => router.replace('/auth/login' as any)}>
-              <Text style={styles.btnPrimaryText}>go to sign in →</Text>
+              <Text style={styles.btnPrimaryText}>Go to sign in</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -210,22 +214,20 @@ export default function SignupScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar style={c.statusBar} />
       <Animated.View style={[{ flex: 1 }, {
         opacity: enterAnim,
         transform: [{ translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
       }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} />
         <Text style={styles.headerTitle}>Create account</Text>
         <View style={{ width: 36 }} />
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Text style={styles.logo}>go<Text style={styles.logoGreen}>good</Text></Text>
-        <Text style={styles.subtitle}>Join thousands rescuing food from the trash 🌱</Text>
+        <Text style={styles.subtitle}>Join thousands rescuing food from the trash</Text>
 
         {/* Name */}
         <Animated.View style={[styles.field, {
@@ -236,7 +238,8 @@ export default function SignupScreen() {
           <TextInput
             style={styles.input}
             placeholder="First and last name"
-            placeholderTextColor="rgba(255,255,255,0.3)"
+            placeholderTextColor={c.placeholder}
+            keyboardAppearance={isDark ? 'dark' : 'light'}
             value={name}
             onChangeText={v => { setName(v); setError(''); }}
             returnKeyType="next"
@@ -254,7 +257,8 @@ export default function SignupScreen() {
           <TextInput
             style={styles.input}
             placeholder="@username"
-            placeholderTextColor="rgba(255,255,255,0.3)"
+            placeholderTextColor={c.placeholder}
+            keyboardAppearance={isDark ? 'dark' : 'light'}
             value={username}
             onChangeText={v => { setUsername(v); setError(''); }}
             autoCapitalize="none"
@@ -274,7 +278,8 @@ export default function SignupScreen() {
           <TextInput
             style={styles.input}
             placeholder="you@example.com"
-            placeholderTextColor="rgba(255,255,255,0.3)"
+            placeholderTextColor={c.placeholder}
+            keyboardAppearance={isDark ? 'dark' : 'light'}
             value={email}
             onChangeText={v => { setEmail(v); setError(''); }}
             autoCapitalize="none"
@@ -295,7 +300,8 @@ export default function SignupScreen() {
             <TextInput
               style={[styles.input, { paddingRight: 56 }]}
               placeholder="Create a strong password"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor={c.placeholder}
+              keyboardAppearance={isDark ? 'dark' : 'light'}
               value={password}
               onChangeText={v => { setPassword(v); setError(''); }}
               secureTextEntry={!showPassword}
@@ -304,7 +310,7 @@ export default function SignupScreen() {
               autoComplete="new-password"
             />
             <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPassword(p => !p)}>
-              <Text style={styles.eyeText}>{showPassword ? 'hide' : 'show'}</Text>
+              <Text style={styles.eyeText}>{showPassword ? 'Hide' : 'Show'}</Text>
             </TouchableOpacity>
           </View>
           <StrengthBar password={password} />
@@ -320,7 +326,8 @@ export default function SignupScreen() {
             <TextInput
               style={[styles.input, { paddingRight: 56 }]}
               placeholder="Repeat your password"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor={c.placeholder}
+              keyboardAppearance={isDark ? 'dark' : 'light'}
               value={confirm}
               onChangeText={v => { setConfirm(v); setError(''); }}
               secureTextEntry={!showConfirm}
@@ -330,14 +337,14 @@ export default function SignupScreen() {
               autoComplete="off"
             />
             <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowConfirm(p => !p)}>
-              <Text style={styles.eyeText}>{showConfirm ? 'hide' : 'show'}</Text>
+              <Text style={styles.eyeText}>{showConfirm ? 'Hide' : 'Show'}</Text>
             </TouchableOpacity>
           </View>
           {confirm.length > 0 && confirm !== password && (
             <Text style={styles.errorText}>Passwords don't match</Text>
           )}
           {confirm.length > 0 && confirm === password && (
-            <Text style={styles.matchText}>✓ Passwords match</Text>
+            <Text style={styles.matchText}>Passwords match</Text>
           )}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </Animated.View>
@@ -352,7 +359,7 @@ export default function SignupScreen() {
           >
             {loading
               ? <ActivityIndicator color="white" />
-              : <Text style={styles.btnPrimaryText}>let's go good →</Text>}
+              : <Text style={styles.btnPrimaryText}>Let's go good</Text>}
           </TouchableOpacity>
         </Animated.View>
 
@@ -363,9 +370,9 @@ export default function SignupScreen() {
         </Text>
 
         <View style={styles.switchRow}>
-          <Text style={styles.switchText}>already have an account? </Text>
+          <Text style={styles.switchText}>Already have an account? </Text>
           <TouchableOpacity onPress={() => router.push('/auth/login' as any)}>
-            <Text style={styles.switchLink}>sign in</Text>
+            <Text style={styles.switchLink}>Sign in</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -373,35 +380,3 @@ export default function SignupScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea:      { flex: 1, backgroundColor: '#085041' },
-  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.1)' },
-  backBtn:       { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
-  backText:      { fontSize: 18, color: 'white' },
-  headerTitle:   { fontSize: 16, fontWeight: '600', color: 'white' },
-  scroll:        { flex: 1, backgroundColor: '#085041' },
-  body:          { padding: 28, gap: 16, paddingBottom: 48 },
-  logo:          { fontSize: 36, fontWeight: '700', color: 'white', textAlign: 'center', fontFamily: 'Fraunces_600SemiBold' },
-  logoGreen:     { color: '#5DCAA5', fontFamily: 'Fraunces_600SemiBold' },
-  subtitle:      { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginTop: -8 },
-  field:         { gap: 6 },
-  fieldLabel:    { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 1 },
-  input:         { backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 14, fontSize: 14, color: 'white' },
-  errorText:     { fontSize: 11, color: '#FF8A8A', marginTop: 4 },
-  matchText:     { fontSize: 11, color: '#1D9E75', marginTop: 4 },
-  eyeBtn:        { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
-  eyeText:       { fontSize: 12, color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
-  btnPrimary:    { backgroundColor: '#1D9E75', padding: 16, borderRadius: 14, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
-  btnPrimaryText:{ color: 'white', fontSize: 15, fontWeight: '600' },
-  terms:         { fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center', lineHeight: 18 },
-  termsLink:     { color: '#5DCAA5' },
-  switchRow:     { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  switchText:    { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
-  switchLink:    { fontSize: 13, color: '#5DCAA5', fontWeight: '600' },
-  confirmBox:    { gap: 16, alignItems: 'center' },
-  confirmIcon:   { fontSize: 56, textAlign: 'center' },
-  confirmTitle:  { fontSize: 22, fontWeight: '700', color: 'white', textAlign: 'center', fontFamily: 'Fraunces_600SemiBold' },
-  confirmSub:    { fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22 },
-  confirmHint:   { fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', lineHeight: 20 },
-});

@@ -4,17 +4,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRef, useEffect, useState } from 'react';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { TAB_BAR_MINI_H, TAB_BAR_GAP, tabBarBottomOffset } from '@/components/tab-bar-space';
 import { useTheme } from '../context/theme';
 import { useSubscription } from '../context/subscription';
 
-const TABS = [
-  { name: 'index',       emoji: '🥗', label: 'Inventory' },
-  { name: 'goodbot',     emoji: '🤖', label: 'Good Bot'  },
-  { name: 'collections', emoji: '📚', label: 'Recipes'   },
-  { name: 'shopping',    emoji: '🛒', label: 'Shop'      },
-  { name: 'foodreport',  emoji: '📊', label: 'Report'    },
-  { name: 'household',   emoji: '🏠', label: 'Household' },
+// Line icons: outlined normally, filled for the screen you're on
+type IconName = keyof typeof Ionicons.glyphMap;
+const TABS: { name: string; icon: IconName; iconOn: IconName; label: string }[] = [
+  { name: 'index',       icon: 'nutrition-outline',   iconOn: 'nutrition',   label: 'Inventory' },
+  { name: 'goodbot',     icon: 'sparkles-outline',    iconOn: 'sparkles',    label: 'Good Bot'  },
+  { name: 'collections', icon: 'book-outline',        iconOn: 'book',        label: 'Recipes'   },
+  { name: 'shopping',    icon: 'cart-outline',        iconOn: 'cart',        label: 'Shop'      },
+  { name: 'foodreport',  icon: 'stats-chart-outline', iconOn: 'stats-chart', label: 'Report'    },
+  { name: 'household',   icon: 'home-outline',        iconOn: 'home',        label: 'Household' },
 ];
 
 // Soft fade drawn just above the tab bar so screen content dissolves into the
@@ -167,16 +170,19 @@ function FloatingDock({ state, navigation }: BottomTabBarProps) {
                 accessibilityLabel={open ? tab.label : 'Show navigation'}
                 style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 }}
               >
-                <Animated.Text
+                <Animated.View
                   style={{
-                    fontSize: 21,
-                    lineHeight: 26,
-                    opacity: isFocused ? 1 : 0.5,
+                    height: 26,
+                    justifyContent: 'center',
                     transform: [{ scale: Animated.multiply(scales[i], iconScale) }],
                   }}
                 >
-                  {tab.emoji}
-                </Animated.Text>
+                  <Ionicons
+                    name={isFocused ? tab.iconOn : tab.icon}
+                    size={19}
+                    color={isFocused ? activeText : mutedText}
+                  />
+                </Animated.View>
 
                 {/* Label — green + bold shows which screen you're on; hidden on the small bar */}
                 <Animated.View style={{ height: labelHeight, opacity: labelOpacity, overflow: 'hidden', justifyContent: 'flex-end' }}>

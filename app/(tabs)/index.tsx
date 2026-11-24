@@ -1,3 +1,5 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Animated, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking, Alert, Image, Dimensions, Easing, Keyboard, LayoutAnimation, UIManager, PanResponder, AppState } from 'react-native';
 import { useTabBarSpace } from '@/components/tab-bar-space';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +29,7 @@ import { unitWarning, UNIT_CHOICES } from '../lib/shopping-helpers';
 import { useSubscription } from '../context/subscription';
 import { seedSampleItems } from '../lib/seed-items';
 import { raised, raisedGreen } from '@/components/raised';
+import FoodIcon from '@/components/food-icon';
 
 type Badge = 'red' | 'amber' | 'green' | 'blue' | 'black';
 type Category = 'fridge' | 'freezer' | 'pantry';
@@ -802,15 +805,16 @@ const CATEGORY_ORDER = [
   'Supplements', 'Herbs & Spices', 'Leftovers', 'Other',
 ];
 
-const CATEGORY_ICONS: Record<string, string> = {
-  'Meat': '🥩', 'Poultry': '🍗', 'Fish & Seafood': '🐟',
-  'Dairy': '🥛', 'Eggs': '🥚', 'Vegetables': '🥦', 'Fruit': '🍎',
-  'Legumes & Beans': '🫘', 'Nuts & Seeds': '🥜',
-  'Bread & Grains': '🍞', 'Canned & Jarred': '🥫', 'Baking': '🧁',
-  'Condiments & Sauces': '🫙', 'Syrups & Sweeteners': '🍯',
-  'Drinks': '🧃', 'Coffee & Tea': '☕',
-  'Snacks & Sweets': '🍫', 'Frozen Foods': '🥶', 'Prepared & Deli': '🥙',
-  'Supplements': '💊', 'Herbs & Spices': '🌿', 'Leftovers': '🍽️', 'Other': '🥘',
+// Line icon shown in each inventory category header
+const CATEGORY_GLYPHS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  'Meat': 'food-steak', 'Poultry': 'food-drumstick-outline', 'Fish & Seafood': 'fish',
+  'Dairy': 'cheese', 'Eggs': 'egg-outline', 'Vegetables': 'carrot', 'Fruit': 'food-apple-outline',
+  'Legumes & Beans': 'seed-outline', 'Nuts & Seeds': 'peanut-outline',
+  'Bread & Grains': 'bread-slice-outline', 'Canned & Jarred': 'food-variant', 'Baking': 'muffin',
+  'Condiments & Sauces': 'bottle-tonic-outline', 'Syrups & Sweeteners': 'beehive-outline',
+  'Drinks': 'cup-outline', 'Coffee & Tea': 'coffee-outline',
+  'Snacks & Sweets': 'cookie-outline', 'Frozen Foods': 'snowflake', 'Prepared & Deli': 'food-takeout-box-outline',
+  'Supplements': 'pill', 'Herbs & Spices': 'leaf', 'Leftovers': 'pot-steam-outline', 'Other': 'silverware-fork-knife',
 };
 
 function getDaysLeft(d: string): number {
@@ -917,8 +921,9 @@ function TopFade({ color, height = TOP_FADE_H }: { color: string; height?: numbe
   );
 }
 
-const GOOD_CONFETTI = ['🌱', '✨', '💚', '🌿', '⭐', '🎉', '🌱', '✨'];
-const BAD_CONFETTI  = ['🥀', '💸', '😔', '🗑', '🥀', '💸', '🌧', '💸'];
+// Little line icons that burst out when an item is used up or thrown out
+const GOOD_CONFETTI: (keyof typeof Ionicons.glyphMap)[] = ['leaf', 'sparkles', 'heart', 'leaf', 'star', 'sparkles', 'leaf', 'heart'];
+const BAD_CONFETTI:  (keyof typeof Ionicons.glyphMap)[] = ['leaf-outline', 'cash-outline', 'trash-outline', 'rainy-outline', 'leaf-outline', 'cash-outline', 'trash-outline', 'rainy-outline'];
 
 function ConfettiBlast({ good, onDone }: { good: boolean; onDone: () => void }) {
   const emojis = good ? GOOD_CONFETTI : BAD_CONFETTI;
@@ -961,19 +966,18 @@ function ConfettiBlast({ good, onDone }: { good: boolean; onDone: () => void }) 
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 999, elevation: 999 }]} pointerEvents="none">
       {anims.map((a, i) => (
-        <Animated.Text
+        <Animated.View
           key={i}
           style={{
             position: 'absolute',
             top: '46%' as any,
             left: '46%' as any,
-            fontSize: spread[i].size,
             opacity: a.op,
             transform: [{ translateX: a.x }, { translateY: a.y }, { scale: a.sc }],
           }}
         >
-          {emojis[i]}
-        </Animated.Text>
+          <Ionicons name={emojis[i]} size={spread[i].size + 6} color={good ? (i % 2 ? '#23B385' : '#6DD4B0') : (i % 2 ? '#D0644F' : '#B9A99A')} />
+        </Animated.View>
       ))}
     </View>
   );
@@ -1148,9 +1152,9 @@ function BarcodeScanStrip({ visible, scanSuccess, scannedEmoji, scannedName }: {
         </View>
       ) : scanSuccess === true ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <Text style={{ fontSize: 26 }}>{scannedEmoji}</Text>
+          <FoodIcon emoji={scannedEmoji} size={36} />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#5DCAA5', fontSize: 13, fontWeight: '700' }}>found it ✓</Text>
+            <Text style={{ color: '#5DCAA5', fontSize: 13, fontWeight: '700' }}>Found it</Text>
             <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '500', marginTop: 1 }} numberOfLines={1}>{scannedName}</Text>
           </View>
         </View>
@@ -1923,11 +1927,11 @@ export default function FridgeScreen() {
   const goodBotMsg = () => {
     if (items.length === 0) return 'add items to get started';
     const urgentCount = items.filter(i => getDaysLeft(i.expiryDate) < 0).length;
-    if (urgentCount > 0) return `${urgentCount} item${urgentCount > 1 ? 's' : ''} already expired — rescue what you can 🥀`;
+    if (urgentCount > 0) return `${urgentCount} item${urgentCount > 1 ? 's' : ''} already expired. Rescue what you can.`;
     const allExpiring = items.filter(i => { const d = getDaysLeft(i.expiryDate); return d >= 0 && d <= 3; }).length;
     if (allExpiring >= 3) return `using ${allExpiring} expiring items`;
-    if (allExpiring > 0) return `${allExpiring} item${allExpiring > 1 ? 's' : ''} expiring — let's use them 🌱`;
-    return `you have ${items.length} item${items.length !== 1 ? 's' : ''} — want a recipe? 🍳`;
+    if (allExpiring > 0) return `${allExpiring} item${allExpiring > 1 ? 's' : ''} expiring. Let's use them.`;
+    return `you have ${items.length} item${items.length !== 1 ? 's' : ''} · want a recipe?`;
   };
 
   const showToast = (msg: string, bad = false) => {
@@ -1986,7 +1990,7 @@ export default function FridgeScreen() {
       // Log the partial use to gone-good history so it counts in the report
       const portionStr = logPortionUsed(useModalItem, amount);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      showToast(`${portionStr} used 🌱`);
+      showToast(`${portionStr} used`);
       setUseModalItem(null);
       setUseAmount('');
     }
@@ -2008,7 +2012,7 @@ export default function FridgeScreen() {
       });
     });
     triggerBlast(false);
-    setTimeout(() => showToast(`${item.baseName} gone good! 🌱`), 700);
+    setTimeout(() => showToast(`${item.baseName} gone good`), 700);
     updateStats('goneGood');
   };
 
@@ -2536,13 +2540,13 @@ export default function FridgeScreen() {
       if (editItem) {
         setItems(prev => prev.map(i => i.id === editItem.id ? item : i));
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        showToast(`${safeName} updated ✏️`);
+        showToast(`${safeName} updated`);
       } else {
         setItems(prev => [...prev, item]);
         setNextId(prev => prev + 1);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         triggerSuccess();
-        showToast(`${safeName} added! 🌱`);
+        showToast(`${safeName} added`);
         updateStats('totalAdded');
       }
       setShowAdd(false);
@@ -2620,6 +2624,9 @@ export default function FridgeScreen() {
               onPress={() => toggleSection(key)}
               activeOpacity={0.7}
             >
+              <View style={[styles.categoryIcon, { backgroundColor: colors.chipBg }]}>
+                <MaterialCommunityIcons name={CATEGORY_GLYPHS[cat] ?? 'silverware-fork-knife'} size={12} color={colors.chipText} />
+              </View>
               <Text style={[styles.categoryHeaderText, { color: colors.textSub }]}>{cat}</Text>
               <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
               <Text style={[styles.categoryHeaderCount, { color: colors.textMuted }]}>{group.length}</Text>
@@ -2832,7 +2839,7 @@ export default function FridgeScreen() {
         {/* ── Search row ── */}
         <View style={styles.searchRow}>
           <View style={styles.searchBar}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Ionicons name="search-outline" size={17} color={colors.textMuted} />
             <TextInput
               style={styles.searchInput}
               placeholder={activeTab === 'all' ? 'search all your food...' : `search your ${activeTab}...`}
@@ -2851,7 +2858,7 @@ export default function FridgeScreen() {
         {/* ── Tabs ── */}
         <View style={styles.tabs}>
           {(['all', 'fridge', 'freezer', 'pantry'] as const).map(tab => (
-            <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]} onPress={() => switchTab(tab)}>
+            <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]} onPress={() => switchTab(tab)} activeOpacity={0.8}>
               <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
@@ -2971,15 +2978,15 @@ export default function FridgeScreen() {
           {useAmount !== '' && !isNaN(parseFloat(useAmount)) && (
             <Text style={{ fontSize: 13, color: colors.textSub, marginTop: 8 }}>
               {parseFloat(useAmount) >= (useModalItem?.qtyNum ?? 0)
-                ? '→ This will mark it as gone good 🌱'
+                ? 'This will mark it as gone good.'
                 : `→ ${fmtQty((useModalItem?.qtyNum ?? 0) - parseFloat(useAmount))}${useModalItem?.unit ? ` ${useModalItem.unit}` : ''} remaining`}
             </Text>
           )}
           <TouchableOpacity style={[styles.addConfirmBtn, { marginTop: 16 }]} onPress={handleUseAmount}>
             <Text style={styles.addConfirmText}>
               {!isNaN(parseFloat(useAmount)) && parseFloat(useAmount) >= (useModalItem?.qtyNum ?? 0)
-                ? 'Mark gone good 🌱'
-                : 'Use it →'}
+                ? 'Mark gone good'
+                : 'Use it'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.cancelBtn} onPress={() => { setUseModalItem(null); setUseAmount(''); }}>
@@ -3433,7 +3440,7 @@ export default function FridgeScreen() {
             >
               <View style={styles.goodBotLeft}>
                 <View style={styles.goodBotAvatarWrap}>
-                  <Text style={{ fontSize: 15 }}>🤖</Text>
+                  <Ionicons name="sparkles" size={15} color="white" />
                 </View>
                 <View>
                   <Text style={styles.goodBotText}>Ask Good Bot what to make</Text>
@@ -3447,7 +3454,7 @@ export default function FridgeScreen() {
               onPress={() => { setShowExpiringDetail(false); showPaywall(); }}
               style={{ backgroundColor: colors.btnPrimary, borderRadius: 12, padding: 12, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}
             >
-              <Text style={{ fontSize: 22 }}>🤖</Text>
+              <Ionicons name="sparkles" size={20} color="#5DCAA5" />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: '#5DCAA5' }}>Turn expiring food into recipes</Text>
                 <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 2 }}>Good Bot creates meals from what you have — upgrade to Go Good+</Text>
@@ -3496,11 +3503,11 @@ export default function FridgeScreen() {
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{lastSaved.baseName}</Text>
                 <Text style={{ fontSize: 12, color: colors.textSub }}>
-                  {lastSaved.category === 'fridge' ? '❄️' : lastSaved.category === 'freezer' ? '🧊' : '🥫'} {lastSaved.category.charAt(0).toUpperCase() + lastSaved.category.slice(1)}
+                  {lastSaved.category.charAt(0).toUpperCase() + lastSaved.category.slice(1)}
                   {lastSaved.foodCategory ? `  ·  ${lastSaved.foodCategory}` : ''}
                 </Text>
                 <Text style={{ fontSize: 12, color: colors.textSub }}>
-                  📅 {lastSaved.expiryDate || 'No expiry set'}{lastSaved.qty ? `  ·  📦 ${lastSaved.qty}` : ''}
+                  {lastSaved.expiryDate ? `Expires ${lastSaved.expiryDate}` : 'No expiry set'}{lastSaved.qty ? `  ·  ${lastSaved.qty}` : ''}
                 </Text>
                 {(lastSaved.protein > 0 || lastSaved.cal > 0) && (
                   <Text style={{ fontSize: 11, color: colors.textSub }}>
@@ -3511,7 +3518,7 @@ export default function FridgeScreen() {
             </View>
           )}
           <TouchableOpacity style={styles.addConfirmBtn} onPress={() => setShowSaveConfirm(false)}>
-            <Text style={styles.addConfirmText}>Looks good ✓</Text>
+            <Text style={styles.addConfirmText}>Looks good</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.cancelBtn, { marginTop: 8 }]} onPress={() => {
             setShowSaveConfirm(false);
@@ -3548,15 +3555,14 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   // Search
   searchRow:             { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 },
   searchBar:             { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: c.border, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
-  searchIcon:            { fontSize: 15 },
   searchInput:           { flex: 1, fontSize: 14, color: c.text },
 
   // Tabs
-  tabs:                  { flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingBottom: 10 },
-  tab:                   { flex: 1, paddingVertical: 9, borderRadius: 100, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.10, shadowRadius: 7, elevation: 3 },
-  tabActive:             { backgroundColor: isDark ? '#1D9E75' : c.brand, borderColor: isDark ? '#1D9E75' : c.brand },
-  tabText:               { fontSize: 10, fontWeight: '500', color: c.textSub },
-  tabTextActive:         { color: 'white', fontWeight: '600' },
+  tabs:                  { flexDirection: 'row', marginHorizontal: 16, marginBottom: 10, padding: 4, borderRadius: 14, backgroundColor: c.surfaceAlt },
+  tab:                   { flex: 1, paddingVertical: 8, borderRadius: 11, alignItems: 'center' },
+  tabActive:             { backgroundColor: c.surface, ...raised(isDark) },
+  tabText:               { fontSize: 13, fontWeight: '600', color: c.textSub },
+  tabTextActive:         { color: c.text },
 
 
   // Sort bar
@@ -3605,11 +3611,11 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   // Category header (level 2 in All, level 1 in individual tabs)
   categoryHeader:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 20, paddingBottom: 10 },
   categoryHeaderNested:  { paddingTop: 14, paddingBottom: 8 },
-  categoryHeaderEmoji:   { fontSize: 13 },
-  categoryHeaderText:    { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.6 },
+  categoryIcon:          { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: -2 },
+  categoryHeaderText:    { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.2 },
   categoryHeaderLine:    { flex: 1, height: 0.5 },
-  categoryChevron:       { fontSize: 16, fontWeight: '700', width: 18, textAlign: 'center' },
-  categoryHeaderCount:   { fontSize: 13, fontWeight: '600' },
+  categoryChevron:       { fontSize: 14, fontWeight: '700', width: 16, textAlign: 'center' },
+  categoryHeaderCount:   { fontSize: 10, fontWeight: '600' },
 
   // Item cards
   itemWrapMargin:        { height: compact ? 4 : 8 },

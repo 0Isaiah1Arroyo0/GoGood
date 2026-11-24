@@ -3,9 +3,11 @@ import { ActivityIndicator, View } from 'react-native';
 import { Redirect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useAuth } from './context/auth';
+import { useTheme } from './context/theme';
 
 export default function Index() {
   const { session, loading } = useAuth();
+  const { colors } = useTheme();
   const [biometricEnabled, setBiometricEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -17,8 +19,8 @@ export default function Index() {
   // Still loading Supabase session or SecureStore check
   if (loading || biometricEnabled === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#085041', alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color="#5DCAA5" size="large" />
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={colors.teal} size="large" />
       </View>
     );
   }

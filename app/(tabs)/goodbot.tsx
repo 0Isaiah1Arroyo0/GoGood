@@ -16,6 +16,7 @@ import { useTabBarSpace } from '@/components/tab-bar-space';
 import { useSubscription } from '../context/subscription';
 import { useAuth } from '../context/auth';
 import { HOUSEHOLD_KEY } from '../lib/household';
+import { supabase } from '../lib/supabase';
 import { pushItems } from '../lib/sync';
 import {
   type Collection, type SavedRecipe,
@@ -29,6 +30,8 @@ import {
 import { addToShoppingList, addToHouseholdShoppingList } from '../lib/shopping-list';
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
 import { raised, raisedGreen } from '@/components/raised';
+import RecipeView, { parseRecipe } from '@/components/recipe-view';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -205,6 +208,18 @@ function getSuggestionGroups(hasExpiring: boolean): SuggestionGroup[] {
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// Fair-use allowance per day (the server enforces these; keep them in sync with
+// supabase/functions/goodbot). Resets at midnight in the user's time zone.
+const FREE_DAILY = 3;
+const PRO_DAILY  = 40;
+const TIME_ZONE = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+})();
+
+class BotError extends Error {
+  constructor(public type: string) { super(type); }
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function GoodBotScreen() {
@@ -220,6 +235,10 @@ export default function GoodBotScreen() {
   const [loading, setLoading]           = useState(false);
   const [expiring, setExpiring]         = useState<(StoredItem & { days: number })[]>([]);
   const [suggestionChosen, setSuggestionChosen] = useState(false);
+  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
+  const usedToday  = usage?.used ?? 0;
+  const leftToday  = Math.max((isPremium ? (usage?.limit || PRO_DAILY) : FREE_DAILY) - usedToday, 0);
+  const canAsk     = leftToday > 0;
 
   // ── Recipe saving ────────────────────────────────────────────────────────────
   const [collections,      setCollections]      = useState<Collection[]>([]);
@@ -288,6 +307,10 @@ export default function GoodBotScreen() {
     }, 100);
 
     loadCollections().then(setCollections);
+
+    // How many questions are left today
+    supabase.rpc('goodbot_used_today', { p_tz: TIME_ZONE })
+      .then(({ data, error }) => { if (!error && typeof data === 'number') setUsage(u => ({ used: data, limit: u?.limit ?? 0 })); });
 
     // Trigger one-time migration of local collections → Supabase
     if (user?.id) migrateLocalCollectionsToSupabase(user.id).catch(() => {});
@@ -363,158 +386,61 @@ export default function GoodBotScreen() {
 
   // ── Claude API ───────────────────────────────────────────────────────────────
 
-  const systemPrompt = () => {
-    const all = allItemsRef.current;
-
-    const fmt = (i: StoredItem & { days: number }) => {
-      const loc = i.category === 'freezer' ? '[freezer]' : i.category === 'pantry' ? '[pantry]' : '[fridge]';
-      const exp = i.days < 0 ? 'EXPIRED' : i.days === 0 ? 'expires TODAY' : `${i.days}d left`;
-      const qty = i.qtyNum ?? 1;
-      const parts: string[] = [];
-      // Per-unit macros — these are stored per serving/per item, NOT totals
-      if (i.protein) parts.push(`${Math.round(i.protein)}g protein`);
-      if (i.carbs)   parts.push(`${Math.round(i.carbs)}g carbs`);
-      if (i.fat)     parts.push(`${Math.round(i.fat)}g fat`);
-      if (i.cal)     parts.push(`${Math.round(i.cal)} cal`);
-      const nutrition = parts.length ? ` [per unit: ${parts.join(', ')}; have: ${qty}]` : ` [have: ${qty}]`;
-      return `  ${loc} ${i.baseName}${i.qty ? ` (${i.qty})` : ''} — ${exp}${nutrition}`;
-    };
-
-    const overdue  = all.filter(i => i.days <  0);
-    const today    = all.filter(i => i.days === 0);
-    const urgent   = all.filter(i => i.days >= 1 && i.days <= 3);
-    const soon     = all.filter(i => i.days >= 4 && i.days <= 7);
-    const fresh    = all.filter(i => i.days  >  7 && i.category !== 'freezer');
-    const frozen   = all.filter(i => i.category === 'freezer');
-    const pantry   = all.filter(i => i.category === 'pantry'  && i.days > 7);
-
-    const section = (title: string, items: typeof all) =>
-      items.length ? `${title}\n${items.map(fmt).join('\n')}` : '';
-
-    const inventory = [
-      section('EXPIRED (use or discard now):', overdue),
-      section('EXPIRES TODAY:', today),
-      section('EXPIRING IN 1–3 DAYS:', urgent),
-      section('EXPIRING IN 4–7 DAYS:', soon),
-      section('FRESH (8+ days):', fresh),
-      section('FROZEN:', frozen),
-      section('PANTRY:', pantry),
-    ].filter(Boolean).join('\n\n');
-
-    const dietary = dietaryRef.current.length ? dietaryRef.current.join(', ') : 'none specified';
-    const household = householdRef.current;
-
-    return `You are Good Bot, a warm and knowledgeable kitchen AI inside Go Good, a food-waste reduction app. Your job is to help users cook creatively with what they actually have, prioritising items that expire soonest.
-
-USER PROFILE
-Name: ${nameRef.current || 'there'}
-Household size: ${household} ${household === 1 ? 'person' : 'people'}
-Dietary preferences: ${dietary}
-
-CURRENT INVENTORY (${all.length} items)
-${inventory || 'No items in inventory yet.'}
-
-STYLE
-- Do not use emojis anywhere in your replies.
-
-INGREDIENT GUIDELINES
-- Always prioritise and build recipes around what the user already has, especially expiring items.
-- You MAY suggest up to 3–4 additional ingredients not in the inventory when they would meaningfully improve the recipe (e.g., garlic, olive oil, fresh herbs, broth, a squeeze of lemon). Use this freedom to enhance the experience, not to replace what they have.
-- Pantry basics that most households always have (salt, pepper, oil) do not need to be flagged as missing.
-- Whenever you suggest an ingredient the user does NOT have in their inventory, list it in a **You may want to grab:** section at the end of the recipe (before the RECIPE_MACROS block), using plain bullet points — one item per line, with its quantity:
-**You may want to grab:**
-- 1 clove garlic
-- A handful of fresh parsley
-- 1 tbsp olive oil
-Only include this section when there are genuinely missing items. Omit it entirely if the recipe uses only inventory items.
-
-CULINARY INTELLIGENCE — FLAVOR COMPATIBILITY (CRITICAL — read before every recipe)
-- Apply real culinary judgment. Never force ingredients together just because they're all expiring.
-- Sweet fruit (banana, mango, strawberry, apple, pear, grapes) does NOT belong in savory egg dishes, meat scrambles, or skillets. A "banana sausage egg scramble" is not a real dish — it's inedible.
-- If expiring items clash in flavor profile, suggest SEPARATE dishes for each group: e.g. "Here's what I'd do: turn your sausage and eggs into [savory dish], and use your banana separately for [breakfast/snack idea]"
-- Only combine sweet fruit with savory protein in well-established contexts: pineapple pork, mango salsa on fish, apple with pork chops, cranberry with turkey.
-- Classic pairings to lean into: egg + sausage (breakfast skillet, frittata, hash), banana + oats/nut butter/yogurt (smoothie, overnight oats, banana pancakes), sausage + pepper/onion/potato (hash, pasta).
-- Ask yourself: "Would a trained chef serve this?" If no, split the items into separate dishes.
-
-RECIPE GUIDELINES
-- Prioritise urgency: build recipes around expired/today/1–3 day items first; use fresh items to complement
-- When items clash in flavor, suggest multiple small recipes instead of one forced combination — this is better food-waste strategy anyway
-- Always include: dish name, prep time + cook time, number of servings, difficulty (Easy / Medium / Hard)
-- List ingredients with specific quantities (e.g. "2 cups spinach", "1 tbsp olive oil") — never vague amounts
-- Scale all quantities to ${household} ${household === 1 ? 'person' : 'people'}
-- Number every cooking step; keep steps concise and actionable
-- Respect dietary preferences strictly — if the user is vegan, every ingredient must be vegan; never add "to make vegan, omit X" — just build it that way from the start
-- If an item is expired, briefly tell the user how to check if it's still good (smell, look, texture) before using
-- Mention storage tip for leftovers when relevant (e.g. "stores in fridge up to 3 days")
-- Be warm, encouraging, and non-judgmental — food waste is a challenge, not a moral failure
-- Reply length: conversational answers ≤ 200 words; quick tips ≤ 100 words; full or blog recipes ≤ 550 words
-- Use **bold** only for section headers (e.g. **Ingredients**, **Steps**, **Tips & Swaps**)
-
-FOOD BLOG STYLE (when the user asks for blog-style or "from a food blog")
-- Give the recipe a creative, catchy title (e.g. "Weeknight Spinach & Egg Skillet")
-- Open with 2–3 warm sentences: a relatable scenario, why this dish works, or what makes it special
-- Include **Tips & Swaps** section with 2–3 substitutions for missing or swappable ingredients
-- End with a **Storage** note (fridge/freezer life, reheating tip)
-- Write with the warmth and approachability of Budget Bytes, Smitten Kitchen, or Half Baked Harvest
-- You can reference inspiration: "In the spirit of Smitten Kitchen's unfussy weeknight approach…"
-
-DIETARY PERSONALISATION (when the user requests a diet-specific recipe)
-- Lead with the dietary constraint as a creative frame, not a limitation
-- Actively highlight what makes the dish great *within* those constraints (e.g. high-protein, naturally gluten-free)
-- Never suggest adding non-compliant ingredients "optionally"
-
-SERVING SIZE CONFIRMATION (required for every recipe that uses inventory items with known macros)
-Before the RECIPE_MACROS block, add one line like this (only for items that have [per unit] macros listed above):
-"**Macro sources:** [item]: [X cal] per [unit/serving] × [qty used in recipe] — let me know if your portion size differs and I'll recalculate."
-This confirms to the user exactly what serving size was assumed. If an item's unit is ambiguous (e.g. "banana" with no gram weight, or "sausage" where size varies), note it: "(assumed standard size — confirm if yours is larger/smaller)".
-
-RECIPE MACROS (full recipes only — not tips or conversational replies)
-Macro calculation rules:
-1. For every ingredient that appears in the inventory with [per unit] macros, use those exact values × the number of units/servings used in this recipe — do NOT estimate or substitute your own values for these items
-2. For pantry staples or items without stored macros, use standard USDA estimates
-3. Sum all ingredients, then divide by number of recipe servings
-4. Round all values to whole integers
-
-At the very end of every complete recipe, append this exact block on its own lines with no extra text before or after it:
-RECIPE_MACROS
-Servings: X | Serving size: Xg | Fridge days: X
-Protein: Xg | Carbs: Xg | Fat: Xg | Cal: X
-END_RECIPE_MACROS
-All values are PER SERVING. "Fridge days" is how long the cooked dish safely keeps refrigerated (1–7).`;
-  };
+  // What Good Bot knows about the user. The server turns this into the prompt.
+  const buildContext = () => ({
+    name: nameRef.current,
+    household: householdRef.current,
+    dietary: dietaryRef.current,
+    items: allItemsRef.current.map(i => ({
+      name: i.baseName, qty: i.qty, qtyNum: i.qtyNum, days: i.days,
+      location: i.category === 'freezer' ? 'freezer' : i.category === 'pantry' ? 'pantry' : 'fridge',
+      protein: i.protein, carbs: i.carbs, fat: i.fat, cal: i.cal,
+    })),
+  });
 
   const callClaude = async (userMsg: string): Promise<string> => {
     if (!SUPABASE_URL || SUPABASE_URL === 'your_supabase_project_url') {
       return "Good Bot isn't connected yet — add your Supabase URL and anon key to .env";
     }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new BotError('auth_required');
     const res = await fetch(`${SUPABASE_URL}/functions/v1/goodbot`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({
-        systemPrompt: systemPrompt(),
+        context: buildContext(),
         messages: [...convoRef.current, { role: 'user', content: userMsg }],
         householdId: householdIdRef.current,
+        tz: TIME_ZONE,
       }),
     });
-    if (!res.ok) throw new Error(`Server error ${res.status}`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (data.usage) setUsage({ used: data.usage.used, limit: data.usage.limit });
     if (data.error) {
       if (data.error.type === 'authentication_error') {
         return "Good Bot's API key needs to be updated — please contact support";
       }
-      throw new Error(data.error.message || 'API error');
+      throw new BotError(data.error.type || 'server_error');
     }
-    if (!data.content?.[0]?.text) throw new Error('empty');
+    if (!res.ok) throw new BotError('server_error');
+    if (!data.content?.[0]?.text) throw new BotError('empty');
     return data.content[0].text;
   };
 
   // ── Send message ─────────────────────────────────────────────────────────────
 
+  // Out of questions for today: free users see the paywall, Pro users a note
+  const explainLimit = () => {
+    if (!isPremium) showPaywall();
+    else Alert.alert("Good Bot's resting", `You've asked ${PRO_DAILY} questions today. Good Bot will be back at midnight.`);
+  };
+
   const send = async (text: string) => {
-    if (!isPremium) { showPaywall(); return; }
+    if (!canAsk) { explainLimit(); return; }
     const t = text.trim();
     if (!t || loading) return;
     setInput('');
@@ -549,9 +475,20 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
           scrollRef.current?.scrollToEnd({ animated: true });
         }
       }, 150);
-    } catch {
+    } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const errMsg: ChatMessage = { id: String(Date.now() + 1), role: 'assistant', content: 'Something went wrong — check your connection and try again.', time: ftime(new Date()) };
+      // The question didn't get an answer, so drop it from the conversation
+      convoRef.current.pop();
+      const type = e instanceof BotError ? e.type : 'network';
+      const content =
+        type === 'daily_limit' && !isPremium ? `That's your ${FREE_DAILY} free questions for today. Upgrade to Go Good Pro to keep cooking with Good Bot.`
+        : type === 'daily_limit'     ? "That's all for today. Good Bot is resting and will be back at midnight with fresh ideas."
+        : type === 'rate_limited'    ? "That's a lot of questions at once. Give me a minute to catch up, then ask again."
+        : type === 'auth_required'   ? 'Please sign in again to keep chatting with Good Bot.'
+        : type === 'update_required' ? 'Please update Go Good to keep chatting with Good Bot.'
+        : 'Something went wrong. Check your connection and try again.';
+      if (type === 'daily_limit' && !isPremium) showPaywall();
+      const errMsg: ChatMessage = { id: String(Date.now() + 1), role: 'assistant', content, time: ftime(new Date()) };
       setMessages(prev => [...prev, errMsg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     }
@@ -563,7 +500,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
   const [suggestGroup, setSuggestGroup] = useState<string | null>(null);
 
   const chooseSuggestion = (prompt: string) => {
-    if (!isPremium) { showPaywall(); return; }
+    if (!canAsk) { explainLimit(); return; }
     Haptics.selectionAsync();
     setSuggestionChosen(true);
     send(prompt);
@@ -716,17 +653,26 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                     {msg.role === 'assistant' ? (
                       <View style={styles.botRow}>
                         <View style={styles.botAvatar}>
-                          <Text style={{ fontSize: 13 }}>🤖</Text>
+                          <Ionicons name="sparkles" size={13} color="white" />
                           <View style={styles.botAvatarDot} />
                         </View>
                       <View style={[styles.botMsgWrap, { flex: 1 }]}>
-                        <View style={styles.botBubble}>
-                          <Markdown
-                            text={msg.content}
-                            style={styles.botText}
-                            boldStyle={styles.botTextBold}
-                          />
-                        </View>
+                        {(() => {
+                          const recipe = parseRecipe(msg.content);
+                          return recipe ? (
+                            <View style={[styles.botBubble, { padding: 16 }]}>
+                              <RecipeView recipe={recipe} />
+                            </View>
+                          ) : (
+                            <View style={styles.botBubble}>
+                              <Markdown
+                                text={msg.content}
+                                style={styles.botText}
+                                boldStyle={styles.botTextBold}
+                              />
+                            </View>
+                          );
+                        })()}
                         <Text style={styles.msgTime}>{msg.time}</Text>
 
                         {msg.recipeMacros && (
@@ -859,7 +805,7 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                 {loading && (
                   <View style={styles.botRow}>
                     <View style={styles.botAvatar}>
-                          <Text style={{ fontSize: 13 }}>🤖</Text>
+                          <Ionicons name="sparkles" size={13} color="white" />
                           <View style={styles.botAvatarDot} />
                         </View>
                     <View style={[styles.botMsgWrap, { flex: 1 }]}>
@@ -876,11 +822,18 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
               </View>
 
               {/* ── Input ── */}
+              {usage && (leftToday <= 5 || !isPremium) && (
+                <Text style={styles.usageNote}>
+                  {leftToday === 0
+                    ? (isPremium ? 'Good Bot is resting until midnight' : 'No free questions left today')
+                    : `${leftToday} ${isPremium ? 'question' : 'free question'}${leftToday === 1 ? '' : 's'} left today`}
+                </Text>
+              )}
               <View style={[styles.inputRow, { paddingBottom: tabSpace + 22 }]}>
                 <View style={{ flex: 1 }}>
                   <TextInput
                     style={styles.chatInput}
-                    placeholder={isPremium ? 'ask Good Bot anything...' : 'Upgrade to chat with Good Bot'}
+                    placeholder={canAsk ? 'ask Good Bot anything...' : isPremium ? 'Good Bot is back at midnight' : 'Upgrade to keep chatting'}
                     placeholderTextColor={colors.textMuted}
                     value={input}
                     onChangeText={setInput}
@@ -888,12 +841,13 @@ All values are PER SERVING. "Fridge days" is how long the cooked dish safely kee
                     blurOnSubmit
                     returnKeyType="send"
                     onSubmitEditing={() => send(input)}
-                    editable={isPremium}
+                    editable={canAsk}
+                    maxLength={1000}
                   />
-                  {!isPremium && (
+                  {!canAsk && (
                     <TouchableOpacity
                       style={{ ...StyleSheet.absoluteFillObject }}
-                      onPress={showPaywall}
+                      onPress={explainLimit}
                       activeOpacity={0.7}
                     />
                   )}
@@ -1152,6 +1106,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   expiryChipDays:     { fontSize: 10, color: c.textMuted, fontWeight: '500' },
 
   // Input
+  usageNote:          { fontSize: 12, fontWeight: '500', color: c.textMuted, textAlign: 'center', marginBottom: 2 },
   inputRow:           { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 36, backgroundColor: c.bg, borderTopWidth: 0, gap: 10 },
   chatInput:          { flex: 1, backgroundColor: c.chatInputBg, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: c.text, maxHeight: 100, fontFamily: 'Fraunces_400Regular', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3 },
   sendBtn:            { width: 40, height: 40, borderRadius: 20, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center', ...raisedGreen(isDark, 'sm') },

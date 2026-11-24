@@ -9,6 +9,8 @@ import {
   parseIngredients, matchIngredients, applyPortionDeductions,
   type IngredientMatch,
 } from '../lib/recipe-inventory';
+import FoodIcon from '@/components/food-icon';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface Props {
   visible: boolean;
@@ -128,7 +130,7 @@ export function PortionDeductionSheet({
               fontSize: 18, fontWeight: '700', color: colors.brand,
               fontFamily: 'Fraunces_600SemiBold',
             }}>
-              🍳 Update your inventory
+              Update your inventory
             </Text>
             <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>
               {matches.length > 0
@@ -140,14 +142,14 @@ export function PortionDeductionSheet({
           {/* Content */}
           {noInventory ? (
             <View style={{ alignItems: 'center', padding: 36, gap: 10 }}>
-              <Text style={{ fontSize: 36 }}>🛒</Text>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="cart-outline" size={28} color={colors.chipText} /></View>
               <Text style={{ fontSize: 14, color: colors.textSub, textAlign: 'center', lineHeight: 20 }}>
                 Your inventory is empty.{'\n'}Add items on the Home tab first.
               </Text>
             </View>
           ) : matches.length === 0 ? (
             <View style={{ alignItems: 'center', padding: 36, gap: 10 }}>
-              <Text style={{ fontSize: 36 }}>🔍</Text>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="search-outline" size={28} color={colors.chipText} /></View>
               <Text style={{ fontSize: 14, color: colors.textSub, textAlign: 'center', lineHeight: 20 }}>
                 No recipe ingredients matched{'\n'}items in your inventory.
               </Text>
@@ -190,7 +192,7 @@ export function PortionDeductionSheet({
                       </TouchableOpacity>
 
                       {/* Icon + name */}
-                      <Text style={{ fontSize: 20 }}>{m.item.icon || '🥘'}</Text>
+                      <FoodIcon emoji={m.item.icon} size={32} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>
                           {m.item.baseName}
@@ -231,7 +233,7 @@ export function PortionDeductionSheet({
                         marginTop: 6, marginLeft: 32,
                       }}>
                         {remaining <= 0
-                          ? '→ Fully used up — will be marked gone good 🌱'
+                          ? 'All used up. It will be marked as gone good.'
                           : `→ ${fmtQty(remaining)}${m.item.unit ? ` ${m.item.unit}` : ''} remaining`}
                       </Text>
                     )}

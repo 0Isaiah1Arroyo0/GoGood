@@ -17,6 +17,8 @@ import {
 } from './lib/collections';
 import { addToShoppingList, addToHouseholdShoppingList } from './lib/shopping-list';
 import { HOUSEHOLD_KEY } from './lib/household';
+import FoodIcon from '@/components/food-icon';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,15 +38,15 @@ interface IngredientStatus {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function detectPlatformEmoji(platform: string): string {
-  const map: Record<string, string> = {
-    TikTok: '🎵',
-    Instagram: '📸',
-    Facebook: '📘',
-    YouTube: '▶️',
-    Web: '🌐',
+function detectPlatformEmoji(platform: string): keyof typeof Ionicons.glyphMap {
+  const map: Record<string, keyof typeof Ionicons.glyphMap> = {
+    TikTok: 'logo-tiktok',
+    Instagram: 'logo-instagram',
+    Facebook: 'logo-facebook',
+    YouTube: 'logo-youtube',
+    Web: 'globe-outline',
   };
-  return map[platform] ?? '🌐';
+  return map[platform] ?? 'globe-outline';
 }
 
 function parseRecipeMacros(content: string): SavedRecipe['recipeMacros'] {
@@ -84,7 +86,7 @@ async function matchAgainstInventory(recipeContent: string): Promise<IngredientS
 
 // ─── CollectionPicker ────────────────────────────────────────────────────────
 
-const PICKER_EMOJIS = ['🍳','🥗','🍝','🥘','🍲','🥩','🐟','🥦','🍜','🌮','🍱','🫕','🥐','🌯','🍛','🍣'];
+const PICKER_EMOJIS = ['🍳','🥗','🍝','🥘','🥩','🍗','🐟','🥕','🌮','🍚','🍕','🥐','🍎','🧁','🍦','☕']; // shown as line icons
 
 function CollectionPicker({ visible, collections, onSelect, onCreateAndSelect, onClose, colors }: {
   visible: boolean;
@@ -154,7 +156,7 @@ function CollectionPicker({ visible, collections, onSelect, onCreateAndSelect, o
                         borderColor: newEmoji === e ? colors.teal : colors.border,
                       }}
                     >
-                      <Text style={{ fontSize: 20 }}>{e}</Text>
+                      <FoodIcon emoji={e} size={22} bare color={newEmoji === e ? colors.chipText : colors.textSub} />
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -200,7 +202,7 @@ function CollectionPicker({ visible, collections, onSelect, onCreateAndSelect, o
                     }}
                     activeOpacity={0.7}
                   >
-                    <Text style={{ fontSize: 24 }}>{col.emoji}</Text>
+                    <FoodIcon emoji={col.emoji} size={36} />
                     <Text style={{ fontSize: 15, fontWeight: '500', color: colors.text, flex: 1 }}>{col.name}</Text>
                   </TouchableOpacity>
                 ))}
@@ -357,7 +359,7 @@ export default function SocialRecipeImportScreen() {
     }
     setAddedToList(true);
     Alert.alert(
-      `Added to Shopping List 🛒`,
+      'Added to your shopping list',
       `${newItems.length} ingredient${newItems.length !== 1 ? 's' : ''} added to your shopping list.`,
     );
   };
@@ -379,7 +381,7 @@ export default function SocialRecipeImportScreen() {
       };
       await persistSavedRecipes([newRecipe, ...existing]);
       Alert.alert(
-        'Recipe Saved! 📚',
+        'Recipe saved',
         `"${extracted.name}" has been added to your${collectionId ? ' collection' : ' recipes'}.`,
         [{ text: 'View Recipes', onPress: () => router.back() }],
       );
@@ -437,7 +439,7 @@ export default function SocialRecipeImportScreen() {
                   borderWidth: 0.5, borderColor: !pasteMode ? colors.btnPrimary : colors.border,
                 }}
               >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: !pasteMode ? 'white' : colors.textSub }}>🔗 Paste Link</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: !pasteMode ? 'white' : colors.textSub }}>Paste link</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => { setPasteMode(true); setState('idle'); setErrorMsg(''); }}
@@ -447,13 +449,13 @@ export default function SocialRecipeImportScreen() {
                   borderWidth: 0.5, borderColor: pasteMode ? colors.btnPrimary : colors.border,
                 }}
               >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: pasteMode ? 'white' : colors.textSub }}>📋 Paste Caption</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: pasteMode ? 'white' : colors.textSub }}>Paste caption</Text>
               </TouchableOpacity>
             </View>
 
             {!pasteMode ? (
               <>
-                <Text style={styles.sectionLabel}>📲 POST URL</Text>
+                <Text style={styles.sectionLabel}>POST URL</Text>
                 <TextInput
                   style={styles.urlInput}
                   value={url}
@@ -473,7 +475,7 @@ export default function SocialRecipeImportScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.sectionLabel}>📋 RECIPE CAPTION</Text>
+                <Text style={styles.sectionLabel}>RECIPE CAPTION</Text>
                 <TextInput
                   style={[styles.urlInput, { minHeight: 120, textAlignVertical: 'top', paddingTop: 12 }]}
                   value={pasteText}
@@ -519,7 +521,7 @@ export default function SocialRecipeImportScreen() {
           {/* ── Error state ── */}
           {state === 'error' && (
             <View style={styles.errorCard}>
-              <Text style={{ fontSize: 32, marginBottom: 10 }}>😕</Text>
+              <View style={{ marginBottom: 10 }}><View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.goneBadBg, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="alert-outline" size={26} color={colors.goneBadText} /></View></View>
               <Text style={styles.errorTitle}>Couldn't extract recipe</Text>
               <Text style={styles.errorMsg}>{errorMsg}</Text>
               <Text style={styles.errorTip}>
@@ -536,7 +538,7 @@ export default function SocialRecipeImportScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <View style={styles.platformBadge}>
-                      <Text style={{ fontSize: 12 }}>{platformEmoji}</Text>
+                      <Ionicons name={platformEmoji} size={13} color={colors.textSub} />
                       <Text style={styles.platformBadgeText}>{platform}</Text>
                     </View>
                   </View>
@@ -550,7 +552,7 @@ export default function SocialRecipeImportScreen() {
                   {ingredients.have.length > 0 && (
                     <>
                       <Text style={[styles.ingredientSectionLabel, { color: colors.teal }]}>
-                        ✅ IN YOUR PANTRY · {ingredients.have.length}
+                        IN YOUR KITCHEN · {ingredients.have.length}
                       </Text>
                       <View style={styles.chipRow}>
                         {ingredients.have.map((ing, i) => (
@@ -563,7 +565,7 @@ export default function SocialRecipeImportScreen() {
                   {ingredients.need.length > 0 && (
                     <>
                       <Text style={[styles.ingredientSectionLabel, { color: '#E8756A', marginTop: ingredients.have.length > 0 ? 14 : 0 }]}>
-                        🛒 YOU'LL NEED · {ingredients.need.length}
+                        YOU'LL NEED · {ingredients.need.length}
                       </Text>
                       <View style={styles.chipRow}>
                         {ingredients.need.map((ing, i) => (
@@ -598,8 +600,8 @@ export default function SocialRecipeImportScreen() {
                   onPress={() => setPreviewExpanded(v => !v)}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.previewToggleLabel}>📄 RECIPE PREVIEW</Text>
-                  <Text style={{ fontSize: 18, color: colors.textMuted }}>{previewExpanded ? '▲' : '▼'}</Text>
+                  <Text style={styles.previewToggleLabel}>RECIPE PREVIEW</Text>
+                  <Ionicons name={previewExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
                 </TouchableOpacity>
                 {previewExpanded && (
                   <Text style={styles.previewText}>{extracted.recipe}</Text>
@@ -616,7 +618,7 @@ export default function SocialRecipeImportScreen() {
                 {saving ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text style={styles.saveBtnText}>📚 Save Recipe to Collection</Text>
+                  <Text style={styles.saveBtnText}>Save to Recipes</Text>
                 )}
               </TouchableOpacity>
             </>

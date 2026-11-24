@@ -494,6 +494,7 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
 
     let items: ParsedItem[] = []
     let rawClaudeText = ''
+    const tries: { prompt: string; status: number; stop: string | null; text: string }[] = []
     let attempts = 0
 
     while (attempts < 2) {
@@ -510,7 +511,8 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
           model: isPhoto ? 'claude-opus-5-5' : 'claude-sonnet-4-6',
           // Opus 5.5 thinks before answering, and that counts toward max_tokens, so give photo scans more room
           max_tokens: isPhoto ? 32000 : 16000,
-          system: isLabels ? labelsPrompt : isPhoto ? photoPrompt : systemPrompt,
+          // If reading every label found nothing, the second try just names what's visible
+          system: isLabels && attempts === 1 ? labelsPrompt : isPhoto ? photoPrompt : systemPrompt,
           messages: [{
             role: 'user',
             content: [{
@@ -538,11 +540,13 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
       if (!anthropicRes.ok) {
         const errText = await anthropicRes.text()
         rawClaudeText = `API error ${anthropicRes.status}: ${errText}`
+        tries.push({ prompt: isLabels && attempts === 1 ? 'labels' : isPhoto ? 'photo' : 'receipt', status: anthropicRes.status, stop: null, text: errText.slice(0, 2000) })
         continue
       }
 
       const anthropicData = await anthropicRes.json()
       rawClaudeText = (anthropicData?.content ?? []).find((b: any) => b?.type === 'text')?.text ?? ''
+      tries.push({ prompt: isLabels && attempts === 1 ? 'labels' : isPhoto ? 'photo' : 'receipt', status: 200, stop: anthropicData?.stop_reason ?? null, text: rawClaudeText.slice(0, 4000) })
       if (anthropicData?.stop_reason === 'max_tokens') {
         console.log('[scan-receipt] response hit max_tokens — item list was cut off')
       }
@@ -557,6 +561,13 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
     if (items.length === 0) {
       const apiRejected = rawClaudeText.startsWith('API error')
       console.log('[scan-receipt] no items:', rawClaudeText.slice(0, 500))
+      // Keep what Claude said so failed scans can be diagnosed later
+      try {
+        await supabase.from('scan_failures').insert({
+          user_id: user.id, mode, location_hint: locationHint,
+          image_bytes: approxBytes, ocr_chars: ocrText ? String(ocrText).length : 0, tries,
+        })
+      } catch { /* diagnostics are best-effort */ }
       return json({
         sessionId: null,
         items: [],
@@ -690,7 +701,15 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
       store_name:      isPhoto ? null : (storeName ?? null),
     }))
 
-    await supabase.from('draft_items').insert(rows)
+    const { error: saveErr } = await supabase.from('draft_items').insert(rows)
+    if (saveErr) {
+      console.log('[scan-receipt] saving items failed:', saveErr.message)
+      return json({
+        sessionId: null, items: [], error: 'save_failed',
+        message: `We found ${rows.length} item${rows.length === 1 ? '' : 's'} but couldn't save them for review. Please try again.`,
+        debug: saveErr.message,
+      })
+    }
 
     const debugSummary = {
       skusExtracted: items.map(i => ({ name: i.name, sku: i.sku })),

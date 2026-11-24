@@ -993,10 +993,11 @@ function imageMimeFromBase64(b64: string): string {
 }
 
 // ─── Scan Status Strip (receipt + label scans) ───────────────────────────────
-function ScanStatusStrip({ visible, label, sublabel, blocking = false, slowHint }: {
+function ScanStatusStrip({ visible, label, sublabel, blocking = false, slowHint, onCancel }: {
   visible: boolean; label: string; sublabel: string;
   blocking?: boolean;   // cover the whole app so a stray tap can't leave mid-scan
   slowHint?: string;    // shown under the sublabel once the scan has run a while
+  onCancel?: () => void; // shows a Cancel button that stops waiting for the scan
 }) {
   const insets = useSafeAreaInsets();
   const [elapsed, setElapsed] = useState(0);
@@ -1063,6 +1064,15 @@ function ScanStatusStrip({ visible, label, sublabel, blocking = false, slowHint 
           <Text style={{ color: '#5DCAA5', fontSize: 12, marginTop: 6, lineHeight: 17 }}>{slowHint}</Text>
         ) : null}
       </View>
+      {onCancel ? (
+        <TouchableOpacity
+          onPress={onCancel}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={{ alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.14)' }}
+        >
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Cancel</Text>
+        </TouchableOpacity>
+      ) : null}
     </Animated.View>
   );
 
@@ -1453,6 +1463,7 @@ export default function FridgeScreen() {
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [barcodeScanned, setBarcodeScanned]         = useState(false);
   const [scanningReceipt, setScanningReceipt]       = useState(false);
+  const scanAbortRef = useRef<AbortController | null>(null);
   const [scanMode, setScanMode] = useState<'receipt' | 'photo' | 'labels'>('receipt');
   const [scanningLabel,   setScanningLabel]         = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -2239,6 +2250,7 @@ export default function FridgeScreen() {
     locationHint: Category | null = null,
   ) => {
     const isPhoto = mode !== 'receipt'; // photo of items or of several labels
+    const abort = new AbortController();
     try {
       let result: ImagePicker.ImagePickerResult;
       if (source === 'camera') {
@@ -2259,14 +2271,17 @@ export default function FridgeScreen() {
       // presenting the full-screen scanning overlay while another pop-up is closing.
       await new Promise<void>(r => setTimeout(r, 750));
       setScanMode(mode);
+      scanAbortRef.current = abort;
       setScanningReceipt(true);
       // Photos of items/labels: read the text on the phone first and send it along,
       // so names and dates come from what's actually printed.
       const ocrLines = isPhoto ? await readTextOnDevice(result.assets[0].uri) : null;
+      if (abort.signal.aborted) return;
       const { data: { session } } = await import('../lib/supabase').then(m => m.supabase.auth.getSession());
       if (!session) { showToast('Please sign in to scan receipts', true); setScanningReceipt(false); return; }
       const res = await fetch(`${SUPABASE_URL}/functions/v1/scan-receipt`, {
         method: 'POST',
+        signal: abort.signal,
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({
           imageBase64: result.assets[0].base64,
@@ -2309,9 +2324,20 @@ export default function FridgeScreen() {
       }
       router.push({ pathname: '/receipt-review', params: { sessionId: data.sessionId, storeName: storeName ?? '', mode } } as any);
     } catch {
-      showToast(`${isPhoto ? 'Photo' : 'Receipt'} scan failed — check your connection`, true);
+      if (!abort.signal.aborted) showToast(`${isPhoto ? 'Photo' : 'Receipt'} scan failed — check your connection`, true);
+    } finally {
+      if (scanAbortRef.current === abort) scanAbortRef.current = null;
     }
+    if (!abort.signal.aborted) setScanningReceipt(false);
+  };
+
+  // Stop waiting for the current receipt/photo scan and close the scanning card
+  const cancelScan = () => {
+    scanAbortRef.current?.abort();
+    scanAbortRef.current = null;
     setScanningReceipt(false);
+    Haptics.selectionAsync();
+    showToast('Scan cancelled');
   };
 
   const scanReceipt = () => {
@@ -2624,9 +2650,7 @@ export default function FridgeScreen() {
               onPress={() => toggleSection(key)}
               activeOpacity={0.7}
             >
-              <View style={[styles.categoryIcon, { backgroundColor: colors.chipBg }]}>
-                <MaterialCommunityIcons name={CATEGORY_GLYPHS[cat] ?? 'silverware-fork-knife'} size={12} color={colors.chipText} />
-              </View>
+              <MaterialCommunityIcons name={CATEGORY_GLYPHS[cat] ?? 'silverware-fork-knife'} size={14} color={colors.textMuted} style={styles.categoryIcon} />
               <Text style={[styles.categoryHeaderText, { color: colors.textSub }]}>{cat}</Text>
               <View style={[styles.categoryHeaderLine, { backgroundColor: colors.border }]} />
               <Text style={[styles.categoryHeaderCount, { color: colors.textMuted }]}>{group.length}</Text>
@@ -2797,9 +2821,10 @@ export default function FridgeScreen() {
         blocking
         label={scanMode === 'receipt' ? 'Scanning receipt' : 'Finding your items'}
         sublabel={scanMode !== 'receipt'
-          ? "Please stay on this screen and don't tap anything. This can take up to a minute."
-          : "Please stay on this screen and don't tap anything. Long receipts can take up to a minute."}
+          ? 'Please stay on this screen. This can take up to a minute.'
+          : 'Please stay on this screen. Long receipts can take up to a minute.'}
         slowHint="Still working — identifying every item and looking up nutrition."
+        onCancel={cancelScan}
       />
       <ScanStatusStrip visible={scanningLabel}   label="reading label"    sublabel="Extracting expiry date…" />
       <BarcodeScanStrip visible={barcodeProcessing} scanSuccess={scanSuccess} scannedEmoji={scannedEmoji} scannedName={scannedName} />
@@ -3611,7 +3636,7 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   // Category header (level 2 in All, level 1 in individual tabs)
   categoryHeader:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 20, paddingBottom: 10 },
   categoryHeaderNested:  { paddingTop: 14, paddingBottom: 8 },
-  categoryIcon:          { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: -2 },
+  categoryIcon:          { marginRight: -4 },
   categoryHeaderText:    { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.2 },
   categoryHeaderLine:    { flex: 1, height: 0.5 },
   categoryChevron:       { fontSize: 14, fontWeight: '700', width: 16, textAlign: 'center' },

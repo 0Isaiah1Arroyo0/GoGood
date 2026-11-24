@@ -50,14 +50,6 @@ const FAQ = [
   { q: 'Can I share with family?', a: 'Yes. Open the Household tab to create a shared list or join one with an invite code. Everyone in the household sees and edits the same inventory.' },
 ];
 
-const PRO_FEATURES = [
-  { title: 'Unlimited label scanning',  sub: 'Scan as many items as you want' },
-  { title: 'AI recipe suggestions',      sub: "Recipes based on what's about to expire" },
-  { title: 'Household sharing',         sub: 'Share your inventory with family' },
-  { title: 'Waste analytics',            sub: 'Track food and money saved over time' },
-  { title: 'Priority support',           sub: 'Get help fast when you need it' },
-];
-
 // ─── Inner Sheet (slide-up modal) ─────────────────────────────────────────────
 
 function Sheet({ visible, onClose, children, colors }: {
@@ -157,7 +149,6 @@ export function useAppDrawer() {
   // ── Modal visibility ────────────────────────────────────────────────────────
   const [showProfile,       setShowProfile]       = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showPro,           setShowPro]           = useState(false);
   const [showHelp,          setShowHelp]          = useState(false);
   const [showRate,          setShowRate]          = useState(false);
 
@@ -171,6 +162,26 @@ export function useAppDrawer() {
   const [editNotifs,    setEditNotifs]    = useState<Notifs>(EMPTY_NOTIFS);
   const [rating,        setRating]        = useState(0);
   const [review,        setReview]        = useState('');
+
+  // Saves the stars and any written feedback, then (for happy users) shows Apple's
+  // own rating pop-up. That pop-up needs a newer app build; older builds just say thanks.
+  const submitRating = async () => {
+    const stars = rating, message = review.trim();
+    setShowRate(false); setRating(0); setReview('');
+    supabase.from('app_feedback').insert({
+      user_id: user?.id ?? null, rating: stars, message: message || null,
+      app_version: Constants.expoConfig?.version ?? null, platform: Platform.OS,
+    }).then(() => {}, () => {});
+    if (stars >= 4) {
+      try {
+        const StoreReview = require('expo-store-review');
+        if (await StoreReview.isAvailableAsync()) { await StoreReview.requestReview(); return; }
+      } catch { /* this build doesn't include the rating pop-up yet */ }
+    }
+    setTimeout(() => Alert.alert('Thank you!', stars >= 4
+      ? "We're so glad you're enjoying Go Good."
+      : "Thanks for the feedback. We read every note and use it to make Go Good better."), 350);
+  };
   const [openFaq,       setOpenFaq]       = useState<number | null>(null);
 
   // ── Load from AsyncStorage ──────────────────────────────────────────────────
@@ -637,8 +648,6 @@ export function useAppDrawer() {
         </View>
         {([
           { key: 'expiry', title: 'Expiry alerts',  sub: 'Get notified 3 days before items expire' },
-          { key: 'digest', title: 'Daily digest',    sub: 'Morning summary of what to use today' },
-          { key: 'weekly', title: 'Weekly report',   sub: 'See your food waste stats every Sunday' },
         ] as const).map(n => (
           <View key={n.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
             <View style={{ flex: 1 }}>
@@ -651,31 +660,6 @@ export function useAppDrawer() {
         ))}
         <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 20 }]} onPress={saveNotifications}>
           <Text style={sharedStyles.confirmBtnText}>Save</Text>
-        </TouchableOpacity>
-      </Sheet>
-
-      {/* ── Go Good Pro modal ── */}
-      <Sheet visible={showPro} onClose={() => setShowPro(false)} colors={colors}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <Text style={[sharedStyles.modalTitle, { color: colors.text }]}>Go Good Pro</Text>
-          <TouchableOpacity onPress={() => setShowPro(false)}><Text style={{ fontSize: 18, color: '#aaa' }}>✕</Text></TouchableOpacity>
-        </View>
-        <View style={{ backgroundColor: '#E1F5EE', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginBottom: 16 }}>
-          <Text style={{ fontSize: 10, fontWeight: '600', color: '#085041' }}>COMING SOON</Text>
-        </View>
-        {PRO_FEATURES.map(f => (
-          <View key={f.title} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-            <View>
-              <Text style={{ fontSize: 13, fontWeight: '500', color: colors.text }}>{f.title}</Text>
-              <Text style={{ fontSize: 11, color: colors.textSub }}>{f.sub}</Text>
-            </View>
-          </View>
-        ))}
-        <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 20 }]} onPress={() => setShowPro(false)}>
-          <Text style={sharedStyles.confirmBtnText}>Join waitlist</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={sharedStyles.cancelBtn} onPress={() => setShowPro(false)}>
-          <Text style={sharedStyles.cancelText}>maybe later</Text>
         </TouchableOpacity>
       </Sheet>
 
@@ -729,10 +713,7 @@ export function useAppDrawer() {
               placeholder="Tell us what you think (optional)"
               placeholderTextColor={colors.placeholder}
               value={review} onChangeText={setReview} multiline />
-            <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 12 }]} onPress={() => {
-              if (rating === 5) Linking.openURL('https://apps.apple.com/app/id0000000000');
-              setShowRate(false); setRating(0); setReview('');
-            }}>
+            <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 12 }]} onPress={submitRating}>
               <Text style={sharedStyles.confirmBtnText}>Submit</Text>
             </TouchableOpacity>
           </>

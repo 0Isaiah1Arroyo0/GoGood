@@ -12,6 +12,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/auth';
 import { useTheme } from '../context/theme';
 import { useAuthStyles, IconBadge, BackButton } from '@/components/auth-ui';
+import * as WebBrowser from 'expo-web-browser';
+import { TERMS_URL, PRIVACY_URL } from '@/constants/legal';
 
 // ── Password strength ────────────────────────────────────────────────────────
 
@@ -365,8 +367,8 @@ export default function SignupScreen() {
 
         <Text style={styles.terms}>
           By creating an account you agree to our{' '}
-          <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
+          <Text style={styles.termsLink} onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)} suppressHighlighting={false}>Terms of Service</Text> and{' '}
+          <Text style={styles.termsLink} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)} suppressHighlighting={false}>Privacy Policy</Text>
         </Text>
 
         <View style={styles.switchRow}>

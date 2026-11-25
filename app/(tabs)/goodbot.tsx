@@ -31,7 +31,9 @@ import { addToShoppingList, addToHouseholdShoppingList } from '../lib/shopping-l
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
 import { raised, raisedGreen } from '@/components/raised';
 import RecipeView, { parseRecipe } from '@/components/recipe-view';
+import ServingsScaler, { extractServings, scaleContent } from '@/components/servings-scaler';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { DialogHost, showAlert } from '@/components/dialog';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -253,6 +255,12 @@ export default function GoodBotScreen() {
   const [saveDishDays,   setSaveDishDays]   = useState('3');
   const [saveDishServings, setSaveDishServings] = useState('2');
 
+  // Serving count picked on each recipe message (message id → servings)
+  const [servingsFor, setServingsFor] = useState<Record<string, number>>({});
+  const baseServingsOf = (msg: ChatMessage) => extractServings(msg.content, msg.recipeMacros?.servings);
+  const servingsOf     = (msg: ChatMessage) => servingsFor[msg.id] ?? baseServingsOf(msg);
+  const scaledContentOf = (msg: ChatMessage) => scaleContent(msg.content, servingsOf(msg) / baseServingsOf(msg));
+
   const scrollRef        = useRef<ScrollView>(null);
   const convoRef         = useRef<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const expiringRef      = useRef<(StoredItem & { days: number })[]>([]);
@@ -436,7 +444,7 @@ export default function GoodBotScreen() {
   // Out of questions for today: free users see the paywall, Pro users a note
   const explainLimit = () => {
     if (!isPremium) showPaywall();
-    else Alert.alert("Good Bot's resting", `You've asked ${PRO_DAILY} questions today. Good Bot will be back at midnight.`);
+    else showAlert("Good Bot's resting", `You've asked ${PRO_DAILY} questions today. Good Bot will be back at midnight.`);
   };
 
   const send = async (text: string) => {
@@ -608,7 +616,7 @@ export default function GoodBotScreen() {
     }
     setShoppingAddedIds(prev => new Set(prev).add(msg.id));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert('Added to shopping list', `${missing.length} missing ingredient${missing.length !== 1 ? 's' : ''} added to your list.`);
+    showAlert('Added to shopping list', `${missing.length} missing ingredient${missing.length !== 1 ? 's' : ''} added to your list.`);
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────────
@@ -658,10 +666,16 @@ export default function GoodBotScreen() {
                         </View>
                       <View style={[styles.botMsgWrap, { flex: 1 }]}>
                         {(() => {
-                          const recipe = parseRecipe(msg.content);
+                          const recipe = parseRecipe(scaledContentOf(msg));
                           return recipe ? (
                             <View style={[styles.botBubble, { padding: 16 }]}>
-                              <RecipeView recipe={recipe} />
+                              <ServingsScaler
+                                flat
+                                base={baseServingsOf(msg)}
+                                target={servingsOf(msg)}
+                                onChange={n => { Haptics.selectionAsync(); setServingsFor(prev => ({ ...prev, [msg.id]: n })); }}
+                              />
+                              <RecipeView key={servingsOf(msg)} recipe={recipe} />
                             </View>
                           ) : (
                             <View style={styles.botBubble}>
@@ -681,7 +695,7 @@ export default function GoodBotScreen() {
                               <Text style={styles.macroCardTitle}>MACROS PER SERVING</Text>
                               {(msg.recipeMacros.servings || msg.recipeMacros.servingSize) && (
                                 <Text style={styles.macroCardServing}>
-                                  {msg.recipeMacros.servings ? `${msg.recipeMacros.servings} serving${msg.recipeMacros.servings !== 1 ? 's' : ''}` : ''}
+                                  {msg.recipeMacros.servings ? `${servingsOf(msg)} serving${servingsOf(msg) !== 1 ? 's' : ''}` : ''}
                                   {msg.recipeMacros.servings && msg.recipeMacros.servingSize ? ' · ' : ''}
                                   {msg.recipeMacros.servingSize ?? ''}
                                 </Text>
@@ -924,6 +938,7 @@ export default function GoodBotScreen() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
+        <DialogHost />
       </Modal>
 
       {drawerEl}
@@ -938,11 +953,11 @@ export default function GoodBotScreen() {
           const macros = msg?.recipeMacros;
           setSaveDishName(name);
           setSaveDishDays(String(macros?.fridgeDays ?? 3));
-          setSaveDishServings(String(macros?.servings ?? 2));
+          setSaveDishServings(String(msg ? servingsOf(msg) : (macros?.servings ?? 2)));
           // Wait for PortionDeductionSheet dismiss animation (~260ms) before showing next modal
           setTimeout(() => setSaveDishMsg(msg), 320);
         }}
-        recipeContent={cookSheetMsg?.content ?? ''}
+        recipeContent={cookSheetMsg ? scaledContentOf(cookSheetMsg) : ''}
         userId={user?.id}
         householdId={householdIdRef.current ?? null}
         colors={colors}
@@ -1016,7 +1031,7 @@ export default function GoodBotScreen() {
                 const days = Math.max(1, parseInt(saveDishDays) || 3);
                 await saveDishToFridge(saveDishName.trim(), days, servings, saveDishMsg?.recipeMacros ?? undefined);
                 setSaveDishMsg(null);
-                Alert.alert('Saved to fridge', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
+                showAlert('Saved to fridge', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
               }}
             >
               <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 15 }}>
@@ -1027,13 +1042,14 @@ export default function GoodBotScreen() {
               style={{ alignItems: 'center', paddingVertical: 10 }}
               onPress={() => {
                 setSaveDishMsg(null);
-                Alert.alert('Enjoy your meal!', 'Inventory updated from recipe.');
+                showAlert('Enjoy your meal!', 'Inventory updated from recipe.');
               }}
             >
               <Text style={{ color: colors.textMuted, fontSize: 13 }}>Skip — I'll eat it all now</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+        <DialogHost />
       </Modal>
     </View>
   );

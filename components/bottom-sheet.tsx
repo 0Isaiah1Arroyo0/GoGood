@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Easing, Keyboard, Modal, PanResponder, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/app/context/theme';
+import { DialogHost } from '@/components/dialog';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -106,6 +107,7 @@ export default function BottomSheet({ visible, onClose, children }: { visible: b
           <Animated.View style={{ height: kbSpace }} />
         </Animated.View>
       </View>
+      <DialogHost />
     </Modal>
   );
 }

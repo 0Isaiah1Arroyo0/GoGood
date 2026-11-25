@@ -30,6 +30,8 @@ import { useSubscription } from '../context/subscription';
 import { seedSampleItems } from '../lib/seed-items';
 import { raised, raisedGreen } from '@/components/raised';
 import FoodIcon from '@/components/food-icon';
+import ScanStatusStrip from '@/components/scan-status-strip';
+import { showAlert } from '@/components/dialog';
 
 type Badge = 'red' | 'amber' | 'green' | 'blue' | 'black';
 type Category = 'fridge' | 'freezer' | 'pantry';
@@ -990,101 +992,6 @@ function imageMimeFromBase64(b64: string): string {
   if (b64.startsWith('R0lGOD')) return 'image/gif';
   if (b64.startsWith('UklGR'))  return 'image/webp';
   return 'image/jpeg';
-}
-
-// ─── Scan Status Strip (receipt + label scans) ───────────────────────────────
-function ScanStatusStrip({ visible, label, sublabel, blocking = false, slowHint, onCancel }: {
-  visible: boolean; label: string; sublabel: string;
-  blocking?: boolean;   // cover the whole app so a stray tap can't leave mid-scan
-  slowHint?: string;    // shown under the sublabel once the scan has run a while
-  onCancel?: () => void; // shows a Cancel button that stops waiting for the scan
-}) {
-  const insets = useSafeAreaInsets();
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!visible) { setElapsed(0); return; }
-    const t = setInterval(() => setElapsed(e => e + 1), 1000);
-    return () => clearInterval(t);
-  }, [visible]);
-  const tabSpace = useTabBarSpace(); // sit above the floating bottom bar
-  const translateY = useRef(new Animated.Value(120)).current;
-  const dot1 = useRef(new Animated.Value(0.3)).current;
-  const dot2 = useRef(new Animated.Value(0.3)).current;
-  const dot3 = useRef(new Animated.Value(0.3)).current;
-  const dotLoopRef = useRef<Animated.CompositeAnimation | null>(null);
-
-  useEffect(() => {
-    if (visible) {
-      Animated.spring(translateY, { toValue: 0, damping: 22, stiffness: 260, useNativeDriver: true }).start();
-      dotLoopRef.current = Animated.loop(
-        Animated.sequence([
-          Animated.timing(dot1, { toValue: 1,   duration: 220, useNativeDriver: true }),
-          Animated.timing(dot1, { toValue: 0.3, duration: 220, useNativeDriver: true }),
-          Animated.timing(dot2, { toValue: 1,   duration: 220, useNativeDriver: true }),
-          Animated.timing(dot2, { toValue: 0.3, duration: 220, useNativeDriver: true }),
-          Animated.timing(dot3, { toValue: 1,   duration: 220, useNativeDriver: true }),
-          Animated.timing(dot3, { toValue: 0.3, duration: 220, useNativeDriver: true }),
-        ])
-      );
-      dotLoopRef.current.start();
-    } else {
-      dotLoopRef.current?.stop();
-      dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3);
-      Animated.timing(translateY, { toValue: 120, duration: 200, useNativeDriver: true }).start();
-    }
-    return () => dotLoopRef.current?.stop();
-  }, [visible]);
-
-  const card = (
-    <Animated.View
-      pointerEvents={visible ? 'auto' : 'none'}
-      style={{
-        position: 'absolute', bottom: tabSpace + 8, left: 16, right: 16,
-        paddingBottom: 16,
-        paddingTop: 18, paddingHorizontal: 24,
-        backgroundColor: '#0A5740',
-        flexDirection: 'row', alignItems: 'center', gap: 16,
-        borderRadius: 16,
-        shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.2, shadowRadius: 10, elevation: 10,
-        opacity: translateY.interpolate({ inputRange: [0, 120], outputRange: [1, 0] }),
-        transform: [{ translateY: translateY.interpolate({ inputRange: [0, 120], outputRange: [0, 40] }) }],
-        zIndex: 200,
-      }}
-    >
-      <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
-        {([dot1, dot2, dot3] as Animated.Value[]).map((dot, i) => (
-          <Animated.View key={i} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#5DCAA5', opacity: dot }} />
-        ))}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600', fontFamily: 'Fraunces_400Regular' }}>{label}</Text>
-        <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, marginTop: 2, lineHeight: 17 }}>{sublabel}</Text>
-        {slowHint && elapsed >= 12 ? (
-          <Text style={{ color: '#5DCAA5', fontSize: 12, marginTop: 6, lineHeight: 17 }}>{slowHint}</Text>
-        ) : null}
-      </View>
-      {onCancel ? (
-        <TouchableOpacity
-          onPress={onCancel}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          style={{ alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.14)' }}
-        >
-          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Cancel</Text>
-        </TouchableOpacity>
-      ) : null}
-    </Animated.View>
-  );
-
-  if (!blocking) return card;
-  // Blocking: dim and cover everything (including the bottom bar) until the scan finishes
-  return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}>
-        {card}
-      </View>
-    </Modal>
-  );
 }
 
 // ─── Barcode Scan Strip ────────────────────────────────────────────────────────
@@ -2054,7 +1961,7 @@ export default function FridgeScreen() {
 
   // Ask why an item is being removed before doing it.
   const confirmRemove = (item: Item) => {
-    Alert.alert(
+    showAlert(
       `Remove ${item.baseName}?`,
       "Why are you removing it? This can't be undone.",
       [
@@ -2098,7 +2005,7 @@ export default function FridgeScreen() {
     if (!isPremium) { showPaywall(); return; }
     try {
       if (cameraPermission?.status === 'denied') {
-        Alert.alert(
+        showAlert(
           'Camera access needed',
           'Please enable camera access in Settings to scan barcodes.',
           [
@@ -2158,7 +2065,7 @@ export default function FridgeScreen() {
         setBarcodeProcessing(false);
         setShowBarcodeScanner(false);
         setTimeout(() => {
-          Alert.alert(
+          showAlert(
             'Product not found',
             'This barcode isn\'t in the Open Food Facts database.',
             [
@@ -2231,7 +2138,7 @@ export default function FridgeScreen() {
       setBarcodeProcessing(false);
       setShowBarcodeScanner(false);
       setTimeout(() => {
-        Alert.alert(
+        showAlert(
           'Lookup failed',
           'Couldn\'t reach the product database. Check your connection, or add the item manually.',
           [
@@ -2312,7 +2219,7 @@ export default function FridgeScreen() {
         if (__DEV__) console.log('[scan-receipt] failed:', data.error, data.debug);
         // Close the blocking overlay first — an alert shown on top of it would be dismissed with it
         setScanningReceipt(false);
-        setTimeout(() => Alert.alert(
+        setTimeout(() => showAlert(
           isPhoto ? 'No Items Found' : 'Receipt Not Recognized',
           data.message
             ?? (isPhoto
@@ -2342,12 +2249,12 @@ export default function FridgeScreen() {
 
   const scanReceipt = () => {
     if (!isAnnual) { showPaywall(); return; }
-    Alert.alert(
-      'Scan Walmart Receipt',
-      'Choose how to add your receipt. Item codes on the receipt are used to look up exact nutrition info.',
+    showAlert(
+      'Scan a receipt',
+      'Take a photo of your Walmart receipt or pick one from your photos. Item codes on it help us find exact nutrition.',
       [
-        { text: 'Take Photo',    onPress: () => doScanReceipt('camera',  'Walmart') },
-        { text: 'Photo Library', onPress: () => doScanReceipt('library', 'Walmart') },
+        { text: 'Take photo',              onPress: () => doScanReceipt('camera',  'Walmart') },
+        { text: 'Choose from photo library', onPress: () => doScanReceipt('library', 'Walmart') },
         { text: 'Cancel', style: 'cancel' },
       ],
     );
@@ -2357,23 +2264,23 @@ export default function FridgeScreen() {
   // Label button: one item (fills the expiry date in this form) or several items
   // (adds them all for review), from the camera or the photo library.
   const scanLabel = () => {
-    const pickSource = (onPick: (src: 'camera' | 'library') => void, title: string) =>
-      Alert.alert(title, undefined, [
-        { text: 'Take Photo',    onPress: () => onPick('camera') },
-        { text: 'Photo Library', onPress: () => onPick('library') },
+    const pickSource = (onPick: (src: 'camera' | 'library') => void, title: string, message?: string) =>
+      showAlert(title, message, [
+        { text: 'Take photo',                onPress: () => onPick('camera') },
+        { text: 'Choose from photo library', onPress: () => onPick('library') },
         { text: 'Cancel', style: 'cancel' },
       ]);
-    Alert.alert(
-      'Scan Labels',
-      'Scan one label to fill in its expiry date, or a photo of several items (your fridge, a shelf, or groceries on the counter) to add them all at once.',
+    showAlert(
+      'Scan labels',
+      'One item fills in its expiry date. Several items adds everything in a photo of your fridge, a shelf or the counter.',
       [
-        { text: 'One item', onPress: () => pickSource(src => scanSingleLabel(src), 'Scan One Label') },
+        { text: 'One item', onPress: () => pickSource(src => scanSingleLabel(src), 'Scan one label', 'Get the expiry date in frame and in focus.') },
         {
           text: 'Several items',
           onPress: () => {
             if (!isAnnual) { showPaywall(); return; }
             const hint: Category | null = activeTab === 'all' ? null : activeTab;
-            pickSource(src => doScanReceipt(src, undefined, 'labels', hint), 'Scan Several Items');
+            pickSource(src => doScanReceipt(src, undefined, 'labels', hint), 'Scan several items', 'Fit everything in one well-lit photo with labels facing you.');
           },
         },
         { text: 'Cancel', style: 'cancel' },
@@ -2583,7 +2490,7 @@ export default function FridgeScreen() {
 
     const warning = getStorageWarning(safeName, built.category);
     if (warning) {
-      Alert.alert(
+      showAlert(
         'Heads up — storage mismatch',
         warning,
         [

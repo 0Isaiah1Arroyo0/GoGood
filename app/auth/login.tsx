@@ -10,6 +10,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/auth';
 import { useAuthStyles, IconBadge, BackButton } from '@/components/auth-ui';
+import { showAlert } from '@/components/dialog';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -99,7 +100,7 @@ export default function LoginScreen() {
     const hasFingerprint = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
     const label = hasFace ? 'Face ID' : hasFingerprint ? 'Touch ID' : 'Passcode';
     await new Promise<void>(resolve => {
-      Alert.alert(
+      showAlert(
         `Enable ${label}?`,
         `Sign in instantly next time using ${label}. iOS will ask for your passcode once to authorize this — that's normal and only happens on first setup.`,
         [

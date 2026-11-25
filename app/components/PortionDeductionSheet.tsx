@@ -11,6 +11,7 @@ import {
 } from '../lib/recipe-inventory';
 import FoodIcon from '@/components/food-icon';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { DialogHost } from '@/components/dialog';
 
 interface Props {
   visible: boolean;
@@ -269,6 +270,7 @@ export function PortionDeductionSheet({
           </View>
         </Animated.View>
       </View>
+      <DialogHost />
     </Modal>
   );
 }

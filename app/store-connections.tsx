@@ -13,6 +13,7 @@ import { useAuth } from './context/auth';
 import { useSubscription } from './context/subscription';
 import { supabase } from './lib/supabase';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { showAlert } from '@/components/dialog';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -79,7 +80,7 @@ export default function StoreConnectionsScreen() {
 
   const connectKroger = async () => {
     if (!KROGER_CLIENT_ID) {
-      Alert.alert('Coming Soon', 'Kroger account sync is being set up. In the meantime, use receipt scanning — it works with any store!');
+      showAlert('Coming Soon', 'Kroger account sync is being set up. In the meantime, use receipt scanning — it works with any store!');
       return;
     }
     setConnecting(true);
@@ -106,13 +107,13 @@ export default function StoreConnectionsScreen() {
       });
       const data = await res.json();
       if (data.ok) {
-        Alert.alert('Kroger connected', 'Your Kroger account is linked. Tap "Sync Purchases" to import recent items.');
+        showAlert('Kroger connected', 'Your Kroger account is linked. Tap "Sync Purchases" to import recent items.');
         loadConnections();
       } else {
-        Alert.alert('Connection failed', data.error ?? 'Could not connect Kroger account.');
+        showAlert('Connection failed', data.error ?? 'Could not connect Kroger account.');
       }
     } catch {
-      Alert.alert('Error', 'Could not complete Kroger connection.');
+      showAlert('Error', 'Could not complete Kroger connection.');
     }
   };
 
@@ -130,21 +131,21 @@ export default function StoreConnectionsScreen() {
         body: JSON.stringify({ daysBack: 7 }),
       });
       const data = await res.json();
-      if (data.error) { Alert.alert('Sync failed', data.error); return; }
+      if (data.error) { showAlert('Sync failed', data.error); return; }
       if (!data.sessionId || (data.items?.length ?? 0) === 0) {
-        Alert.alert('Up to date', 'No new Kroger purchases found in the last 7 days.');
+        showAlert('Up to date', 'No new Kroger purchases found in the last 7 days.');
         return;
       }
       loadConnections();
       router.push({ pathname: '/receipt-review', params: { sessionId: data.sessionId, storeName: 'Kroger' } } as any);
     } catch {
-      Alert.alert('Error', 'Could not sync Kroger purchases.');
+      showAlert('Error', 'Could not sync Kroger purchases.');
     }
     setSyncing(false);
   };
 
   const disconnectStore = (store: string) => {
-    Alert.alert(`Disconnect ${STORE_INFO[store]?.name}?`, 'Your saved connection will be removed.', [
+    showAlert(`Disconnect ${STORE_INFO[store]?.name}?`, 'Your saved connection will be removed.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Disconnect', style: 'destructive', onPress: async () => {
         await supabase.from('store_connections').delete().eq('user_id', user?.id).eq('store', store);
@@ -217,7 +218,7 @@ export default function StoreConnectionsScreen() {
                     {!isAnnual ? (
                       <TouchableOpacity
                         style={[styles.actionBtn, { backgroundColor: '#FFD166', flex: 1 }]}
-                        onPress={showPaywall}
+                        onPress={() => showPaywall()}
                       >
                         <Text style={{ color: '#085041', fontWeight: '800', fontSize: 13 }}>Annual plan required</Text>
                       </TouchableOpacity>

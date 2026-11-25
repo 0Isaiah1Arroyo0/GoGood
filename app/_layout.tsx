@@ -11,11 +11,13 @@ import {
 } from '@expo-google-fonts/fraunces';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ShareIntentProvider } from 'expo-share-intent';
 import { ThemeProvider, useTheme } from './context/theme';
 import { AuthProvider } from './context/auth';
 import { SubscriptionProvider } from './context/subscription';
 import PaywallModal from './components/PaywallModal';
 import AppSplash from './components/AppSplash';
+import { DialogHost } from '@/components/dialog';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -36,6 +38,7 @@ function InnerLayout() {
         <Stack.Screen name="store-connections" />
         <Stack.Screen name="social-recipe-import" options={{ animation: 'none' }} />
       </Stack>
+      <DialogHost />
       <PaywallModal />
     </View>
   );
@@ -67,14 +70,16 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <SubscriptionProvider>
-            <InnerLayout />
-          </SubscriptionProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <ShareIntentProvider>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <SubscriptionProvider>
+              <InnerLayout />
+            </SubscriptionProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ShareIntentProvider>
   );
 }

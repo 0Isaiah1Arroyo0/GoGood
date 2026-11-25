@@ -23,6 +23,7 @@ const BAD_BG   = 'rgba(208,100,79,0.14)';
 const AMBER_BG = 'rgba(214,154,45,0.16)';
 import { useAppDrawer } from '../components/AppDrawer';
 import { useSubscription } from '../context/subscription';
+import { DialogHost, showAlert } from '@/components/dialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -264,6 +265,7 @@ function HistSheet({ visible, onClose, children, colors }: {
           </Animated.View>
         </View>
       </KeyboardAvoidingView>
+      <DialogHost />
     </Modal>
   );
 }
@@ -519,12 +521,12 @@ export default function FoodReportScreen() {
       }, 280);
     } catch {
       setCapturing(false);
-      Alert.alert('Could not capture card', 'Please try again.');
+      showAlert('Could not capture card', 'Please try again.');
     }
   };
 
   const handleClearAllData = () => {
-    Alert.alert(
+    showAlert(
       'Clear all data?',
       'This will permanently erase your entire food history, stats, and inventory. This cannot be undone.',
       [
@@ -533,7 +535,7 @@ export default function FoodReportScreen() {
           text: 'Delete everything',
           style: 'destructive',
           onPress: () => {
-            Alert.alert(
+            showAlert(
               'Are you absolutely sure?',
               'Every item, all history, all stats — gone forever. There is no undo.',
               [
@@ -590,7 +592,7 @@ export default function FoodReportScreen() {
   };
 
   const handleDeleteHistEntry = (entry: HistoryEntry, from: 'good' | 'bad') => {
-    Alert.alert('Delete entry', `Remove "${entry.name}" from history?`, [
+    showAlert('Delete entry', `Remove "${entry.name}" from history?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
@@ -1378,7 +1380,7 @@ export default function FoodReportScreen() {
         {!isPremium && (
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
-            onPress={showPaywall}
+            onPress={() => showPaywall()}
             activeOpacity={1}
           />
         )}
@@ -1490,6 +1492,7 @@ export default function FoodReportScreen() {
               </ScrollView>
             </Animated.View>
           </View>
+          <DialogHost />
         </Modal>
       )}
       {/* ── Itemized Waste Sheet ── */}

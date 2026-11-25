@@ -9,6 +9,7 @@ import { type PurchasesPackage } from 'react-native-purchases';
 import { useSubscription } from '../context/subscription';
 import { TERMS_URL, PRIVACY_URL } from '../../constants/legal';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { DialogHost, showAlert } from '@/components/dialog';
 
 const STORE = Platform.OS === 'android'
   ? { account: 'Google Play account', settings: 'Google Play subscription settings' }
@@ -24,7 +25,7 @@ const FEATURES: { icon: keyof typeof Ionicons.glyphMap; name: string; free: Cell
   { icon: 'notifications-outline', name: 'Expiry alerts',    free: true,          monthly: true,        annual: true        },
   { icon: 'sparkles-outline', name: 'Good Bot AI',      free: false,         monthly: true,        annual: true        },
   { icon: 'stats-chart-outline', name: 'Food Report',      free: false,         monthly: true,        annual: true        },
-  { icon: 'home-outline', name: 'Household',        free: false,         monthly: true,        annual: true        },
+  { icon: 'home-outline', name: 'Share with partner', free: false,       monthly: 'Household', annual: 'Household' },
   { icon: 'book-outline', name: 'Collections',      free: false,         monthly: true,        annual: true        },
   { icon: 'receipt-outline', name: 'Receipt scan',     free: false,         monthly: false,       annual: true        },
 ];
@@ -56,13 +57,18 @@ function packageLabel(pkg: PurchasesPackage): { period: string; price: string; n
   return {
     period: id === 'ANNUAL' ? 'Annual' : id === 'MONTHLY' ? 'Monthly' : pkg.product.title ?? id,
     price:  pkg.product.priceString,
-    note:   id === 'ANNUAL' ? 'Save 2 months' : id === 'MONTHLY' ? 'monthly' : undefined,
+    note:   id === 'ANNUAL' ? 'Save 33%' : id === 'MONTHLY' ? 'monthly' : undefined,
   };
 }
 
 export default function PaywallModal() {
   const insets = useSafeAreaInsets();
-  const { paywallVisible, hidePaywall, packages, purchase, restorePurchases } = useSubscription();
+  const { paywallVisible, hidePaywall, packages: soloPackages, householdPackages, paywallKind, purchase, restorePurchases } = useSubscription();
+  // Just me (Pro) or Household (Pro for you and one partner)
+  const [kind, setKind] = useState<'solo' | 'household'>('solo');
+  useEffect(() => { if (paywallVisible) setKind(paywallKind); }, [paywallVisible, paywallKind]);
+  const household = kind === 'household';
+  const packages = household ? householdPackages : soloPackages;
 
   const slideAnim  = useRef(new Animated.Value(SCREEN_H)).current;
   const fadeAnim   = useRef(new Animated.Value(0)).current;
@@ -163,14 +169,18 @@ export default function PaywallModal() {
   const noPackages = packages.length === 0;
   const selectedPkg = selected === 'annual' ? annualPkg : monthlyPkg;
 
-  const monthlyPrice = monthlyPkg ? packageLabel(monthlyPkg).price : '$4.99';
-  const annualPrice  = annualPkg  ? packageLabel(annualPkg).price  : '$45.99';
+  const monthlyPrice = monthlyPkg ? packageLabel(monthlyPkg).price : household ? '$6.99'  : '$4.99';
+  const annualPrice  = annualPkg  ? packageLabel(annualPkg).price  : household ? '$59.99' : '$39.99';
+  // How much the yearly plan saves against 12 months, from the real store prices
+  const annualSavings = monthlyPkg && annualPkg && monthlyPkg.product.price > 0
+    ? Math.round((1 - annualPkg.product.price / (monthlyPkg.product.price * 12)) * 100)
+    : 33;
 
   const dismiss = () => hidePaywall();
 
   const handlePurchase = async () => {
     if (!selectedPkg) {
-      Alert.alert(
+      showAlert(
         noPackages ? "Plans couldn't load" : 'Plan unavailable',
         noPackages
           ? 'Subscription plans could not be loaded. Check your connection and try again in a moment.'
@@ -187,13 +197,13 @@ export default function PaywallModal() {
       const ok = await purchase(selectedPkg);
       if (!ok && __DEV__) {
         // Purchase finished (or was cancelled) but the "premium" entitlement isn't active.
-        Alert.alert(
+        showAlert(
           'Not unlocked',
           'No premium access came back. If you completed the purchase, check that both products are attached to your entitlement in RevenueCat (Product catalog → Entitlements).',
         );
       }
     } catch (e: any) {
-      Alert.alert('Purchase failed', e?.message ? String(e.message) : 'Please try again.');
+      showAlert('Purchase failed', e?.message ? String(e.message) : 'Please try again.');
     } finally {
       setPurchasing(false);
     }
@@ -203,8 +213,8 @@ export default function PaywallModal() {
     setRestoring(true);
     const ok = await restorePurchases();
     setRestoring(false);
-    if (ok) Alert.alert('Restored!', 'Your subscription has been restored.');
-    else    Alert.alert('Nothing to restore', 'No active subscription found.');
+    if (ok) showAlert('Restored!', 'Your subscription has been restored.');
+    else    showAlert('Nothing to restore', 'No active subscription found.');
   };
 
   return (
@@ -229,9 +239,28 @@ export default function PaywallModal() {
               <Text style={styles.logoLine}>
                 <Text style={styles.logoGo}>go</Text><Text style={styles.logoPremium}>premium</Text>
               </Text>
-              <Text style={styles.heroSub}>Unlock the full Go Good experience</Text>
+              <Text style={styles.heroSub}>{household ? 'Every Pro feature for you and your partner' : 'Unlock the full Go Good experience'}</Text>
             </View>
           </View>
+
+          {/* ── Just me / Household ── */}
+          <View style={styles.kindRow}>
+            {([
+              { key: 'solo',      label: 'Just me',   icon: 'person-outline' },
+              { key: 'household', label: 'Household', icon: 'people-outline' },
+            ] as const).map(k => {
+              const on = kind === k.key;
+              return (
+                <TouchableOpacity key={k.key} style={[styles.kindBtn, on && styles.kindBtnOn]} onPress={() => setKind(k.key)} activeOpacity={0.85}>
+                  <Ionicons name={k.icon} size={14} color={on ? '#085041' : 'rgba(255,255,255,0.7)'} />
+                  <Text style={[styles.kindText, on && { color: '#085041' }]}>{k.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {household && (
+            <Text style={styles.kindNote}>You plus one partner. They join free from your invite and get every Pro feature.</Text>
+          )}
 
           {/* ── Plan selector cards ── */}
           <View style={styles.planRow}>
@@ -262,7 +291,7 @@ export default function PaywallModal() {
               </Animated.View>
               <Text style={[styles.planCardName, selected === 'annual' && { color: '#FFD166' }]}>Annual</Text>
               <Text style={[styles.planCardPrice, selected === 'annual' && { color: '#FFD166' }]}>{annualPrice}</Text>
-              <Text style={[styles.planCardSub, selected === 'annual' && { color: 'rgba(255,209,102,0.65)' }]}>Save 2 months</Text>
+              <Text style={[styles.planCardSub, selected === 'annual' && { color: 'rgba(255,209,102,0.65)' }]}>{annualSavings > 0 ? `Save ${annualSavings}%` : 'Best value'}</Text>
             </TouchableOpacity>
           </View>
 
@@ -290,10 +319,10 @@ export default function PaywallModal() {
                 </View>
                 <View style={styles.planCol}><Cell val={f.free}    col="free"    /></View>
                 <View style={[styles.planCol, selected === 'monthly' && styles.colSelectedBg]}>
-                  <Cell val={f.monthly} col="monthly" />
+                  <Cell val={f.name === 'Share with partner' ? household : f.monthly} col="monthly" />
                 </View>
                 <View style={[styles.planCol, selected === 'annual' && styles.colSelectedBgGold]}>
-                  <Cell val={f.annual}  col="annual"  />
+                  <Cell val={f.name === 'Share with partner' ? household : f.annual}  col="annual"  />
                 </View>
               </View>
             ))}
@@ -333,7 +362,7 @@ export default function PaywallModal() {
 
           {/* Required auto-renew disclosure (App Store Guideline 3.1.2) */}
           <Text style={styles.legal}>
-            Go Good Premium is an auto-renewing subscription ({monthlyPrice}/month or {annualPrice}/year).
+            Go Good {household ? 'Household' : 'Premium'} is an auto-renewing subscription ({monthlyPrice}/month or {annualPrice}/year).
             Payment is charged to your {STORE.account} at confirmation of purchase. Your subscription renews
             automatically unless cancelled at least 24 hours before the end of the current period, and
             your account is charged for renewal within 24 hours prior to the end of the period. Manage or
@@ -342,6 +371,7 @@ export default function PaywallModal() {
 
         </Animated.View>
       </View>
+      <DialogHost />
     </Modal>
   );
 }
@@ -375,6 +405,11 @@ const styles = StyleSheet.create({
 
   // ── Plan selector cards ──
   planRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  kindRow:   { flexDirection: 'row', padding: 4, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.08)', marginBottom: 10 },
+  kindBtn:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 11 },
+  kindBtnOn: { backgroundColor: '#5DCAA5' },
+  kindText:  { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
+  kindNote:  { fontSize: 12, color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginBottom: 12, lineHeight: 17 },
   planCardFree: {
     flex: 1, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 6,
     alignItems: 'center', justifyContent: 'center',

@@ -32,6 +32,7 @@ type SortMode = 'aisle' | 'recipe' | 'alpha';
 const SORT_KEY = 'gogood_shopping_sort';
 import { raised, raisedGreen } from '@/components/raised';
 import BottomSheet from '@/components/bottom-sheet';
+import { showAlert } from '@/components/dialog';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -281,7 +282,7 @@ export default function ShoppingScreen() {
   const handleClearChecked = async () => {
     const count = items.filter(i => i.checked).length;
     if (!count) return;
-    Alert.alert(
+    showAlert(
       `Remove ${count} checked item${count !== 1 ? 's' : ''}?`,
       undefined,
       [
@@ -302,7 +303,7 @@ export default function ShoppingScreen() {
 
   const handleClearAll = () => {
     if (!items.length) return;
-    Alert.alert('Clear entire shopping list?', 'This cannot be undone.', [
+    showAlert('Clear entire shopping list?', 'This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear all', style: 'destructive', onPress: async () => {

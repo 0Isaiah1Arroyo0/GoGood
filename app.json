@@ -2,7 +2,7 @@
   "expo": {
     "name": "gogood",
     "slug": "gogood",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gogood",
@@ -78,7 +78,22 @@
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsWebPageWithMaxCount": 1
+          },
+          "iosShareExtensionName": "GoGoodShare",
+          "androidIntentFilters": [
+            "text/*"
+          ],
+          "iosShareExtensionDisplayName": "Go Good"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

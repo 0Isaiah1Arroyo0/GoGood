@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabase';
 import { raised, raisedGreen } from '@/components/raised';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import BottomSheet from '@/components/bottom-sheet';
+import { DialogHost, showAlert } from '@/components/dialog';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -88,6 +89,7 @@ function Sheet({ visible, onClose, children, colors }: {
           </Animated.View>
         </View>
       </KeyboardAvoidingView>
+      <DialogHost />
     </Modal>
   );
 }
@@ -158,6 +160,18 @@ export function useAppDrawer() {
   const [stats,         setStats]         = useState<Stats>(EMPTY_STATS);
   const [itemCount,     setItemCount]     = useState(0);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+
+  // Opt-out for combined, anonymous trend reports (profiles.insights_opt_out)
+  const [shareInsights, setShareInsights] = useState(true);
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').select('insights_opt_out').eq('id', user.id).maybeSingle()
+      .then(({ data }) => { if (data) setShareInsights(!data.insights_opt_out); }, () => {});
+  }, [user?.id]);
+  const toggleInsights = (on: boolean) => {
+    setShareInsights(on);
+    if (user?.id) supabase.from('profiles').update({ insights_opt_out: !on }).eq('id', user.id).then(() => {}, () => {});
+  };
   const [notifs,        setNotifs]        = useState<Notifs>(EMPTY_NOTIFS);
   const [editNotifs,    setEditNotifs]    = useState<Notifs>(EMPTY_NOTIFS);
   const [rating,        setRating]        = useState(0);
@@ -178,7 +192,7 @@ export function useAppDrawer() {
         if (await StoreReview.isAvailableAsync()) { await StoreReview.requestReview(); return; }
       } catch { /* this build doesn't include the rating pop-up yet */ }
     }
-    setTimeout(() => Alert.alert('Thank you!', stars >= 4
+    setTimeout(() => showAlert('Thank you!', stars >= 4
       ? "We're so glad you're enjoying Go Good."
       : "Thanks for the feedback. We read every note and use it to make Go Good better."), 350);
   };
@@ -277,7 +291,7 @@ export function useAppDrawer() {
     } else {
       const hasHw    = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasHw || !enrolled) { Alert.alert('Not available', 'Face ID / Touch ID is not set up on this device.'); return; }
+      if (!hasHw || !enrolled) { showAlert('Not available', 'Face ID / Touch ID is not set up on this device.'); return; }
       const types   = await LocalAuthentication.supportedAuthenticationTypesAsync();
       const hasFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
       const result  = await LocalAuthentication.authenticateAsync({
@@ -290,7 +304,7 @@ export function useAppDrawer() {
 
   // ── Logout ───────────────────────────────────────────────────────────────────
   const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
+    showAlert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log out', style: 'destructive', onPress: async () => {
@@ -316,15 +330,15 @@ export function useAppDrawer() {
     setDeleting(true);
     const { error } = await deleteAccount();
     setDeleting(false);
-    if (error) { Alert.alert('Deletion failed', error); return; }
+    if (error) { showAlert('Deletion failed', error); return; }
     await SecureStore.deleteItemAsync('gogood_biometric').catch(() => {});
     close();
     router.replace('/auth/welcome' as any);
-    Alert.alert('Account deleted', 'Your Go Good account and data have been permanently deleted.');
+    showAlert('Account deleted', 'Your Go Good account and data have been permanently deleted.');
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert(
+    showAlert(
       'Delete account?',
       'This permanently deletes your account, inventory, recipes, and collections. ' +
       'If you own a household, ownership passes to another member.\n\n' +
@@ -333,7 +347,7 @@ export function useAppDrawer() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Continue', style: 'destructive', onPress: () =>
-            Alert.alert('Are you absolutely sure?', 'This cannot be undone.', [
+            showAlert('Are you absolutely sure?', 'This cannot be undone.', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Delete forever', style: 'destructive', onPress: runDeleteAccount },
             ]),
@@ -359,7 +373,7 @@ export function useAppDrawer() {
 
   const saveProfile = async () => {
     if (!editProfile.name.trim()) {
-      Alert.alert('Name required', 'Please enter your name before saving.');
+      showAlert('Name required', 'Please enter your name before saving.');
       return;
     }
     const cleaned: Profile = {
@@ -493,6 +507,9 @@ export function useAppDrawer() {
                   right={<Switch value={biometricEnabled} onValueChange={toggleBiometric} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
                 <MenuRow icon="moon-outline" label="Dark mode" colors={colors} onPress={toggleTheme}
                   right={<Switch value={isDark} onValueChange={toggleTheme} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
+                <MenuRow icon="analytics-outline" label="Anonymous food trends" sub="Include my activity in combined, anonymous reports" colors={colors}
+                  onPress={() => toggleInsights(!shareInsights)}
+                  right={<Switch value={shareInsights} onValueChange={toggleInsights} trackColor={{ false: '#ddd', true: '#1D9E75' }} thumbColor="white" />} />
               </MenuGroup>
 
               {/* Sharing */}
@@ -534,6 +551,7 @@ export function useAppDrawer() {
             </ScrollView>
           </Animated.View>
         </View>
+        <DialogHost />
       </Modal>
 
       {/* ── Edit profile ── */}

@@ -16,6 +16,7 @@ import { pushItems } from './lib/sync';
 import { HOUSEHOLD_KEY } from './lib/household';
 import { rescheduleExpiryNotifications } from './lib/notifications';
 import { raised, raisedGreen } from '@/components/raised';
+import { showAlert } from '@/components/dialog';
 
 const CATEGORIES = ['fridge', 'freezer', 'pantry'] as const;
 
@@ -136,12 +137,12 @@ export default function ReceiptReviewScreen() {
 
   const openBarcodeScanner = async (draftId: string) => {
     if (cameraPermission?.status === 'denied') {
-      Alert.alert('Camera needed', 'Enable camera access in Settings to scan barcodes.');
+      showAlert('Camera needed', 'Enable camera access in Settings to scan barcodes.');
       return;
     }
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
-      if (!result.granted) { Alert.alert('Camera needed', 'Please allow camera access to scan barcodes.'); return; }
+      if (!result.granted) { showAlert('Camera needed', 'Please allow camera access to scan barcodes.'); return; }
     }
     barcodeLockRef.current = false;
     setScanningForId(draftId);
@@ -158,7 +159,7 @@ export default function ReceiptReviewScreen() {
     setScanningForId(null);
 
     if (!result) {
-      Alert.alert('Not found', `Barcode ${data} wasn't in Open Food Facts. Edit nutrition manually.`);
+      showAlert('Not found', `Barcode ${data} wasn't in Open Food Facts. Edit nutrition manually.`);
       return;
     }
 
@@ -171,7 +172,7 @@ export default function ReceiptReviewScreen() {
     };
     updateLocal(targetId, changes);
     updateDraft(targetId, changes).catch(() => {});
-    Alert.alert(
+    showAlert(
       'Nutrition updated',
       result.name ? `Found: ${result.name}` : 'Nutrition data updated from barcode.',
     );
@@ -205,7 +206,7 @@ export default function ReceiptReviewScreen() {
 
       setSavedItems(newItems);
     } catch {
-      Alert.alert('Error', 'Could not add items. Please try again.');
+      showAlert('Error', 'Could not add items. Please try again.');
     }
     setSaving(false);
   };

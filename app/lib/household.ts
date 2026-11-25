@@ -7,7 +7,7 @@ export const HOUSEHOLD_NAME_KEY       = 'gogood_household_name';
 export const HOUSEHOLD_JOINED_AT_KEY  = 'gogood_household_joined_at';
 export const HOUSEHOLD_ROLE_KEY       = 'gogood_household_role';
 export const INVITE_EXPIRY_DAYS       = 7;
-export const MAX_HOUSEHOLD_MEMBERS    = 10;
+export const MAX_HOUSEHOLD_MEMBERS    = 2;  // the owner and one partner
 
 export interface Household {
   id: string;
@@ -162,7 +162,7 @@ export async function inviteMember(householdId: string, userId: string, email: s
     .select('*', { count: 'exact', head: true })
     .eq('household_id', householdId);
   if ((count ?? 0) >= MAX_HOUSEHOLD_MEMBERS) {
-    return { token: null, error: `Households are limited to ${MAX_HOUSEHOLD_MEMBERS} members.` };
+    return { token: null, error: 'Your household already has two people. Households are for you and one partner.' };
   }
 
   const { data: existingMember } = await supabase
@@ -196,6 +196,9 @@ export async function inviteMember(householdId: string, userId: string, email: s
     .select('token')
     .single();
 
+  if (error?.message?.includes('household_full')) {
+    return { token: null, error: 'You already invited someone. Cancel that invite first to invite someone else.' };
+  }
   if (error || !data) return { token: null, error: error?.message ?? 'Could not create invite.' };
   return { token: data.token };
 }
@@ -226,6 +229,9 @@ export async function acceptInviteByToken(token: string, userId: string, userEma
   if (error) {
     if (error.code === '23505') {
       return { ok: false, error: 'You are already a member of this household.' };
+    }
+    if (error.message?.includes('household_full')) {
+      return { ok: false, error: 'This household already has two people.' };
     }
     return { ok: false, error: error.message };
   }
@@ -260,6 +266,9 @@ export async function acceptPendingInvite(invite: HouseholdInvite, userId: strin
   if (error) {
     if (error.code === '23505') {
       return { ok: false, error: 'You are already a member of this household.' };
+    }
+    if (error.message?.includes('household_full')) {
+      return { ok: false, error: 'This household already has two people.' };
     }
     return { ok: false, error: error.message };
   }

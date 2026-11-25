@@ -12,6 +12,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme, type ThemeColors } from '../context/theme';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import RecipeView, { parseRecipe } from '@/components/recipe-view';
+import ServingsScaler, { extractServings, scaleContent } from '@/components/servings-scaler';
 import { useAppDrawer } from '../components/AppDrawer';
 import HeaderAddButton from '@/components/header-add-button';
 import EdgeFade from '@/components/edge-fade';
@@ -36,6 +37,7 @@ import {
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
 import { raised, raisedGreen } from '@/components/raised';
 import FoodIcon from '@/components/food-icon';
+import { DialogHost, showAlert } from '@/components/dialog';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -66,59 +68,6 @@ function Markdown({ text, style, boldStyle }: { text: string; style: any; boldSt
 }
 
 /** Extract the base serving count from recipe text / stored macros */
-function extractServings(content: string, macroServings?: number): number {
-  if (macroServings && macroServings > 0) return macroServings;
-  const m = content.match(/(?:serves?|servings?|yield)[:\s]*(\d+)/i)
-    || content.match(/(\d+)\s*(?:servings?|portions?|people)/i)
-    || content.match(/makes?\s*(\d+)/i);
-  return m ? Math.max(1, parseInt(m[1])) : 4;
-}
-
-/** Format a scaled decimal as a human-friendly fraction string */
-function scaleValue(n: number, factor: number): string {
-  const scaled = n * factor;
-  if (scaled <= 0) return '0';
-  const fracs: [number, string][] = [
-    [0.125,'⅛'],[0.25,'¼'],[0.33,'⅓'],[0.5,'½'],[0.67,'⅔'],[0.75,'¾'],
-    [1.25,'1¼'],[1.33,'1⅓'],[1.5,'1½'],[1.67,'1⅔'],[1.75,'1¾'],
-    [2.5,'2½'],[3.5,'3½'],
-  ];
-  for (const [v, s] of fracs) {
-    if (Math.abs(scaled - v) < 0.1) return s;
-  }
-  const rounded = Math.round(scaled * 4) / 4;
-  if (Number.isInteger(rounded)) return String(rounded);
-  return scaled.toFixed(1);
-}
-
-/** Scale ingredient quantities in the ingredients section of a recipe */
-function scaleContent(content: string, factor: number): string {
-  if (Math.abs(factor - 1) < 0.05) return content;
-  const lines = content.split('\n');
-  let inIngredients = false;
-  return lines.map(line => {
-    if (/ingredients?/i.test(line) && (/\*\*/.test(line) || /^#+\s/.test(line))) {
-      inIngredients = true; return line;
-    }
-    if (/instructions?|directions?|method|steps?/i.test(line) && (/\*\*/.test(line) || /^#+\s/.test(line))) {
-      inIngredients = false; return line;
-    }
-    if (!inIngredients || !/^\s*[-•*]/.test(line)) return line;
-    // Scale numbers in ingredient lines; skip temperatures (followed by °)
-    return line.replace(/\b(\d+(?:\/\d+)?|\d*\.\d+)\b(?!\s*°)/g, (match) => {
-      let n: number;
-      if (match.includes('/')) {
-        const [a, b] = match.split('/');
-        n = Number(a) / Number(b);
-      } else {
-        n = parseFloat(match);
-      }
-      if (!n || n === 0 || isNaN(n)) return match;
-      return scaleValue(n, factor);
-    });
-  }).join('\n');
-}
-
 /** Move selected inventory items to the gone-good history */
 async function markItemsGoneGood(itemIds: Set<number>): Promise<void> {
   const [itemsRaw, goodRaw, statsRaw] = await Promise.all([
@@ -310,6 +259,7 @@ function CookItSheet({ visible, onClose, onConfirm, colors }: {
           </View>
         </Animated.View>
       </View>
+      <DialogHost />
     </Modal>
   );
 }
@@ -401,6 +351,7 @@ function MoveSheet({ visible, onClose, collections, currentId, onMove, onCreateC
           </TouchableOpacity>
         </Animated.View>
       </View>
+      <DialogHost />
     </Modal>
   );
 }
@@ -471,13 +422,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
   const scaledContent = scaleContent(recipe.content, scaleFactor);
   const parsed = parseRecipe(scaledContent);
   const m             = recipe.recipeMacros;
-  const scaledMacros  = m && Math.abs(scaleFactor - 1) > 0.05 ? {
-    ...m,
-    protein: Math.round(m.protein * scaleFactor),
-    carbs:   Math.round(m.carbs   * scaleFactor),
-    fat:     Math.round(m.fat     * scaleFactor),
-    cal:     Math.round(m.cal     * scaleFactor),
-  } : m;
+  const scaledMacros  = m; // per serving, so the same at any serving count
 
   const handleRate = (r: number) => onUpdate({ ...recipe, rating: r || undefined });
 
@@ -485,15 +430,6 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
     onUpdate({ ...recipe, notes: notesText.trim() || undefined });
     setEditingNotes(false);
   };
-
-  // Build preset serving options: ½×, 1× (base), 2×, 3×, 4×
-  const servingPresets = [
-    Math.round(baseServings * 0.5),
-    baseServings,
-    Math.round(baseServings * 2),
-    Math.round(baseServings * 3),
-    Math.round(baseServings * 4),
-  ].filter((v, i, arr) => v > 0 && arr.indexOf(v) === i);
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
@@ -521,7 +457,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
           <TouchableOpacity
             style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
             onPress={() =>
-              Alert.alert('Delete recipe?', 'This cannot be undone.', [
+              showAlert('Delete recipe?', 'This cannot be undone.', [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Delete', style: 'destructive', onPress: onDelete },
               ])
@@ -630,38 +566,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
           )}
 
           {/* Serving scaler */}
-          <View style={{ marginBottom: 20, padding: 12, backgroundColor: colors.surface, borderRadius: 14, ...raised(isDark, 'md') }}>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSub, letterSpacing: 1, marginBottom: 10 }}>
-              SERVINGS
-              {Math.abs(scaleFactor - 1) > 0.05
-                ? `  ·  scaled ${scaleFactor > 1 ? `${scaleFactor.toFixed(1)}×` : `${Math.round(scaleFactor * 100)}%`}`
-                : '  ·  tap to scale'}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-              {servingPresets.map(s => (
-                <TouchableOpacity
-                  key={s}
-                  onPress={() => setTargetServings(s)}
-                  style={{
-                    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 999,
-                    backgroundColor: targetServings === s ? colors.btnPrimary : colors.surfaceAlt,
-                    borderWidth: 1,
-                    borderColor: targetServings === s ? colors.btnPrimary : colors.border,
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: targetServings === s ? 'white' : colors.textSub }}>
-                    {s}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {Math.abs(scaleFactor - 1) > 0.05 && (
-              <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 8 }}>
-                Ingredient amounts are scaled. Some rounding may apply.
-              </Text>
-            )}
-          </View>
+          <ServingsScaler base={baseServings} target={targetServings} onChange={setTargetServings} />
 
           {/* Recipe body: structured when it reads as a recipe, plain text otherwise */}
           {parsed ? (
@@ -731,6 +636,7 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
         </Animated.View>
 
       </Animated.View>
+      <DialogHost />
     </Modal>
   );
 }
@@ -815,6 +721,7 @@ function CollectionModal({ visible, onClose, onSave, renaming, colors }: {
           </TouchableOpacity>
         </TouchableOpacity>
       </KeyboardAvoidingView>
+      <DialogHost />
     </Modal>
   );
 }
@@ -928,7 +835,7 @@ export default function CollectionsScreen() {
   };
 
   const handleDeleteCollection = (col: Collection) => {
-    Alert.alert(
+    showAlert(
       `Delete "${col.name}"?`,
       'Recipes inside will become uncategorized.',
       [
@@ -980,7 +887,7 @@ export default function CollectionsScreen() {
       const ok = await shareRecipeWithHousehold(selectedRecipe.id, user.id, householdId);
       if (ok) {
         await handleUpdateRecipe({ ...selectedRecipe, sharedWithHousehold: true });
-        Alert.alert('Shared', 'Your household can now see this recipe.');
+        showAlert('Shared', 'Your household can now see this recipe.');
       }
     }
   };
@@ -990,7 +897,7 @@ export default function CollectionsScreen() {
     const dest = collections.find(c => c.id === collectionId);
     await handleUpdateRecipe({ ...selectedRecipe, collectionId });
     setMoveVisible(false);
-    Alert.alert('Moved', `Recipe moved to ${dest?.name ?? 'Uncategorized'}.`);
+    showAlert('Moved', `Recipe moved to ${dest?.name ?? 'Uncategorized'}.`);
   };
 
   const saveDishToFridge = async (name: string, days: number, servings: number, macros?: SavedRecipe['recipeMacros']) => {
@@ -1179,7 +1086,7 @@ export default function CollectionsScreen() {
                 const days = Math.max(1, parseInt(saveDishDays) || 3);
                 await saveDishToFridge(saveDishName.trim(), days, servings, selectedRecipe?.recipeMacros);
                 setSaveDishVisible(false);
-                Alert.alert('Saved to fridge', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
+                showAlert('Saved to fridge', `${servings} serving${servings !== 1 ? 's' : ''} of "${saveDishName.trim()}" added to your inventory. Deduct portions from the Home tab as you eat.`);
               }}
             >
               <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 15 }}>
@@ -1190,13 +1097,14 @@ export default function CollectionsScreen() {
               style={{ alignItems: 'center', paddingVertical: 10 }}
               onPress={() => {
                 setSaveDishVisible(false);
-                Alert.alert('Enjoy your meal', 'Logged as cooked.');
+                showAlert('Enjoy your meal', 'Logged as cooked.');
               }}
             >
               <Text style={{ color: colors.textMuted, fontSize: 13 }}>Skip — I'll eat it all now</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+        <DialogHost />
       </Modal>
     </>
   );
@@ -1261,7 +1169,7 @@ export default function CollectionsScreen() {
                     style={styles.colCard}
                     onPress={() => setActiveCollection(col)}
                     onLongPress={() =>
-                      Alert.alert(col.name, undefined, [
+                      showAlert(col.name, undefined, [
                         { text: 'Rename', onPress: () => { setRenamingCol(col); setModalVisible(true); } },
                         { text: 'Delete', style: 'destructive', onPress: () => handleDeleteCollection(col) },
                         { text: 'Cancel', style: 'cancel' },
@@ -1438,7 +1346,7 @@ export default function CollectionsScreen() {
         {!isPremium && (
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
-            onPress={showPaywall}
+            onPress={() => showPaywall()}
             activeOpacity={1}
           />
         )}

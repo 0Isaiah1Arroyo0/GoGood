@@ -27,6 +27,7 @@ import {
   HOUSEHOLD_JOINED_AT_KEY,
   type Household, type HouseholdMember, type HouseholdInvite,
 } from '../lib/household';
+import { showAlert } from '@/components/dialog';
 
 function timeAgo(iso: string): string {
   const d = Math.round((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -118,7 +119,7 @@ export default function HouseholdScreen() {
   const tabSpace = useTabBarSpace(); // room for the floating bottom bar
   const { user } = useAuth();
   const { menuBtn, drawerEl } = useAppDrawer();
-  const { isPremium, showPaywall } = useSubscription();
+  const { isPremium, hasHouseholdPlan, proFromHousehold, refreshProStatus, showPaywall } = useSubscription();
   const router = useRouter();
 
   const screenFade      = useRef(new Animated.Value(0)).current;
@@ -159,6 +160,8 @@ export default function HouseholdScreen() {
 
   const joinedDays = joinedAt ? Math.floor((Date.now() - new Date(joinedAt).getTime()) / 86400000) : 0;
   const showNudge  = household && !isOwner && !isPremium && joinedDays >= 3 && !nudgeDismissed;
+  // Two people per household: the owner can invite one partner
+  const hasRoom    = members.length + invites.length < 2;
 
   const load = useCallback(async () => {
     if (!user?.id) { setLoading(false); return; }
@@ -210,12 +213,12 @@ export default function HouseholdScreen() {
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   const handleCreate = async () => {
-    if (!isPremium) { showPaywall(); return; }
+    if (!hasHouseholdPlan) { showPaywall('household'); return; }
     if (!user?.id) return;
     setCreating(true);
     const { household: hh, error: hhErr } = await createHousehold(user.id, userEmail, createName);
     setCreating(false);
-    if (!hh) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); Alert.alert('Could not create household', hhErr ?? 'Please try again.'); return; }
+    if (!hh) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); showAlert('Could not create household', hhErr ?? 'Please try again.'); return; }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setHousehold(hh);
     setMembers([{ userId: user.id, email: userEmail, role: 'owner', joinedAt: new Date().toISOString() }]);
@@ -227,13 +230,13 @@ export default function HouseholdScreen() {
     if (!household || !user?.id || !inviteEmail.trim()) return;
     if (!isValidEmail(inviteEmail)) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      showAlert('Invalid email', 'Please enter a valid email address.');
       return;
     }
     setInviting(true);
     const { token, error: invErr } = await inviteMember(household.id, user.id, inviteEmail.trim());
     setInviting(false);
-    if (!token) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); Alert.alert('Could not send invite', invErr ?? 'Please try again.'); return; }
+    if (!token) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); showAlert('Could not send invite', invErr ?? 'Please try again.'); return; }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setSentToken(token);
     setInviteEmail('');
@@ -244,11 +247,11 @@ export default function HouseholdScreen() {
   const handleCopyToken = (token: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Clipboard.setStringAsync(token);
-    Alert.alert('Code copied!', 'Share this invite code with your household member. They enter it on their Household tab to join.');
+    showAlert('Code copied!', 'Share this invite code with your household member. They enter it on their Household tab to join.');
   };
 
   const handleCancelInvite = (invite: HouseholdInvite) => {
-    Alert.alert('Cancel invite', `Cancel invite to ${invite.invitedEmail}?`, [
+    showAlert('Cancel invite', `Cancel invite to ${invite.invitedEmail}?`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Cancel invite', style: 'destructive', onPress: async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -265,26 +268,28 @@ export default function HouseholdScreen() {
     setJoining(false);
     if (!result.ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Invalid code', 'This invite code is not valid or has already been used.');
+      showAlert('Invalid code', 'This invite code is not valid or has already been used.');
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setJoinCode('');
+    refreshProStatus();
     await load();
   };
 
   const handleAcceptPending = async (invite: HouseholdInvite) => {
     if (!user?.id) return;
-    const ok = await acceptPendingInvite(invite, user.id, userEmail);
-    if (!ok) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); Alert.alert('Could not join', 'Please try again.'); return; }
+    const res = await acceptPendingInvite(invite, user.id, userEmail);
+    if (!res.ok) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); showAlert('Could not join', res.error ?? 'Please try again.'); return; }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setPendingForMe([]);
+    refreshProStatus();
     await load();
   };
 
   const handleRemoveMember = (member: HouseholdMember) => {
     if (!household) return;
-    Alert.alert('Remove member', `Remove ${member.email} from the household?`, [
+    showAlert('Remove member', `Remove ${member.email} from the household?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -296,7 +301,7 @@ export default function HouseholdScreen() {
 
   const handleLeave = () => {
     if (!household) return;
-    Alert.alert('Leave household', "You'll no longer have access to the shared inventory, recipes, or shopping list. Your personal data is unaffected.", [
+    showAlert('Leave household', "You'll no longer have access to the shared inventory, recipes, or shopping list. Your personal data is unaffected.", [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -309,7 +314,7 @@ export default function HouseholdScreen() {
 
   const handleDelete = () => {
     if (!household) return;
-    Alert.alert('Delete household', 'This will remove all members and permanently delete the shared inventory, recipes, and shopping list. This cannot be undone.', [
+    showAlert('Delete household', 'This will remove all members and permanently delete the shared inventory, recipes, and shopping list. This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete everything', style: 'destructive', onPress: async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -374,7 +379,7 @@ export default function HouseholdScreen() {
                 <Text style={[styles.label, { color: colors.textSub }]}>Your household</Text>
                 <Text style={[styles.heroName, { color: colors.text }]}>{household.name}</Text>
                 <Text style={{ fontSize: 13, color: colors.textSub }}>
-                  {members.length} member{members.length !== 1 ? 's' : ''} sharing inventory, recipes and shopping
+                  {members.length === 1 ? 'Just you so far. Invite your partner to share everything.' : 'You two share the inventory, recipes and shopping list'}
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
                   {([
@@ -429,11 +434,28 @@ export default function HouseholdScreen() {
                 ))}
               </View>
 
-              {/* Invite by email (any member can invite) */}
+              {/* Owner without the Household plan: sharing Pro needs it */}
+              {isOwner && !hasHouseholdPlan && (
+                <View style={card}>
+                  <View style={[styles.iconCircle, { backgroundColor: colors.chipBg, marginBottom: 12 }]}>
+                    <Ionicons name="people-outline" size={20} color={colors.chipText} />
+                  </View>
+                  <Text style={[styles.cardHeading, { color: colors.text, fontSize: 16, marginBottom: 6 }]}>Share Pro with your partner</Text>
+                  <Text style={[styles.cardSub, { color: colors.textSub, lineHeight: 19, marginBottom: 14 }]}>
+                    With the Household plan, your partner gets every Pro feature too: Good Bot, scans and Food Reports.
+                  </Text>
+                  <ScaleBtn style={[styles.btn, { backgroundColor: colors.btnPrimary }, raisedGreen(isDark)]} onPress={() => showPaywall('household')}>
+                    <Text style={styles.btnText}>See the Household plan</Text>
+                  </ScaleBtn>
+                </View>
+              )}
+
+              {/* Invite your partner (owner only, two people per household) */}
+              {isOwner && hasRoom && (
               <View style={card}>
-                <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Invite someone</Text>
+                <Text style={[styles.cardHeading, { color: colors.text, marginBottom: 4 }]}>Invite your partner</Text>
                 <Text style={[styles.cardSub, { color: colors.textSub }]}>
-                  Enter their email. They'll get a code to paste on their Household screen.
+                  Enter their email. When they sign up or log in with it, Go Good asks them to join. You can also share the code.
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TextInput
@@ -470,6 +492,7 @@ export default function HouseholdScreen() {
                   </TouchableOpacity>
                 )}
               </View>
+              )}
 
               {/* Pending invites (show to all members) */}
               {invites.length > 0 && (
@@ -567,14 +590,16 @@ export default function HouseholdScreen() {
               <View style={card}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <Text style={[styles.cardHeading, { color: colors.text }]}>Create a household</Text>
-                  {!isPremium && (
+                  {!hasHouseholdPlan && (
                     <View style={{ backgroundColor: colors.chipBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.chipText }}>Premium</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.chipText }}>Household plan</Text>
                     </View>
                   )}
                 </View>
                 <Text style={[styles.cardSub, { color: colors.textSub }]}>
-                  {isPremium ? 'Start a shared list and invite others to join.' : 'Start a shared list and invite your household. Joining is free for members.'}
+                  {hasHouseholdPlan
+                    ? 'Share your kitchen with one partner. They get Pro free while you have the Household plan.'
+                    : 'Share your inventory, recipes and shopping list with one partner, and they get Pro too. Joining is free for them.'}
                 </Text>
                 <TextInput
                   style={[input, { marginBottom: 12 }]}
@@ -595,7 +620,7 @@ export default function HouseholdScreen() {
                     ? <ActivityIndicator color="white" size="small" />
                     : (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        {!isPremium && <Ionicons name="lock-closed" size={14} color="white" />}
+                        {!hasHouseholdPlan && <Ionicons name="lock-closed" size={14} color="white" />}
                         <Text style={styles.btnText}>Create household</Text>
                       </View>
                     )}

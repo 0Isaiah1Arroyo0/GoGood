@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { useShareIntentContext } from 'expo-share-intent';
+import * as Clipboard from 'expo-clipboard';
 import { useTheme, type ThemeColors } from './context/theme';
 import { useAuth } from './context/auth';
 import { supabase } from './lib/supabase';
@@ -18,7 +20,12 @@ import {
 import { addToShoppingList, addToHouseholdShoppingList } from './lib/shopping-list';
 import { HOUSEHOLD_KEY } from './lib/household';
 import FoodIcon from '@/components/food-icon';
+import BottomSheet from '@/components/bottom-sheet';
+import ScanStatusStrip from '@/components/scan-status-strip';
+import RecipeView, { parseRecipe } from '@/components/recipe-view';
+import { raised, raisedGreen } from '@/components/raised';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { showAlert } from '@/components/dialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,136 +103,87 @@ function CollectionPicker({ visible, collections, onSelect, onCreateAndSelect, o
   onClose: () => void;
   colors: ThemeColors;
 }) {
-  const slideAnim = useRef(new Animated.Value(500)).current;
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const [mounted,   setMounted]   = useState(false);
-  const [creating,  setCreating]  = useState(false);
-  const [newName,   setNewName]   = useState('');
-  const [newEmoji,  setNewEmoji]  = useState(PICKER_EMOJIS[0]);
+  const { isDark } = useTheme();
+  const [creating, setCreating] = useState(false);
+  const [newName,  setNewName]  = useState('');
+  const [newEmoji, setNewEmoji] = useState(PICKER_EMOJIS[0]);
 
   useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      setCreating(false); setNewName(''); setNewEmoji(PICKER_EMOJIS[0]);
-      slideAnim.setValue(500); fadeAnim.setValue(0);
-      Animated.parallel([
-        Animated.timing(fadeAnim,  { toValue: 1, duration: 260, useNativeDriver: true }),
-        Animated.spring(slideAnim, { toValue: 0, damping: 28, stiffness: 180, useNativeDriver: true }),
-      ]).start();
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(fadeAnim,  { toValue: 0, duration: 220, useNativeDriver: true }),
-        Animated.timing(slideAnim, { toValue: 500, duration: 240, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
-    }
+    if (visible) { setCreating(false); setNewName(''); setNewEmoji(PICKER_EMOJIS[0]); }
   }, [visible]);
 
-  if (!mounted) return null;
-
-  const options = [{ id: '', name: 'Uncategorized', emoji: '📌' }, ...collections];
+  const options = [{ id: '', name: 'Uncategorized', emoji: '🍽️' }, ...collections];
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={{ flex: 1 }}>
-          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: fadeAnim }]} pointerEvents="none" />
-          <TouchableOpacity style={{ flex: 1 }} onPress={onClose} activeOpacity={1} />
-          <Animated.View style={{
-            backgroundColor: colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-            padding: 20, paddingBottom: 44, transform: [{ translateY: slideAnim }],
-          }}>
-            <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999, alignSelf: 'center', marginBottom: 18 }} />
-
-            {creating ? (
-              /* ── Inline create form ── */
-              <>
-                <TouchableOpacity onPress={() => setCreating(false)} style={{ marginBottom: 12 }}>
-                  <Text style={{ fontSize: 13, color: colors.teal, fontWeight: '600' }}>‹ Back</Text>
-                </TouchableOpacity>
-                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.brand, fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 }}>
-                  New collection
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                  {PICKER_EMOJIS.map(e => (
-                    <TouchableOpacity
-                      key={e} onPress={() => setNewEmoji(e)}
-                      style={{
-                        width: 42, height: 42, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: newEmoji === e ? colors.chipBg : colors.surface,
-                        borderWidth: newEmoji === e ? 1.5 : 0.5,
-                        borderColor: newEmoji === e ? colors.teal : colors.border,
-                      }}
-                    >
-                      <FoodIcon emoji={e} size={22} bare color={newEmoji === e ? colors.chipText : colors.textSub} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <TextInput
-                  style={{
-                    backgroundColor: colors.surface, borderRadius: 12, borderWidth: 0.5,
-                    borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12,
-                    fontSize: 15, color: colors.text, marginBottom: 14,
-                  }}
-                  placeholder="Collection name (e.g. Quick Weeknights)"
-                  placeholderTextColor={colors.textMuted}
-                  value={newName}
-                  onChangeText={setNewName}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={() => newName.trim() && onCreateAndSelect(newName.trim(), newEmoji)}
-                />
+    <BottomSheet visible={visible} onClose={onClose}>
+      {creating ? (
+        <>
+          <TouchableOpacity onPress={() => setCreating(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="chevron-back" size={16} color={colors.textSub} />
+            <Text style={{ fontSize: 13, color: colors.textSub, fontWeight: '600' }}>Back</Text>
+          </TouchableOpacity>
+          <Text style={{ fontSize: 20, color: colors.text, fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 }}>New collection</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+            {PICKER_EMOJIS.map(e => {
+              const on = newEmoji === e;
+              return (
                 <TouchableOpacity
-                  style={{
-                    backgroundColor: colors.btnPrimary, borderRadius: 13, paddingVertical: 14,
-                    alignItems: 'center', opacity: newName.trim() ? 1 : 0.4,
-                  }}
-                  disabled={!newName.trim()}
-                  onPress={() => onCreateAndSelect(newName.trim(), newEmoji)}
-                  activeOpacity={0.85}
+                  key={e} onPress={() => setNewEmoji(e)} activeOpacity={0.8}
+                  style={[{ width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? colors.chipBg : colors.surface }, raised(isDark)]}
                 >
-                  <Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>Create & Save Recipe</Text>
+                  <FoodIcon emoji={e} size={22} bare color={on ? colors.chipText : colors.textSub} />
                 </TouchableOpacity>
-              </>
-            ) : (
-              /* ── Collection list ── */
-              <>
-                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.brand, fontFamily: 'Fraunces_600SemiBold', marginBottom: 16 }}>
-                  Save to collection
-                </Text>
-                {options.map(col => (
-                  <TouchableOpacity
-                    key={col.id || 'uncategorized'}
-                    onPress={() => onSelect(col.id)}
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 14,
-                      paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, marginBottom: 4,
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <FoodIcon emoji={col.emoji} size={36} />
-                    <Text style={{ fontSize: 15, fontWeight: '500', color: colors.text, flex: 1 }}>{col.name}</Text>
-                  </TouchableOpacity>
-                ))}
-                <View style={{ height: 0.5, backgroundColor: colors.border, marginVertical: 8 }} />
-                <TouchableOpacity
-                  onPress={() => setCreating(true)}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 14,
-                    paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14,
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: colors.chipBg, borderWidth: 1, borderColor: colors.teal, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontSize: 18, color: colors.teal, lineHeight: 22 }}>+</Text>
-                  </View>
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: colors.teal }}>New collection</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </Animated.View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+              );
+            })}
+          </View>
+          <TextInput
+            style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.inputBorder, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, color: colors.inputText, marginBottom: 14 }}
+            placeholder="Collection name, e.g. Quick weeknights"
+            placeholderTextColor={colors.placeholder}
+            keyboardAppearance={isDark ? 'dark' : 'light'}
+            value={newName}
+            onChangeText={setNewName}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={() => newName.trim() && onCreateAndSelect(newName.trim(), newEmoji)}
+          />
+          <TouchableOpacity
+            style={[{ backgroundColor: colors.btnPrimary, borderRadius: 14, paddingVertical: 15, alignItems: 'center', opacity: newName.trim() ? 1 : 0.45 }, raisedGreen(isDark)]}
+            disabled={!newName.trim()}
+            onPress={() => onCreateAndSelect(newName.trim(), newEmoji)}
+            activeOpacity={0.85}
+          >
+            <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 15 }}>Create and save</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <Text style={{ fontSize: 20, color: colors.text, fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 }}>Save to collection</Text>
+          <View style={[{ backgroundColor: colors.surface, borderRadius: 16, overflow: 'hidden' }, raised(isDark, 'md')]}>
+            {options.map((col, i) => (
+              <TouchableOpacity
+                key={col.id || 'uncategorized'}
+                onPress={() => onSelect(col.id)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 14, borderTopWidth: i ? 0.5 : 0, borderTopColor: colors.border }}
+                activeOpacity={0.7}
+              >
+                <FoodIcon emoji={col.emoji} size={34} />
+                <Text style={{ fontSize: 15, fontWeight: '500', color: colors.text, flex: 1 }}>{col.name}</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity
+            onPress={() => setCreating(true)}
+            style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, paddingVertical: 13, borderRadius: 14, backgroundColor: colors.surfaceAlt }, raised(isDark)]}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add" size={18} color={colors.text} />
+            <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>New collection</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </BottomSheet>
   );
 }
 
@@ -234,14 +192,12 @@ function CollectionPicker({ visible, collections, onSelect, onCreateAndSelect, o
 function IngredientChip({ label, have, colors }: { label: string; have: boolean; colors: ThemeColors }) {
   return (
     <View style={{
-      paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, marginRight: 6, marginBottom: 6,
-      backgroundColor: have ? 'rgba(29,158,117,0.12)' : 'rgba(232,117,106,0.12)',
-      borderWidth: 1,
-      borderColor: have ? 'rgba(29,158,117,0.4)' : 'rgba(232,117,106,0.4)',
+      flexDirection: 'row', alignItems: 'center', gap: 4,
+      paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, marginRight: 6, marginBottom: 6,
+      backgroundColor: have ? colors.chipBg : colors.surfaceAlt,
     }}>
-      <Text style={{ fontSize: 12, color: have ? colors.teal : '#E8756A', fontWeight: '600' }}>
-        {have ? '✓ ' : ''}{label}
-      </Text>
+      {have && <Ionicons name="checkmark" size={12} color={colors.chipText} />}
+      <Text style={{ fontSize: 12, color: have ? colors.chipText : colors.textSub, fontWeight: '600' }}>{label}</Text>
     </View>
   );
 }
@@ -289,11 +245,40 @@ export default function SocialRecipeImportScreen() {
     }, 100);
   }, []);
 
-  const handleExtract = async () => {
-    const trimmedUrl  = url.trim();
-    const trimmedText = pasteText.trim();
+  // Shared from another app (Share → Go Good): fill in the link or caption and import it
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  useEffect(() => {
+    if (!hasShareIntent) return;
+    const sharedUrl  = shareIntent.webUrl ?? shareIntent.text?.match(/https?:\/\/\S+/)?.[0] ?? null;
+    const sharedText = (shareIntent.text ?? '').trim();
+    resetShareIntent();
+    if (sharedUrl) {
+      setPasteMode(false); setUrl(sharedUrl);
+      handleExtract({ url: sharedUrl, via: 'share' });
+    } else if (sharedText) {
+      setPasteMode(true); setPasteText(sharedText);
+      handleExtract({ text: sharedText, via: 'share' });
+    }
+  }, [hasShareIntent]);
 
-    if (pasteMode) {
+  // A recipe link the user just copied, offered as a one-tap fill
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  useEffect(() => {
+    Clipboard.hasUrlAsync()
+      .then(async has => {
+        if (!has) return;
+        const u = (await Clipboard.getUrlAsync()) ?? '';
+        if (/instagram|tiktok|youtu|facebook|fb\.watch|pinterest|pin\.it/i.test(u)) setCopiedLink(u);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleExtract = async (override?: { url?: string; text?: string; via?: 'share' | 'link' | 'paste' }) => {
+    const usePaste    = override ? !!override.text : pasteMode;
+    const trimmedUrl  = (override?.url ?? url).trim();
+    const trimmedText = (override?.text ?? pasteText).trim();
+
+    if (usePaste) {
       if (!trimmedText) return;
     } else {
       if (!trimmedUrl) return;
@@ -305,16 +290,19 @@ export default function SocialRecipeImportScreen() {
     }
 
     setState('loading');
+    const reqId = ++requestRef.current;
     setExtracted(null);
     setIngredients({ have: [], need: [] });
     setAddedToList(false);
     setPreviewExpanded(false);
 
     try {
-      const body = pasteMode
-        ? { text: trimmedText }
-        : { url: trimmedUrl };
+      const via  = override?.via ?? (usePaste ? 'paste' : 'link');
+      const body = usePaste
+        ? { text: trimmedText, via }
+        : { url: trimmedUrl, via };
       const { data, error } = await supabase.functions.invoke('recipe-from-url', { body });
+      if (reqId !== requestRef.current) return; // cancelled
 
       if (error) {
         let msg = error.message ?? 'Something went wrong. Please try again.';
@@ -338,10 +326,15 @@ export default function SocialRecipeImportScreen() {
       setIngredients(matched);
       setState('success');
     } catch (e) {
+      if (reqId !== requestRef.current) return;
       setErrorMsg((e as Error).message ?? 'Something went wrong. Please try again.');
       setState('error');
     }
   };
+
+  // Stop waiting for the current import (the answer is ignored if it arrives later)
+  const requestRef = useRef(0);
+  const cancelImport = () => { requestRef.current++; setState('idle'); };
 
   const handleAddToShoppingList = async () => {
     if (!extracted || !ingredients.need.length) return;
@@ -358,7 +351,7 @@ export default function SocialRecipeImportScreen() {
       await addToShoppingList(newItems);
     }
     setAddedToList(true);
-    Alert.alert(
+    showAlert(
       'Added to your shopping list',
       `${newItems.length} ingredient${newItems.length !== 1 ? 's' : ''} added to your shopping list.`,
     );
@@ -380,7 +373,7 @@ export default function SocialRecipeImportScreen() {
         savedAt: Date.now(),
       };
       await persistSavedRecipes([newRecipe, ...existing]);
-      Alert.alert(
+      showAlert(
         'Recipe saved',
         `"${extracted.name}" has been added to your${collectionId ? ' collection' : ' recipes'}.`,
         [{ text: 'View Recipes', onPress: () => router.back() }],
@@ -401,6 +394,14 @@ export default function SocialRecipeImportScreen() {
   const platform = extracted?.platform ?? '';
   const platformEmoji = detectPlatformEmoji(platform);
 
+  const recipeCard = useMemo(() => {
+    if (!extracted) return null;
+    // Nutrition shows as chips under the name, so keep it out of the recipe card
+    return parseRecipe(extracted.recipe.split(/^##\s+Nutrition/im)[0]);
+  }, [extracted]);
+  const macros = extracted ? parseRecipeMacros(extracted.recipe) : null;
+  const canSubmit = !!(pasteMode ? pasteText.trim() : url.trim()) && state !== 'loading';
+
   return (
     <View style={styles.safe}>
       <StatusBar style={colors.statusBar} backgroundColor={colors.bg} />
@@ -408,218 +409,234 @@ export default function SocialRecipeImportScreen() {
 
         {/* Header */}
         <Animated.View style={{ transform: [{ scale: heroScale }] }}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={{ fontSize: 20, color: colors.brand, lineHeight: 24 }}>‹</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1, alignItems: 'center' }}>
-            <Text style={styles.headerTitle}>Import Recipe</Text>
+          <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.8}>
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Import recipe</Text>
+            <View style={{ width: 38 }} />
           </View>
-          <View style={{ width: 40 }} />
-        </View>
         </Animated.View>
 
         <Animated.View style={{ flex: 1, opacity: cardsOpacity, transform: [{ translateY: cardsTranslateY }] }}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: 50 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: insets.bottom + 40 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
 
-          {/* ── Input section ── */}
-          <View style={styles.inputCard}>
-            {/* Mode toggle */}
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-              <TouchableOpacity
-                onPress={() => { setPasteMode(false); setState('idle'); setErrorMsg(''); }}
-                style={{
-                  flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
-                  backgroundColor: !pasteMode ? colors.btnPrimary : colors.surface,
-                  borderWidth: 0.5, borderColor: !pasteMode ? colors.btnPrimary : colors.border,
-                }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: !pasteMode ? 'white' : colors.textSub }}>Paste link</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => { setPasteMode(true); setState('idle'); setErrorMsg(''); }}
-                style={{
-                  flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
-                  backgroundColor: pasteMode ? colors.btnPrimary : colors.surface,
-                  borderWidth: 0.5, borderColor: pasteMode ? colors.btnPrimary : colors.border,
-                }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: pasteMode ? 'white' : colors.textSub }}>Paste caption</Text>
-              </TouchableOpacity>
+          {/* ── Input ── */}
+          <View style={styles.card}>
+            {/* Link / caption: the same segmented control as the inventory tabs */}
+            <View style={styles.segment}>
+              {([
+                { key: false, label: 'Link',    icon: 'link-outline' },
+                { key: true,  label: 'Caption', icon: 'document-text-outline' },
+              ] as const).map(o => {
+                const on = pasteMode === o.key;
+                return (
+                  <TouchableOpacity
+                    key={o.label}
+                    style={[styles.segmentBtn, on && styles.segmentBtnOn]}
+                    onPress={() => { setPasteMode(o.key); setState('idle'); setErrorMsg(''); }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name={o.icon} size={14} color={on ? colors.text : colors.textSub} />
+                    <Text style={[styles.segmentText, { color: on ? colors.text : colors.textSub }]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {!pasteMode ? (
               <>
-                <Text style={styles.sectionLabel}>POST URL</Text>
-                <TextInput
-                  style={styles.urlInput}
-                  value={url}
-                  onChangeText={setUrl}
-                  placeholder="https://www.tiktok.com/@..."
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  returnKeyType="go"
-                  onSubmitEditing={handleExtract}
-                  editable={state !== 'loading'}
-                />
-                <Text style={styles.hintText}>
-                  Works best with recipe websites and YouTube. TikTok/Instagram captions may be truncated — use Paste Caption if the link doesn't work.
-                </Text>
+                <Text style={styles.fieldLabel}>Post or recipe link</Text>
+                <View style={styles.inputWrap}>
+                  <Ionicons name="link-outline" size={17} color={colors.textMuted} />
+                  <TextInput
+                    style={styles.input}
+                    value={url}
+                    onChangeText={setUrl}
+                    placeholder="Instagram, TikTok or website link"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardAppearance={isDark ? 'dark' : 'light'}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    returnKeyType="go"
+                    onSubmitEditing={() => handleExtract()}
+                    editable={state !== 'loading'}
+                  />
+                  {url ? (
+                    <TouchableOpacity onPress={() => setUrl('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Ionicons name="close-circle" size={17} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                {copiedLink && !url && state !== 'loading' ? (
+                  <TouchableOpacity
+                    onPress={() => { setUrl(copiedLink); setCopiedLink(null); handleExtract({ url: copiedLink }); }}
+                    activeOpacity={0.8}
+                    style={styles.copiedBtn}
+                  >
+                    <Ionicons name="clipboard-outline" size={16} color={colors.chipText} />
+                    <Text style={styles.copiedText} numberOfLines={1}>Use copied link</Text>
+                    <Ionicons name="arrow-forward" size={15} color={colors.chipText} />
+                  </TouchableOpacity>
+                ) : null}
               </>
             ) : (
               <>
-                <Text style={styles.sectionLabel}>RECIPE CAPTION</Text>
+                <Text style={styles.fieldLabel}>Caption or recipe text</Text>
                 <TextInput
-                  style={[styles.urlInput, { minHeight: 120, textAlignVertical: 'top', paddingTop: 12 }]}
+                  style={[styles.inputWrap, styles.input, { minHeight: 130, textAlignVertical: 'top', paddingTop: 12 }]}
                   value={pasteText}
                   onChangeText={setPasteText}
-                  placeholder="Paste the caption or recipe text here…"
-                  placeholderTextColor={colors.textMuted}
+                  placeholder="Paste the caption or recipe here"
+                  placeholderTextColor={colors.placeholder}
+                  keyboardAppearance={isDark ? 'dark' : 'light'}
                   autoCapitalize="sentences"
                   autoCorrect={false}
                   multiline
                   editable={state !== 'loading'}
                 />
-                <Text style={styles.hintText}>
-                  Copy the caption from TikTok, Instagram, or any post and paste it here.
-                </Text>
               </>
             )}
 
             <TouchableOpacity
-              style={[styles.extractBtn, {
-                opacity: (pasteMode ? pasteText.trim() : url.trim()) && state !== 'loading' ? 1 : 0.45,
-                marginTop: 12,
-              }]}
-              onPress={handleExtract}
-              disabled={!(pasteMode ? pasteText.trim() : url.trim()) || state === 'loading'}
+              style={[styles.primaryBtn, { opacity: canSubmit ? 1 : 0.45 }]}
+              onPress={() => handleExtract()}
+              disabled={!canSubmit}
               activeOpacity={0.85}
             >
-              {state === 'loading' ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.extractBtnText}>Extract Recipe</Text>
-              )}
+              {state === 'loading'
+                ? <ActivityIndicator color={colors.btnPrimaryText} />
+                : <>
+                    <Ionicons name="sparkles-outline" size={17} color={colors.btnPrimaryText} />
+                    <Text style={styles.primaryBtnText}>Get recipe</Text>
+                  </>}
             </TouchableOpacity>
           </View>
 
-          {/* ── Loading state ── */}
-          {state === 'loading' && (
-            <View style={styles.loadingCard}>
-              <ActivityIndicator size="large" color={colors.teal} />
-              <Text style={styles.loadingText}>Extracting recipe with AI…</Text>
+          {/* ── Tips before the first import ── */}
+          {state === 'idle' && (
+            <View style={styles.tipCard}>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIcon}><Ionicons name="share-outline" size={16} color={colors.chipText} /></View>
+                <Text style={styles.tipText}>
+                  <Text style={{ fontWeight: '700', color: colors.text }}>Fastest way: </Text>
+                  in Instagram or TikTok, tap Share, then Go Good. The first time, tap More to turn it on.
+                </Text>
+              </View>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIcon}><Ionicons name="globe-outline" size={16} color={colors.chipText} /></View>
+                <Text style={styles.tipText}>Works with Instagram, TikTok, YouTube, Facebook, Pinterest and recipe websites.</Text>
+              </View>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIcon}><Ionicons name="document-text-outline" size={16} color={colors.chipText} /></View>
+                <Text style={styles.tipText}>Private post? Copy the caption and use Caption instead.</Text>
+              </View>
             </View>
           )}
 
-          {/* ── Error state ── */}
+          {/* ── Error ── */}
           {state === 'error' && (
-            <View style={styles.errorCard}>
-              <View style={{ marginBottom: 10 }}><View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.goneBadBg, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="alert-outline" size={26} color={colors.goneBadText} /></View></View>
-              <Text style={styles.errorTitle}>Couldn't extract recipe</Text>
-              <Text style={styles.errorMsg}>{errorMsg}</Text>
-              <Text style={styles.errorTip}>
-                Tip: Copy the post caption and ask Good Bot to format it as a recipe instead.
-              </Text>
+            <View style={[styles.card, { alignItems: 'center', paddingVertical: 26 }]}>
+              <View style={[styles.bigIcon, { backgroundColor: colors.goneBadBg }]}><Ionicons name="alert-outline" size={24} color={colors.goneBadText} /></View>
+              <Text style={[styles.stateTitle, { marginTop: 12 }]}>Couldn't get that recipe</Text>
+              <Text style={[styles.stateText, { marginTop: 6 }]}>{errorMsg}</Text>
+              {!pasteMode && (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() => { setPasteMode(true); setState('idle'); setErrorMsg(''); }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="document-text-outline" size={16} color={colors.text} />
+                  <Text style={styles.secondaryBtnText}>Paste the caption instead</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
-          {/* ── Success: extracted recipe ── */}
+          {/* ── Result ── */}
           {state === 'success' && extracted && (
             <>
-              {/* Recipe name + source */}
-              <View style={styles.recipeHeader}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <View style={styles.platformBadge}>
-                      <Ionicons name={platformEmoji} size={13} color={colors.textSub} />
-                      <Text style={styles.platformBadgeText}>{platform}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.recipeName}>{extracted.name}</Text>
+              <View style={styles.card}>
+                <View style={styles.sourceChip}>
+                  <Ionicons name={platformEmoji} size={13} color={colors.textSub} />
+                  <Text style={styles.sourceText}>From {platform === 'Web' ? 'the web' : platform}</Text>
                 </View>
+                <Text style={styles.recipeName}>{extracted.name}</Text>
+                {macros && (
+                  <View style={styles.macroRow}>
+                    {[
+                      { k: 'Cal',     v: macros.cal ? String(macros.cal) : '' },
+                      { k: 'Protein', v: macros.protein ? `${macros.protein}g` : '' },
+                      { k: 'Carbs',   v: macros.carbs ? `${macros.carbs}g` : '' },
+                      { k: 'Fat',     v: macros.fat ? `${macros.fat}g` : '' },
+                    ].filter(m => m.v).map(m => (
+                      <View key={m.k} style={styles.macroChip}>
+                        <Text style={styles.macroValue}>{m.v}</Text>
+                        <Text style={styles.macroLabel}>{m.k}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
 
-              {/* Ingredient matching */}
+              {/* What they have and what they need */}
               {(ingredients.have.length > 0 || ingredients.need.length > 0) && (
-                <View style={styles.ingredientsCard}>
+                <View style={styles.card}>
                   {ingredients.have.length > 0 && (
                     <>
-                      <Text style={[styles.ingredientSectionLabel, { color: colors.teal }]}>
-                        IN YOUR KITCHEN · {ingredients.have.length}
-                      </Text>
+                      <Text style={styles.groupLabel}>In your kitchen · {ingredients.have.length}</Text>
                       <View style={styles.chipRow}>
-                        {ingredients.have.map((ing, i) => (
-                          <IngredientChip key={i} label={ing.name} have colors={colors} />
-                        ))}
+                        {ingredients.have.map((ing, i) => <IngredientChip key={i} label={ing.name} have colors={colors} />)}
                       </View>
                     </>
                   )}
-
                   {ingredients.need.length > 0 && (
                     <>
-                      <Text style={[styles.ingredientSectionLabel, { color: '#E8756A', marginTop: ingredients.have.length > 0 ? 14 : 0 }]}>
-                        YOU'LL NEED · {ingredients.need.length}
-                      </Text>
+                      <Text style={[styles.groupLabel, { marginTop: ingredients.have.length > 0 ? 12 : 0 }]}>You'll need · {ingredients.need.length}</Text>
                       <View style={styles.chipRow}>
-                        {ingredients.need.map((ing, i) => (
-                          <IngredientChip key={i} label={ing.name} have={false} colors={colors} />
-                        ))}
+                        {ingredients.need.map((ing, i) => <IngredientChip key={i} label={ing.name} have={false} colors={colors} />)}
                       </View>
                       <TouchableOpacity
-                        style={[styles.addToListBtn, addedToList && styles.addToListBtnDone]}
+                        style={styles.secondaryBtn}
                         onPress={handleAddToShoppingList}
                         disabled={addedToList}
                         activeOpacity={0.85}
                       >
-                        <Text style={[styles.addToListBtnText, addedToList && { color: colors.teal }]}>
-                          {addedToList ? '✓ Added to Shopping List' : '+ Add all to Shopping List'}
+                        <Ionicons name={addedToList ? 'checkmark' : 'cart-outline'} size={16} color={addedToList ? colors.chipText : colors.text} />
+                        <Text style={[styles.secondaryBtnText, addedToList && { color: colors.chipText }]}>
+                          {addedToList ? 'Added to shopping list' : 'Add missing to shopping list'}
                         </Text>
                       </TouchableOpacity>
                     </>
                   )}
-
-                  {ingredients.have.length === 0 && ingredients.need.length === 0 && (
-                    <Text style={{ fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: 8 }}>
-                      No ingredients matched against your inventory.
-                    </Text>
-                  )}
                 </View>
               )}
 
-              {/* Recipe preview (collapsible) */}
-              <View style={styles.previewCard}>
-                <TouchableOpacity
-                  style={styles.previewToggle}
-                  onPress={() => setPreviewExpanded(v => !v)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.previewToggleLabel}>RECIPE PREVIEW</Text>
-                  <Ionicons name={previewExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-                {previewExpanded && (
-                  <Text style={styles.previewText}>{extracted.recipe}</Text>
-                )}
+              {/* The recipe itself, in the same card style as Good Bot and Recipes */}
+              <View style={styles.card}>
+                {recipeCard
+                  ? <RecipeView recipe={recipeCard} showTitle={false} />
+                  : <Text style={styles.rawText}>{extracted.recipe}</Text>}
               </View>
 
-              {/* Save button */}
               <TouchableOpacity
-                style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+                style={[styles.primaryBtn, { marginTop: 4 }, saving && { opacity: 0.6 }]}
                 onPress={() => setPickerVisible(true)}
                 disabled={saving}
                 activeOpacity={0.85}
               >
-                {saving ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text style={styles.saveBtnText}>Save to Recipes</Text>
-                )}
+                {saving
+                  ? <ActivityIndicator color={colors.btnPrimaryText} />
+                  : <>
+                      <Ionicons name="bookmark-outline" size={17} color={colors.btnPrimaryText} />
+                      <Text style={styles.primaryBtnText}>Save to recipes</Text>
+                    </>}
               </TouchableOpacity>
             </>
           )}
@@ -628,6 +645,14 @@ export default function SocialRecipeImportScreen() {
         </Animated.View>
 
       </Animated.View>
+      <ScanStatusStrip
+        visible={state === 'loading'}
+        label="Reading the recipe"
+        sublabel="Pulling the ingredients and steps from the post. This can take a few seconds."
+        slowHint="Still working — long captions take a little longer."
+        onCancel={cancelImport}
+        bottom={insets.bottom + 16}
+      />
       <CollectionPicker
         visible={pickerVisible}
         collections={collections}
@@ -645,43 +670,47 @@ export default function SocialRecipeImportScreen() {
 function createStyles(c: ThemeColors, isDark = false) {
   return StyleSheet.create({
     safe:         { flex: 1, backgroundColor: c.bg },
-    header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: 0.5, borderBottomColor: c.border },
-    headerTitle:  { fontSize: 16, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
-    backBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
+    header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12, backgroundColor: c.bg },
+    headerTitle:  { fontSize: 20, color: c.brand, fontFamily: 'Fraunces_600SemiBold' },
+    backBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', ...raised(isDark) },
 
-    inputCard:    { backgroundColor: c.surface, borderRadius: 18, padding: 16, borderWidth: 0.5, borderColor: c.border, marginBottom: 16 },
-    sectionLabel: { fontSize: 10, fontWeight: '700', color: c.textSub, letterSpacing: 1, marginBottom: 10 },
-    urlInput:     { backgroundColor: c.bg, borderRadius: 12, borderWidth: 0.5, borderColor: c.border, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: c.text, marginBottom: 12, fontFamily: 'Fraunces_400Regular' },
-    extractBtn:   { backgroundColor: c.btnPrimary, borderRadius: 13, paddingVertical: 14, alignItems: 'center', marginBottom: 12 },
-    extractBtnText: { color: 'white', fontWeight: '700', fontSize: 15 },
-    hintText:     { fontSize: 11, color: c.textMuted, lineHeight: 17 },
+    card:         { backgroundColor: c.surface, borderRadius: 18, padding: 16, marginBottom: 12, ...raised(isDark, 'md') },
 
-    loadingCard:  { backgroundColor: c.surface, borderRadius: 18, padding: 36, borderWidth: 0.5, borderColor: c.border, alignItems: 'center', gap: 14, marginBottom: 16 },
-    loadingText:  { fontSize: 14, color: c.textSub, fontFamily: 'Fraunces_400Regular' },
+    segment:      { flexDirection: 'row', padding: 4, borderRadius: 14, backgroundColor: c.surfaceAlt, marginBottom: 16 },
+    segmentBtn:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 11 },
+    segmentBtnOn: { backgroundColor: c.surface, ...raised(isDark) },
+    segmentText:  { fontSize: 13, fontWeight: '600' },
 
-    errorCard:    { backgroundColor: isDark ? 'rgba(232,117,106,0.08)' : 'rgba(232,117,106,0.06)', borderRadius: 18, padding: 20, borderWidth: 0.5, borderColor: 'rgba(232,117,106,0.3)', alignItems: 'center', marginBottom: 16 },
-    errorTitle:   { fontSize: 16, fontWeight: '700', color: '#E8756A', marginBottom: 8, fontFamily: 'Fraunces_600SemiBold' },
-    errorMsg:     { fontSize: 13, color: c.text, textAlign: 'center', lineHeight: 20, marginBottom: 12 },
-    errorTip:     { fontSize: 12, color: c.textMuted, textAlign: 'center', lineHeight: 18, fontStyle: 'italic' },
+    fieldLabel:   { fontSize: 12, fontWeight: '600', color: c.textSub, marginBottom: 8 },
+    inputWrap:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.inputBorder, paddingHorizontal: 12 },
+    input:        { flex: 1, paddingVertical: 12, fontSize: 15, color: c.inputText },
+    copiedBtn:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, backgroundColor: c.chipBg },
+    copiedText:   { flex: 1, fontSize: 13, fontWeight: '600', color: c.chipText },
 
-    recipeHeader: { backgroundColor: c.surface, borderRadius: 18, padding: 16, borderWidth: 0.5, borderColor: c.border, marginBottom: 12 },
-    platformBadge:    { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.chipBg, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: c.border },
-    platformBadgeText:{ fontSize: 11, fontWeight: '600', color: c.textSub },
-    recipeName:   { fontSize: 20, fontWeight: '700', color: c.brand, fontFamily: 'Fraunces_600SemiBold', lineHeight: 28 },
+    primaryBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.btnPrimary, borderRadius: 14, paddingVertical: 15, marginTop: 14, ...raisedGreen(isDark) },
+    primaryBtnText:   { color: c.btnPrimaryText, fontWeight: '700', fontSize: 15 },
+    secondaryBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.surfaceAlt, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, marginTop: 14, ...raised(isDark) },
+    secondaryBtnText: { color: c.text, fontWeight: '600', fontSize: 14 },
 
-    ingredientsCard:          { backgroundColor: c.surface, borderRadius: 18, padding: 16, borderWidth: 0.5, borderColor: c.border, marginBottom: 12 },
-    ingredientSectionLabel:   { fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 10 },
-    chipRow:                  { flexDirection: 'row', flexWrap: 'wrap' },
-    addToListBtn:             { marginTop: 12, backgroundColor: 'rgba(232,117,106,0.1)', borderRadius: 12, paddingVertical: 11, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(232,117,106,0.3)' },
-    addToListBtnDone:         { backgroundColor: 'rgba(29,158,117,0.1)', borderColor: 'rgba(29,158,117,0.3)' },
-    addToListBtnText:         { fontSize: 14, fontWeight: '700', color: '#E8756A' },
+    tipCard:      { backgroundColor: c.surface, borderRadius: 18, padding: 14, gap: 12, marginBottom: 12, ...raised(isDark, 'md') },
+    tipRow:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    tipIcon:      { width: 32, height: 32, borderRadius: 10, backgroundColor: c.chipBg, alignItems: 'center', justifyContent: 'center' },
+    tipText:      { flex: 1, fontSize: 13, color: c.textSub, lineHeight: 19 },
 
-    previewCard:    { backgroundColor: c.surface, borderRadius: 18, padding: 16, borderWidth: 0.5, borderColor: c.border, marginBottom: 16 },
-    previewToggle:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    previewToggleLabel: { fontSize: 10, fontWeight: '700', color: c.textSub, letterSpacing: 1 },
-    previewText:    { fontSize: 13, color: c.text, lineHeight: 21, marginTop: 14, fontFamily: 'Fraunces_400Regular' },
+    bigIcon:      { width: 52, height: 52, borderRadius: 26, backgroundColor: c.chipBg, alignItems: 'center', justifyContent: 'center' },
+    stateTitle:   { fontSize: 17, color: c.text, fontFamily: 'Fraunces_600SemiBold', textAlign: 'center' },
+    stateText:    { fontSize: 13, color: c.textSub, textAlign: 'center', lineHeight: 19, paddingHorizontal: 8 },
 
-    saveBtn:      { backgroundColor: c.btnPrimary, borderRadius: 16, paddingVertical: 16, alignItems: 'center', shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 6 }, shadowOpacity: isDark ? 0.18 : 0.3, shadowRadius: 14, elevation: 6 },
-    saveBtnText:  { color: 'white', fontWeight: '700', fontSize: 16 },
+    sourceChip:   { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', backgroundColor: c.surfaceAlt, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, marginBottom: 10 },
+    sourceText:   { fontSize: 11, fontWeight: '600', color: c.textSub },
+    recipeName:   { fontSize: 22, color: c.text, fontFamily: 'Fraunces_600SemiBold', lineHeight: 29 },
+    macroRow:     { flexDirection: 'row', gap: 8, marginTop: 12 },
+    macroChip:    { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 12, backgroundColor: c.surfaceAlt },
+    macroValue:   { fontSize: 15, fontWeight: '700', color: c.text },
+    macroLabel:   { fontSize: 10, color: c.textMuted, marginTop: 1 },
+
+    groupLabel:   { fontSize: 12, fontWeight: '600', color: c.textSub, marginBottom: 8 },
+    chipRow:      { flexDirection: 'row', flexWrap: 'wrap' },
+    rawText:      { fontSize: 14, color: c.text, lineHeight: 21 },
   });
 }

@@ -8,6 +8,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { TAB_BAR_MINI_H, TAB_BAR_GAP, tabBarBottomOffset } from '@/components/tab-bar-space';
 import { useTheme } from '../context/theme';
 import { useSubscription } from '../context/subscription';
+import PendingInvitePrompt from '../components/PendingInvitePrompt';
 
 // Line icons: outlined normally, filled for the screen you're on
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -214,6 +215,8 @@ export default function TabLayout() {
   const { isPremium } = useSubscription();
 
   return (
+    <>
+    <PendingInvitePrompt />
     <Tabs
       tabBar={(props) => <FloatingDock {...props} />}
       sceneContainerStyle={{ backgroundColor: colors.bg }}
@@ -230,5 +233,6 @@ export default function TabLayout() {
       <Tabs.Screen name="foodreport"  options={{ title: 'Food Report' }} />
       <Tabs.Screen name="household"   options={{ title: 'Household'   }} />
     </Tabs>
+    </>
   );
 }

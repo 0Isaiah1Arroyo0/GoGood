@@ -14,6 +14,7 @@ import { useTheme } from '../context/theme';
 import { useAuthStyles, IconBadge, BackButton } from '@/components/auth-ui';
 import * as WebBrowser from 'expo-web-browser';
 import { TERMS_URL, PRIVACY_URL } from '@/constants/legal';
+import { showAlert } from '@/components/dialog';
 
 // ── Password strength ────────────────────────────────────────────────────────
 
@@ -176,7 +177,7 @@ export default function SignupScreen() {
     const hasFace        = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
     const hasFingerprint = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
     const label = hasFace ? 'Face ID' : hasFingerprint ? 'Touch ID' : 'Passcode';
-    Alert.alert(
+    showAlert(
       `Enable ${label}?`,
       `Sign in instantly next time using ${label}`,
       [

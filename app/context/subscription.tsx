@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Purchases, {
   type CustomerInfo,
@@ -7,21 +7,35 @@ import Purchases, {
 } from 'react-native-purchases';
 import { useAuth } from './auth';
 import { HOUSEHOLD_ROLE_KEY } from '../lib/household';
+import { supabase } from '../lib/supabase';
 
 const RC_IOS_KEY     = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
 const RC_ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? '';
 const ENTITLEMENT    = 'premium';
+// The Household plan unlocks its own entitlement (on top of Pro) so the owner can
+// share Pro with one partner. Offering "household" holds its monthly/yearly packages.
+const HOUSEHOLD_ENTITLEMENT = 'household';
+const HOUSEHOLD_OFFERING    = 'household';
+
+export type PaywallKind = 'solo' | 'household';
 
 interface SubscriptionCtx {
   isPremium: boolean;
   isAnnual: boolean;
+  /** Pays for the Household plan (can invite a partner who gets Pro) */
+  hasHouseholdPlan: boolean;
+  /** Has Pro through a partner's Household plan */
+  proFromHousehold: boolean;
+  refreshProStatus: () => void;
+  paywallKind: PaywallKind;
+  householdPackages: PurchasesPackage[];
   isHouseholdJoiner: boolean;
   isLoading: boolean;
   paywallVisible: boolean;
   paywallDemoMode: boolean;
   setPaywallDemoMode: (v: boolean) => void;
   packages: PurchasesPackage[];
-  showPaywall: () => void;
+  showPaywall: (kind?: PaywallKind) => void;
   hidePaywall: () => void;
   purchase: (pkg: PurchasesPackage) => Promise<boolean>;
   restorePurchases: () => Promise<boolean>;
@@ -30,6 +44,11 @@ interface SubscriptionCtx {
 const SubscriptionContext = createContext<SubscriptionCtx>({
   isPremium: false,
   isAnnual: false,
+  hasHouseholdPlan: false,
+  proFromHousehold: false,
+  refreshProStatus: () => {},
+  paywallKind: 'solo',
+  householdPackages: [],
   isHouseholdJoiner: false,
   isLoading: true,
   paywallVisible: false,
@@ -70,11 +89,34 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const [paywallVisible,    setPaywallVisible]     = useState(false);
   const [paywallDemoMode,   setPaywallDemoModeState] = useState(false);
   const [packages,          setPackages]           = useState<PurchasesPackage[]>([]);
+  const [householdPackages, setHouseholdPackages]  = useState<PurchasesPackage[]>([]);
+  const [rcHousehold,       setRcHousehold]        = useState(false);
+  const [paywallKind,       setPaywallKind]        = useState<PaywallKind>('solo');
+  // Pro shared by a partner's Household plan (checked on the server)
+  const [shared,            setShared]             = useState<{ pro: boolean; annual: boolean }>({ pro: false, annual: false });
+
+  const refreshProStatus = useCallback(() => {
+    if (!user?.id) { setShared({ pro: false, annual: false }); return; }
+    supabase.functions.invoke('pro-status', { body: {} })
+      .then(({ data }) => {
+        if (data && data.via === 'household') setShared({ pro: !!data.pro, annual: !!data.annual });
+        else setShared({ pro: false, annual: false });
+      })
+      .catch(() => {});
+  }, [user?.id]);
+
+  // Check when the user changes and whenever the app comes back to the front
+  useEffect(() => {
+    refreshProStatus();
+    const sub = AppState.addEventListener('change', st => { if (st === 'active') refreshProStatus(); });
+    return () => sub.remove();
+  }, [refreshProStatus]);
 
   // In __DEV__, demo mode forces free-tier so you can test the paywall UI.
   // In production, always use the actual RevenueCat subscription status.
-  const isPremium = __DEV__ && paywallDemoMode ? false : rcIsPremium;
-  const isAnnual  = __DEV__ && paywallDemoMode ? false : rcIsAnnual;
+  const isPremium = __DEV__ && paywallDemoMode ? false : (rcIsPremium || shared.pro);
+  const isAnnual  = __DEV__ && paywallDemoMode ? false : (rcIsAnnual || shared.annual);
+  const hasHouseholdPlan = !(__DEV__ && paywallDemoMode) && rcHousehold;
 
   // Only restore demo mode flag in development builds — never in production.
   useEffect(() => {
@@ -110,6 +152,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     Purchases.addCustomerInfoUpdateListener(info => {
       setRcIsPremium(isEntitled(info));
       setRcIsAnnual(isAnnualPlan(info));
+      setRcHousehold(!!info.entitlements.active[HOUSEHOLD_ENTITLEMENT]);
     });
 
     // 6-second timeout so isLoading never hangs indefinitely on slow networks.
@@ -119,12 +162,17 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       .then(info => {
         setRcIsPremium(isEntitled(info));
         setRcIsAnnual(isAnnualPlan(info));
+        setRcHousehold(!!info.entitlements.active[HOUSEHOLD_ENTITLEMENT]);
       })
       .catch(e => console.error('[RC] getCustomerInfo failed', e))
       .finally(() => { clearTimeout(timeout); setIsLoading(false); });
 
     Purchases.getOfferings()
-      .then(o => { if (o.current?.availablePackages.length) setPackages(o.current.availablePackages); })
+      .then(o => {
+        if (o.current?.availablePackages.length) setPackages(o.current.availablePackages);
+        const h = o.all[HOUSEHOLD_OFFERING]?.availablePackages;
+        if (h?.length) setHouseholdPackages(h);
+      })
       .catch(e => console.error('[RC] getOfferings failed', e));
   }, [user?.id]);
 
@@ -135,6 +183,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       const annual   = isAnnualPlan(customerInfo);
       setRcIsPremium(ok);
       setRcIsAnnual(annual);
+      setRcHousehold(!!customerInfo.entitlements.active[HOUSEHOLD_ENTITLEMENT]);
       if (ok) setPaywallVisible(false);
       return ok;
     } catch (e: any) {
@@ -151,6 +200,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       const annual = isAnnualPlan(info);
       setRcIsPremium(ok);
       setRcIsAnnual(annual);
+      setRcHousehold(!!info.entitlements.active[HOUSEHOLD_ENTITLEMENT]);
       return ok;
     } catch (e) {
       console.error('[RC] restorePurchases failed', e);
@@ -161,7 +211,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   return (
     <SubscriptionContext.Provider value={{
       isPremium, isAnnual, isHouseholdJoiner, isLoading, paywallVisible, paywallDemoMode, setPaywallDemoMode, packages,
-      showPaywall: () => setPaywallVisible(true),
+      hasHouseholdPlan, proFromHousehold: shared.pro && !rcIsPremium, refreshProStatus, paywallKind, householdPackages,
+      showPaywall: (kind?: PaywallKind) => { setPaywallKind(kind === 'household' ? 'household' : 'solo'); setPaywallVisible(true); },
       hidePaywall: () => setPaywallVisible(false),
       purchase, restorePurchases,
     }}>

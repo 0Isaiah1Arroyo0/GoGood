@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { proStatus } from '../_shared/pro.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -17,28 +18,13 @@ const MAX_ITEMS  = 200  // inventory items included in the prompt
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const ANON_KEY     = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 const SERVICE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-const RC_SECRET    = Deno.env.get('REVENUECAT_SECRET_KEY') ?? ''   // v2 secret key, read-only
-const RC_PROJECT   = Deno.env.get('REVENUECAT_PROJECT_ID') ?? ''   // e.g. proj2f616bc4
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
-// Pro if RevenueCat has any active entitlement for this user. Without a
-// RevenueCat secret key, everyone signed in gets the Pro limit (the app still
-// keeps free users to the free allowance).
+// Pro: own subscription, or a partner's Household plan (see _shared/pro.ts)
 async function isPro(userId: string): Promise<boolean> {
-  if (!RC_SECRET || !RC_PROJECT) return true
-  try {
-    const r = await fetch(
-      `https://api.revenuecat.com/v2/projects/${RC_PROJECT}/customers/${encodeURIComponent(userId)}/active_entitlements`,
-      { headers: { Authorization: `Bearer ${RC_SECRET}` } },
-    )
-    if (r.status === 404) return false            // never opened the paywall
-    if (!r.ok) return true                         // RevenueCat hiccup: don't punish paying users
-    return ((await r.json())?.items ?? []).length > 0
-  } catch {
-    return true
-  }
+  return (await proStatus(userId)).pro
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────────

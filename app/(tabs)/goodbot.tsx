@@ -26,12 +26,16 @@ import {
 import {
   migrateLocalCollectionsToSupabase,
   pushSavedRecipes,
+  pushCollections,
 } from '../lib/collections-sync';
 import { addToShoppingList, addToHouseholdShoppingList } from '../lib/shopping-list';
 import { PortionDeductionSheet } from '../components/PortionDeductionSheet';
 import { raised, raisedGreen } from '@/components/raised';
 import RecipeView, { parseRecipe } from '@/components/recipe-view';
 import ServingsScaler, { extractServings, scaleContent } from '@/components/servings-scaler';
+import MacroBar from '@/components/macro-bar';
+import CollectionPicker from '@/components/collection-picker';
+import { parseIngredients, matchIngredients } from '../lib/recipe-inventory';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { DialogHost, showAlert } from '@/components/dialog';
 
@@ -213,7 +217,7 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 // Fair-use allowance per day (the server enforces these; keep them in sync with
 // supabase/functions/goodbot). Resets at midnight in the user's time zone.
 const FREE_DAILY = 3;
-const PRO_DAILY  = 40;
+const PRO_DAILY  = 25;
 const TIME_ZONE = (() => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
 })();
@@ -247,8 +251,6 @@ export default function GoodBotScreen() {
   const [savedMsgIds,      setSavedMsgIds]      = useState<Set<string>>(new Set());
   const [shoppingAddedIds, setShoppingAddedIds] = useState<Set<string>>(new Set());
   const [saveSheetMsg,   setSaveSheetMsg]   = useState<ChatMessage | null>(null);
-  const [newColName,     setNewColName]     = useState('');
-  const [creatingCol,    setCreatingCol]    = useState(false);
   const [cookSheetMsg,   setCookSheetMsg]   = useState<ChatMessage | null>(null);
   const [saveDishMsg,    setSaveDishMsg]    = useState<ChatMessage | null>(null);
   const [saveDishName,   setSaveDishName]   = useState('');
@@ -267,6 +269,7 @@ export default function GoodBotScreen() {
   const allItemsRef      = useRef<(StoredItem & { days: number })[]>([]);
   const nameRef          = useRef('');
   const dietaryRef       = useRef<string[]>([]);
+  const cookingRef       = useRef<any>(null);
   const householdRef     = useRef(1);
   const householdIdRef   = useRef<string | undefined>(undefined);
   const initialized      = useRef(false);
@@ -345,6 +348,7 @@ export default function GoodBotScreen() {
       allItemsRef.current = withDays;
       nameRef.current = name;
       dietaryRef.current = profile.dietary || [];
+      cookingRef.current = profile.cooking ?? null;
       householdRef.current = profile.household || 1;
 
       // Re-run initChat if: first visit OR no user messages sent yet (opening message is still fresh)
@@ -399,6 +403,7 @@ export default function GoodBotScreen() {
     name: nameRef.current,
     household: householdRef.current,
     dietary: dietaryRef.current,
+    cooking: cookingRef.current,
     items: allItemsRef.current.map(i => ({
       name: i.baseName, qty: i.qty, qtyNum: i.qtyNum, days: i.days,
       location: i.category === 'freezer' ? 'freezer' : i.category === 'pantry' ? 'pantry' : 'fridge',
@@ -556,6 +561,33 @@ export default function GoodBotScreen() {
     }
   };
 
+  // Ingredients the user doesn't have: what the bot called out, plus any recipe
+  // ingredient that isn't in their inventory
+  const missingFor = (msg: ChatMessage): { name: string; quantity?: string }[] => {
+    const out = parseMissingIngredients(msg.content);
+    const seen = new Set(out.map(m => m.name.toLowerCase()));
+    if (msg.role === 'assistant' && (msg.recipeMacros || looksLikeRecipe(msg.content))) {
+      const parsed = parseIngredients(scaledContentOf(msg));
+      const inventory = allItemsRef.current.map((i: any) => ({
+        id: i.id, baseName: i.baseName ?? i.name ?? '', qtyNum: i.qtyNum ?? 1, unit: i.unit ?? '', icon: i.icon,
+      }));
+      const have = new Set(matchIngredients(parsed, inventory).map(m => m.ingredient.name));
+      for (const ing of parsed) {
+        if (have.has(ing.name) || seen.has(ing.name.toLowerCase())) continue;
+        seen.add(ing.name.toLowerCase());
+        const qty = ing.qty > 0 ? `${ing.qty}${ing.unit ? ' ' + ing.unit : ''}` : undefined;
+        out.push({ name: ing.name, quantity: qty });
+      }
+    }
+    return out;
+  };
+
+  // Open the save sheet with fresh categories (they may have been made on the Recipes tab)
+  const openSaveSheet = (msg: ChatMessage) => () => {
+    setSaveSheetMsg(msg);
+    loadCollections().then(setCollections).catch(() => {});
+  };
+
   // ── Save recipe ───────────────────────────────────────────────────────────────
 
   const confirmSave = async (collectionId: string) => {
@@ -577,29 +609,28 @@ export default function GoodBotScreen() {
     }
     setSavedMsgIds(prev => new Set(prev).add(saveSheetMsg.id));
     setSaveSheetMsg(null);
-    setNewColName('');
-    setCreatingCol(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const handleCreateAndSave = async () => {
-    if (!newColName.trim() || !saveSheetMsg) return;
+  const handleCreateAndSave = async (name: string, emoji: string) => {
+    if (!name.trim() || !saveSheetMsg) return;
     const newCol: Collection = {
       id: String(Date.now()),
-      name: newColName.trim(),
-      emoji: '🍳',
+      name: name.trim(),
+      emoji,
       createdAt: Date.now(),
     };
     const updatedCols = [...collections, newCol];
     setCollections(updatedCols);
     await persistCollections(updatedCols);
+    if (user?.id) pushCollections(updatedCols, user.id).catch(() => {});
     await confirmSave(newCol.id);
   };
 
   // ── Add missing ingredients to shopping list ─────────────────────────────────
 
   const addMissingToList = async (msg: ChatMessage) => {
-    const missing = parseMissingIngredients(msg.content);
+    const missing = missingFor(msg);
     if (!missing.length) return;
     const recipeName = parseRecipeName(msg.content);
     const items = missing.map(item => ({
@@ -690,63 +721,57 @@ export default function GoodBotScreen() {
                         <Text style={styles.msgTime}>{msg.time}</Text>
 
                         {msg.recipeMacros && (
-                          <View style={styles.macroCard}>
-                            <View style={styles.macroCardHeader}>
-                              <Text style={styles.macroCardTitle}>MACROS PER SERVING</Text>
-                              {(msg.recipeMacros.servings || msg.recipeMacros.servingSize) && (
-                                <Text style={styles.macroCardServing}>
-                                  {msg.recipeMacros.servings ? `${servingsOf(msg)} serving${servingsOf(msg) !== 1 ? 's' : ''}` : ''}
-                                  {msg.recipeMacros.servings && msg.recipeMacros.servingSize ? ' · ' : ''}
-                                  {msg.recipeMacros.servingSize ?? ''}
-                                </Text>
-                              )}
-                            </View>
-                            <View style={styles.macroCardRow}>
-                              {[
-                                { label: 'PROTEIN', val: msg.recipeMacros.protein + 'g', color: colors.teal },
-                                { label: 'CARBS',   val: msg.recipeMacros.carbs   + 'g', color: '#F5A623' },
-                                { label: 'FAT',     val: msg.recipeMacros.fat     + 'g', color: '#E8756A' },
-                                { label: 'CAL',     val: String(msg.recipeMacros.cal),  color: colors.brand },
-                              ].map((m, i) => (
-                                <View key={m.label} style={styles.macroCardItem}>
-                                  {i > 0 && <View style={styles.macroCardDivider} />}
-                                  <View style={styles.macroCardInner}>
-                                    <Text style={[styles.macroCardNum, { color: m.color }]}>{m.val}</Text>
-                                    <Text style={styles.macroCardLabel}>{m.label}</Text>
-                                  </View>
-                                </View>
-                              ))}
-                            </View>
-                          </View>
+                          <MacroBar
+                            macros={msg.recipeMacros}
+                            title="Per serving"
+                            note={[
+                              msg.recipeMacros.servings ? `${servingsOf(msg)} serving${servingsOf(msg) !== 1 ? 's' : ''}` : '',
+                              msg.recipeMacros.servingSize ?? '',
+                            ].filter(Boolean).join(' · ')}
+                          />
                         )}
 
                         {(msg.recipeMacros || looksLikeRecipe(msg.content)) && (
-                          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.tealLight + '33', borderColor: colors.teal }]} onPress={() => setCookSheetMsg(msg)}>
-                              <Text style={styles.saveBtnText}>Cook This</Text>
+                          <View style={styles.actionRow}>
+                            <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={() => setCookSheetMsg(msg)} activeOpacity={0.85}>
+                              <Ionicons name="flame-outline" size={16} color={colors.btnPrimaryText} />
+                              <Text style={[styles.actionBtnText, { color: colors.btnPrimaryText }]}>Cook this</Text>
                             </TouchableOpacity>
                             {savedMsgIds.has(msg.id)
-                              ? <Text style={styles.savedBadge}>Saved to Recipes</Text>
-                              : <TouchableOpacity style={styles.saveBtn} onPress={() => { setSaveSheetMsg(msg); setCreatingCol(false); setNewColName(''); }}>
-                                  <Text style={styles.saveBtnText}>Save to Recipes</Text>
+                              ? (
+                                <View style={[styles.actionBtn, styles.actionBtnDone]}>
+                                  <Ionicons name="checkmark" size={16} color={colors.chipText} />
+                                  <Text style={[styles.actionBtnText, { color: colors.chipText }]}>Saved</Text>
+                                </View>
+                              )
+                              : (
+                                <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={openSaveSheet(msg)} activeOpacity={0.85}>
+                                  <Ionicons name="bookmark-outline" size={16} color={colors.btnPrimaryText} />
+                                  <Text style={[styles.actionBtnText, { color: colors.btnPrimaryText }]}>Save recipe</Text>
                                 </TouchableOpacity>
-                            }
+                              )}
                           </View>
                         )}
 
                         {(() => {
-                          const missing = parseMissingIngredients(msg.content);
+                          const missing = missingFor(msg);
                           if (!missing.length) return null;
-                          return shoppingAddedIds.has(msg.id)
-                            ? <Text style={styles.savedBadge}>Added {missing.length} item{missing.length !== 1 ? 's' : ''} to shopping list</Text>
-                            : (
-                              <TouchableOpacity
-                                style={[styles.saveBtn, { borderColor: '#F5A623', backgroundColor: '#FFF8E620' }]}
-                                onPress={() => addMissingToList(msg)}
-                              >
-                                <Text style={styles.saveBtnText}>Add {missing.length} missing item{missing.length !== 1 ? 's' : ''} to list</Text>
-                              </TouchableOpacity>
-                            );
+                          const added = shoppingAddedIds.has(msg.id);
+                          return (
+                            <TouchableOpacity
+                              style={[styles.actionBtn, styles.actionBtnSecondary, added && styles.actionBtnDone, { alignSelf: 'stretch' }]}
+                              onPress={() => addMissingToList(msg)}
+                              disabled={added}
+                              activeOpacity={0.85}
+                            >
+                              <Ionicons name={added ? 'checkmark' : 'cart-outline'} size={16} color={added ? colors.chipText : colors.text} />
+                              <Text style={[styles.actionBtnText, { color: added ? colors.chipText : colors.text }]} numberOfLines={1}>
+                                {added
+                                  ? `Added ${missing.length} item${missing.length !== 1 ? 's' : ''} to shopping list`
+                                  : `Add ${missing.length} missing item${missing.length !== 1 ? 's' : ''} to shopping list`}
+                              </Text>
+                            </TouchableOpacity>
+                          );
                         })()}
 
                         {msg.showSuggestions && !suggestionChosen && (
@@ -884,62 +909,15 @@ export default function GoodBotScreen() {
         </Animated.View>
       </KeyboardAvoidingView>
 
-      {/* ── Save-to-collection sheet ── */}
-      <Modal visible={!!saveSheetMsg} transparent animationType="slide" onRequestClose={() => setSaveSheetMsg(null)}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => { setSaveSheetMsg(null); setCreatingCol(false); setNewColName(''); }} />
-          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 36 }}>
-            <View style={{ width: 36, height: 4, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 999, alignSelf: 'center', marginVertical: 12 }} />
-            <Text style={{ fontSize: 16, fontWeight: '700', color: colors.brand, paddingHorizontal: 20, marginBottom: 4, fontFamily: 'Fraunces_600SemiBold' }}>
-              Save Recipe
-            </Text>
-            <Text style={{ fontSize: 12, color: colors.textSub, paddingHorizontal: 20, marginBottom: 16 }}>
-              {parseRecipeName(saveSheetMsg?.content ?? '')}
-            </Text>
-
-            <ScrollView style={{ maxHeight: 280 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-              {/* Uncategorized */}
-              <TouchableOpacity style={styles.colOption} onPress={() => confirmSave('')}>
-                <Text style={styles.colOptionText}>No Collection</Text>
-              </TouchableOpacity>
-
-              {/* Existing collections */}
-              {collections.map(col => (
-                <TouchableOpacity key={col.id} style={styles.colOption} onPress={() => confirmSave(col.id)}>
-                  <Text style={styles.colOptionText}>{col.name}</Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* Create new */}
-              {creatingCol ? (
-                <View style={[styles.colOption, { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
-                  <TextInput
-                    style={{ backgroundColor: colors.surface, borderRadius: 10, borderWidth: 0.5, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: colors.text }}
-                    placeholder="Collection name..."
-                    placeholderTextColor={colors.textMuted}
-                    value={newColName}
-                    onChangeText={setNewColName}
-                    autoFocus
-                    returnKeyType="done"
-                    onSubmitEditing={handleCreateAndSave}
-                  />
-                  <TouchableOpacity
-                    style={{ backgroundColor: colors.btnPrimary, borderRadius: 10, paddingVertical: 10, alignItems: 'center', opacity: newColName.trim() ? 1 : 0.4 }}
-                    onPress={handleCreateAndSave}
-                  >
-                    <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>Create & Save</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity style={[styles.colOption, { borderStyle: 'dashed' }]} onPress={() => setCreatingCol(true)}>
-                  <Text style={[styles.colOptionText, { color: colors.teal }]}>+ New Collection</Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-        <DialogHost />
-      </Modal>
+      {/* ── Save recipe: pick a category ── */}
+      <CollectionPicker
+        visible={!!saveSheetMsg}
+        collections={collections}
+        title={saveSheetMsg ? parseRecipeName(saveSheetMsg.content) : undefined}
+        onSelect={id => { confirmSave(id); }}
+        onCreateAndSelect={(name, emoji) => { handleCreateAndSave(name, emoji); }}
+        onClose={() => setSaveSheetMsg(null)}
+      />
 
       {drawerEl}
 
@@ -1129,6 +1107,12 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   sendBtnText:        { color: 'white', fontSize: 18, lineHeight: 22 },
 
   // Save recipe
+  actionRow:          { flexDirection: 'row', gap: 8 },
+  actionBtn:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12 },
+  actionBtnPrimary:   { backgroundColor: c.btnPrimary, ...raisedGreen(isDark, 'sm') },
+  actionBtnSecondary: { backgroundColor: c.surface, ...raised(isDark, 'sm') },
+  actionBtnDone:      { backgroundColor: c.chipBg, borderWidth: 0, shadowOpacity: 0, elevation: 0, experimental_backgroundImage: undefined },
+  actionBtnText:      { fontSize: 14, fontWeight: '700' },
   saveBtn:            { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', backgroundColor: c.chipBg, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: c.teal },
   saveBtnText:        { fontSize: 13, fontWeight: '700', color: c.chipText },
   savedBadge:         { fontSize: 12, color: c.teal, fontWeight: '600', paddingHorizontal: 4, paddingTop: 2 },

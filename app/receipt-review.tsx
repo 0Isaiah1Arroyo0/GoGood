@@ -681,10 +681,10 @@ function DraftCard({ draft, colors, isDark, onUpdate, onRemove, onScanBarcode, e
         </View>
         <View style={{ flexDirection: 'row', gap: 6 }}>
           {([
-            { key: 'protein' as const, label: 'Protein', unit: 'g', color: '#1D9E75', text: proteinText, setText: setProteinText },
-            { key: 'carbs'   as const, label: 'Carbs',   unit: 'g', color: '#F5A623', text: carbsText,   setText: setCarbsText },
-            { key: 'fat'     as const, label: 'Fat',     unit: 'g', color: '#E8756A', text: fatText,     setText: setFatText },
-            { key: 'cal'     as const, label: 'Cal',     unit: '',  color: colors.textSub, text: calText, setText: setCalText },
+            { key: 'protein' as const, label: 'Protein', unit: 'g', color: colors.teal, text: proteinText, setText: setProteinText },
+            { key: 'carbs'   as const, label: 'Carbs',   unit: 'g', color: colors.teal, text: carbsText,   setText: setCarbsText },
+            { key: 'fat'     as const, label: 'Fat',     unit: 'g', color: colors.teal, text: fatText,     setText: setFatText },
+            { key: 'cal'     as const, label: 'Cal',     unit: '',  color: colors.teal, text: calText, setText: setCalText },
           ] as const).map(({ key, label, unit, color, text, setText }) => (
             <View key={key} style={{ flex: 1 }}>
               <Text style={{ fontSize: 9, fontWeight: '700', color, letterSpacing: 0.3, marginBottom: 3 }}>{label}{unit ? ` (${unit})` : ''}</Text>

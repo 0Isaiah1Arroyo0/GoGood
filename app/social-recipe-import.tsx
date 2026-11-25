@@ -24,6 +24,8 @@ import BottomSheet from '@/components/bottom-sheet';
 import ScanStatusStrip from '@/components/scan-status-strip';
 import RecipeView, { parseRecipe } from '@/components/recipe-view';
 import { raised, raisedGreen } from '@/components/raised';
+import MacroBar from '@/components/macro-bar';
+import CollectionPicker from '@/components/collection-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { showAlert } from '@/components/dialog';
 
@@ -89,102 +91,6 @@ async function matchAgainstInventory(recipeContent: string): Promise<IngredientS
   const have = parsed.filter(p => matchedNames.has(p.name));
   const need = parsed.filter(p => !matchedNames.has(p.name));
   return { have, need };
-}
-
-// ─── CollectionPicker ────────────────────────────────────────────────────────
-
-const PICKER_EMOJIS = ['🍳','🥗','🍝','🥘','🥩','🍗','🐟','🥕','🌮','🍚','🍕','🥐','🍎','🧁','🍦','☕']; // shown as line icons
-
-function CollectionPicker({ visible, collections, onSelect, onCreateAndSelect, onClose, colors }: {
-  visible: boolean;
-  collections: Collection[];
-  onSelect: (id: string) => void;
-  onCreateAndSelect: (name: string, emoji: string) => void;
-  onClose: () => void;
-  colors: ThemeColors;
-}) {
-  const { isDark } = useTheme();
-  const [creating, setCreating] = useState(false);
-  const [newName,  setNewName]  = useState('');
-  const [newEmoji, setNewEmoji] = useState(PICKER_EMOJIS[0]);
-
-  useEffect(() => {
-    if (visible) { setCreating(false); setNewName(''); setNewEmoji(PICKER_EMOJIS[0]); }
-  }, [visible]);
-
-  const options = [{ id: '', name: 'Uncategorized', emoji: '🍽️' }, ...collections];
-
-  return (
-    <BottomSheet visible={visible} onClose={onClose}>
-      {creating ? (
-        <>
-          <TouchableOpacity onPress={() => setCreating(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="chevron-back" size={16} color={colors.textSub} />
-            <Text style={{ fontSize: 13, color: colors.textSub, fontWeight: '600' }}>Back</Text>
-          </TouchableOpacity>
-          <Text style={{ fontSize: 20, color: colors.text, fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 }}>New collection</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-            {PICKER_EMOJIS.map(e => {
-              const on = newEmoji === e;
-              return (
-                <TouchableOpacity
-                  key={e} onPress={() => setNewEmoji(e)} activeOpacity={0.8}
-                  style={[{ width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? colors.chipBg : colors.surface }, raised(isDark)]}
-                >
-                  <FoodIcon emoji={e} size={22} bare color={on ? colors.chipText : colors.textSub} />
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <TextInput
-            style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.inputBorder, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, color: colors.inputText, marginBottom: 14 }}
-            placeholder="Collection name, e.g. Quick weeknights"
-            placeholderTextColor={colors.placeholder}
-            keyboardAppearance={isDark ? 'dark' : 'light'}
-            value={newName}
-            onChangeText={setNewName}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={() => newName.trim() && onCreateAndSelect(newName.trim(), newEmoji)}
-          />
-          <TouchableOpacity
-            style={[{ backgroundColor: colors.btnPrimary, borderRadius: 14, paddingVertical: 15, alignItems: 'center', opacity: newName.trim() ? 1 : 0.45 }, raisedGreen(isDark)]}
-            disabled={!newName.trim()}
-            onPress={() => onCreateAndSelect(newName.trim(), newEmoji)}
-            activeOpacity={0.85}
-          >
-            <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 15 }}>Create and save</Text>
-          </TouchableOpacity>
-        </>
-      ) : (
-        <>
-          <Text style={{ fontSize: 20, color: colors.text, fontFamily: 'Fraunces_600SemiBold', marginBottom: 14 }}>Save to collection</Text>
-          <View style={[{ backgroundColor: colors.surface, borderRadius: 16, overflow: 'hidden' }, raised(isDark, 'md')]}>
-            {options.map((col, i) => (
-              <TouchableOpacity
-                key={col.id || 'uncategorized'}
-                onPress={() => onSelect(col.id)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 14, borderTopWidth: i ? 0.5 : 0, borderTopColor: colors.border }}
-                activeOpacity={0.7}
-              >
-                <FoodIcon emoji={col.emoji} size={34} />
-                <Text style={{ fontSize: 15, fontWeight: '500', color: colors.text, flex: 1 }}>{col.name}</Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity
-            onPress={() => setCreating(true)}
-            style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, paddingVertical: 13, borderRadius: 14, backgroundColor: colors.surfaceAlt }, raised(isDark)]}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="add" size={18} color={colors.text} />
-            <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>New collection</Text>
-          </TouchableOpacity>
-        </>
-      )}
-    </BottomSheet>
-  );
 }
 
 // ─── IngredientChip ───────────────────────────────────────────────────────────
@@ -569,18 +475,8 @@ export default function SocialRecipeImportScreen() {
                 </View>
                 <Text style={styles.recipeName}>{extracted.name}</Text>
                 {macros && (
-                  <View style={styles.macroRow}>
-                    {[
-                      { k: 'Cal',     v: macros.cal ? String(macros.cal) : '' },
-                      { k: 'Protein', v: macros.protein ? `${macros.protein}g` : '' },
-                      { k: 'Carbs',   v: macros.carbs ? `${macros.carbs}g` : '' },
-                      { k: 'Fat',     v: macros.fat ? `${macros.fat}g` : '' },
-                    ].filter(m => m.v).map(m => (
-                      <View key={m.k} style={styles.macroChip}>
-                        <Text style={styles.macroValue}>{m.v}</Text>
-                        <Text style={styles.macroLabel}>{m.k}</Text>
-                      </View>
-                    ))}
+                  <View style={{ marginTop: 12 }}>
+                    <MacroBar macros={macros} title="Per serving" />
                   </View>
                 )}
               </View>
@@ -627,7 +523,7 @@ export default function SocialRecipeImportScreen() {
 
               <TouchableOpacity
                 style={[styles.primaryBtn, { marginTop: 4 }, saving && { opacity: 0.6 }]}
-                onPress={() => setPickerVisible(true)}
+                onPress={() => { loadCollections().then(setCollections).catch(() => {}); setPickerVisible(true); }}
                 disabled={saving}
                 activeOpacity={0.85}
               >

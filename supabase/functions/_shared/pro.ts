@@ -14,7 +14,7 @@ const RC = 'https://api.revenuecat.com/v2'
 export type ProStatus = {
   pro: boolean
   via: 'own' | 'household' | null
-  annual: boolean          // yearly plan (receipt scanning is yearly-only)
+  annual: boolean          // on a yearly plan
   householdPlan: boolean   // this user pays for the Household plan
 }
 

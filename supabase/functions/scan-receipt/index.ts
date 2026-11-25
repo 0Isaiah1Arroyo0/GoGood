@@ -1,5 +1,12 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { proStatus } from '../_shared/pro.ts'
+
+// Picture scans per calendar month: receipts, photos, several labels, and a single
+// label when the phone couldn't read the date itself. Barcodes don't count (they're
+// a free database lookup, no AI).
+const PRO_MONTHLY_SCANS  = 60
+const FREE_MONTHLY_SCANS = 5
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -307,6 +314,8 @@ function extractJsonArray(text: string): any[] | null {
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  let counted = false
+  let refundScan: () => Promise<void> = async () => {}
 
   try {
     const authHeader = req.headers.get('Authorization')
@@ -323,7 +332,7 @@ serve(async (req) => {
 
     const {
       imageBase64: rawBase64, mimeType: claimedType = 'image/jpeg', storeName,
-      mode = 'receipt',          // 'receipt' | 'photo' (items in a fridge/pantry/counter) | 'labels' (several product labels)
+      mode = 'receipt',          // 'receipt' | 'photo' (items in a fridge/pantry/counter) | 'labels' (several product labels) | 'expiry' (one label's date)
       locationHint = null,       // 'fridge' | 'freezer' | 'pantry' when the user says where the photo was taken
       ocrText = null,            // text the phone already read from the photo (Apple Vision / ML Kit), if available
     } = await req.json()
@@ -349,6 +358,60 @@ serve(async (req) => {
         sessionId: null, items: [], error: 'image_too_large',
         message: `That image is too large to read (${(approxBytes / 1048576).toFixed(1)} MB). Try a closer photo, or crop the screenshot to just the items.`,
       })
+    }
+
+    // ── Monthly scan limit (checked on the server, never trusted from the app) ──
+    const admin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
+    const isPro = (await proStatus(user.id)).pro
+    const monthlyLimit = isPro ? PRO_MONTHLY_SCANS : FREE_MONTHLY_SCANS
+    const { data: use, error: useErr } = await admin.rpc('scan_use', { p_user: user.id, p_limit: monthlyLimit })
+    if (useErr) console.log('[scan-receipt] scan_use failed:', useErr.message) // don't block scans over a counter problem
+    const useRow = Array.isArray(use) ? use[0] : use
+    if (!useErr && useRow && !useRow.allowed) {
+      return json({
+        sessionId: null, items: [], error: 'scan_limit', limit: monthlyLimit, used: useRow.used, pro: isPro,
+        message: isPro
+          ? `You've used all ${monthlyLimit} scans for this month. They reset on the 1st. Barcode scanning still works.`
+          : `Free accounts get ${monthlyLimit} scans a month. Go Good Pro gives you ${PRO_MONTHLY_SCANS}. Barcode scanning still works.`,
+      })
+    }
+    counted = !useErr
+    const refund = async () => {
+      if (!counted) return
+      counted = false
+      try { await admin.rpc('scan_refund', { p_user: user.id }) } catch { /* best-effort */ }
+    }
+    refundScan = refund
+
+    // ── One label: just find its expiry date ──
+    if (mode === 'expiry') {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 200,
+          system: 'You are an expiry date extractor. Respond ONLY with raw JSON, no markdown, no explanation.',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
+              { type: 'text', text: `Today is ${todayStr}. Find any best-by, use-by, sell-by, or expiry date printed on this label. Convert it to YYYY-MM-DD format. If only month and year are visible (e.g. "MAY 2026" or "05/26"), use the last day of that month. If only month/day with no year, assume the nearest future year. Return ONLY: {"expiryDate":"YYYY-MM-DD"}. If no date is found return {"expiryDate":""}.` },
+            ],
+          }],
+        }),
+      })
+      if (!res.ok) { await refund(); return json({ expiryDate: '', error: 'image_rejected' }) }
+      const data = await res.json()
+      const text = String(data?.content?.find((b: any) => b.type === 'text')?.text ?? '')
+      let expiryDate = ''
+      try { expiryDate = String(JSON.parse(text.replace(/```json|```/g, '').trim()).expiryDate ?? '') } catch { /* no date */ }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) { expiryDate = ''; await refund() }
+      return json({ expiryDate })
     }
 
     const systemPrompt = `You are a grocery receipt parser for US retail stores (Walmart, Kroger, Target, Publix, Costco, Sam's Club, etc.).
@@ -559,6 +622,7 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
     }
 
     if (items.length === 0) {
+      await refundScan()
       const apiRejected = rawClaudeText.startsWith('API error')
       console.log('[scan-receipt] no items:', rawClaudeText.slice(0, 500))
       // Keep what Claude said so failed scans can be diagnosed later
@@ -703,6 +767,7 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
 
     const { error: saveErr } = await supabase.from('draft_items').insert(rows)
     if (saveErr) {
+      await refundScan()
       console.log('[scan-receipt] saving items failed:', saveErr.message)
       return json({
         sessionId: null, items: [], error: 'save_failed',
@@ -723,6 +788,7 @@ ${locationHint ? `- The user says this photo is of their ${locationHint}. Set es
       headers: { ...cors, 'Content-Type': 'application/json' }
     })
   } catch (err) {
+    await refundScan()
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500, headers: { ...cors, 'Content-Type': 'application/json' }
     })

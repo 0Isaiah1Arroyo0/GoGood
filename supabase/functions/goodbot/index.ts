@@ -8,7 +8,7 @@ const cors = {
 }
 
 // ── Fair-use limits ──────────────────────────────────────────────────────────
-const PRO_DAILY  = 40   // questions per day for Go Good Pro
+const PRO_DAILY  = 25   // questions per day for Go Good Pro
 const FREE_DAILY = 3    // questions per day on the free plan
 const BURST      = 6    // questions per minute, any plan
 const MAX_TURNS  = 10   // most recent messages sent to Claude
@@ -32,7 +32,36 @@ type Item = {
   name?: string; qty?: string; qtyNum?: number; location?: string; days?: number
   protein?: number; carbs?: number; fat?: number; cal?: number
 }
-type Context = { name?: string; household?: number; dietary?: string[]; items?: Item[] }
+type Cooking = {
+  allergies?: string[]; otherAllergies?: string; dislikes?: string; equipment?: string[]; time?: string
+  goals?: string[]; skill?: string; cuisines?: string[]; spice?: string; household?: string[]
+}
+type Context = { name?: string; household?: number; dietary?: string[]; cooking?: Cooking; items?: Item[] }
+
+// The user's cooking preferences as prompt lines (only what they filled in)
+function cookingLines(c: Cooking | undefined): string {
+  if (!c || typeof c !== 'object') return ''
+  const list = (v: unknown, n = 12) => (Array.isArray(v) ? v : []).slice(0, n).map(x => clean(x, 30)).filter(Boolean)
+  const allergies = [...list(c.allergies), ...clean(c.otherAllergies, 200).split(',').map(x => x.trim()).filter(Boolean).slice(0, 10)]
+  const lines: string[] = []
+  if (allergies.length) lines.push(`ALLERGIES (hard rule, never include, check hidden sources): ${allergies.join(', ')}`)
+  const dislikes = clean(c.dislikes, 200)
+  if (dislikes) lines.push(`Dislikes (leave out, don't suggest): ${dislikes}`)
+  const equipment = list(c.equipment)
+  if (equipment.length) lines.push(`Kitchen equipment they have: ${equipment.join(', ')} (only use these)`)
+  if (['15', '30', '45'].includes(String(c.time))) lines.push(`Weeknight cooking time: ${c.time} minutes or less total, unless they ask for something longer`)
+  const goals = list(c.goals)
+  if (goals.length) lines.push(`Nutrition goals: ${goals.join(', ')}`)
+  const skill = { beginner: 'Beginner (explain techniques, simple steps)', comfortable: 'Comfortable (normal home-cook steps)', confident: 'Confident (can be concise, more advanced techniques are fine)' }[String(c.skill)]
+  if (skill) lines.push(`Cooking skill: ${skill}`)
+  const cuisines = list(c.cuisines)
+  if (cuisines.length) lines.push(`Favorite cuisines: ${cuisines.join(', ')} (lean toward these when it fits)`)
+  const spice = { mild: 'Mild (little or no heat)', medium: 'Medium', hot: 'Hot (they like heat)' }[String(c.spice)]
+  if (spice) lines.push(`Spice level: ${spice}`)
+  const household = list(c.household, 4)
+  if (household.length) lines.push(`Who they cook for: ${household.join(', ')}`)
+  return lines.join('\n')
+}
 
 const clean = (v: unknown, max = 60) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, max)
 const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : undefined)
@@ -66,11 +95,12 @@ function profileBlock(ctx: Context): string {
 
   const household = Math.min(Math.max(Math.round(num(ctx.household) ?? 1), 1), 20)
   const dietary = (Array.isArray(ctx.dietary) ? ctx.dietary : []).slice(0, 12).map(d => clean(d, 30)).filter(Boolean)
+  const cooking = cookingLines(ctx.cooking)
 
   return `USER PROFILE
 Name: ${clean(ctx.name, 40) || 'there'}
 Household size: ${household} ${household === 1 ? 'person' : 'people'} (scale every recipe to this)
-Dietary preferences: ${dietary.length ? dietary.join(', ') : 'none specified'}
+Dietary preferences: ${dietary.length ? dietary.join(', ') : 'none specified'}${cooking ? `\n${cooking}` : ''}
 
 CURRENT INVENTORY (${items.length} items)
 ${inventory || 'No items in inventory yet.'}`
@@ -125,6 +155,13 @@ RECIPE GUIDELINES
 - Scale all quantities to the household size in the user's profile
 - Number every cooking step; keep steps concise and actionable
 - Respect dietary preferences strictly — if the user is vegan, every ingredient must be vegan; never add "to make vegan, omit X" — just build it that way from the start
+- ALLERGIES in the profile are a safety rule, stricter than any preference: never include an allergen or an ingredient that commonly contains it (e.g. pesto has pine nuts, Worcestershire has anchovies, many sauces contain soy or wheat). If the user asks for something that needs an allergen, say so and offer a safe swap. When a recipe uses a packaged ingredient that can hide an allergen they listed, add one short line telling them to check that label. Never use an inventory item that contains one of their allergens
+- Leave out foods they dislike without commenting on it
+- If they listed kitchen equipment, only write steps that use that equipment; if the best method needs something they don't have, adapt it (e.g. stovetop instead of oven)
+- Keep weeknight recipes within their cooking time; say the total time near the top
+- Fit their nutrition goals and mention briefly how the recipe fits (e.g. "about 35g protein per serving")
+- Match the step detail to their cooking skill; for beginners, explain any technique in a few words
+- Lean toward their favorite cuisines and spice level when it fits what they asked; cook for kids or picky eaters with familiar flavors and the heat on the side
 - If an item is expired, briefly tell the user how to check if it's still good (smell, look, texture) before using
 - Mention storage tip for leftovers when relevant (e.g. "stores in fridge up to 3 days")
 - Be warm, encouraging, and non-judgmental — food waste is a challenge, not a moral failure

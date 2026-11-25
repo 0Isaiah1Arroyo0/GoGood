@@ -27,20 +27,54 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+import {
+  type CookingPrefs, EMPTY_COOKING, normalizeCooking, isCookingEmpty,
+  ALLERGY_OPTIONS, EQUIPMENT_OPTIONS, TIME_OPTIONS, GOAL_OPTIONS, SKILL_OPTIONS,
+  CUISINE_OPTIONS, SPICE_OPTIONS, HOUSEHOLD_OPTIONS,
+} from '../lib/cooking-prefs';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Profile {
   name: string; email: string; username: string; photo: string | null;
   dietary: string[]; household: number;
+  cooking: CookingPrefs;
 }
 interface Stats  { goneGood: number; goneBad: number; totalAdded: number; }
 interface Notifs { expiry: boolean; digest: boolean; weekly: boolean; }
 
-const EMPTY_PROFILE: Profile = { name: '', email: '', username: '', photo: null, dietary: [], household: 1 };
+const EMPTY_PROFILE: Profile = { name: '', email: '', username: '', photo: null, dietary: [], household: 1, cooking: EMPTY_COOKING };
 const EMPTY_STATS:   Stats   = { goneGood: 0, goneBad: 0, totalAdded: 0 };
 const EMPTY_NOTIFS:  Notifs  = { expiry: true, digest: false, weekly: false };
 
 const DIETARY_OPTIONS = ['Vegan', 'Vegetarian', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Nut-Free', 'Halal', 'Kosher'];
+
+// A wrap of selectable chips. `single` = pick one (tap again to clear).
+function ChipGroup({ options, selected, onChange, single, colors, isDark }: {
+  options: (string | { key: string; label: string })[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  single?: boolean;
+  colors: any; isDark: boolean;
+}) {
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      {options.map(o => {
+        const key = typeof o === 'string' ? o : o.key;
+        const label = typeof o === 'string' ? o : o.label;
+        const on = selected.includes(key);
+        return (
+          <TouchableOpacity key={key || label}
+            onPress={() => onChange(single ? (on && key ? [] : [key]) : on ? selected.filter(x => x !== key) : [...selected, key])}
+            style={[sharedStyles.chip, { backgroundColor: on ? colors.btnPrimary : colors.surface }, raised(isDark)]}
+            activeOpacity={0.8}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: on ? colors.btnPrimaryText : colors.text }}>{label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
 
 const FAQ = [
   { q: 'How do I add items?', a: 'Tap the green + in the top right. Type the details, or use Barcode or Label to fill them in from the package. Receipt adds everything from a store receipt at once.' },
@@ -233,6 +267,10 @@ export function useAppDrawer() {
           if (typeof data.household_size === 'number') remote.household = data.household_size;
         }
       }
+      if (uid) {
+        const { data: cp, error: cpErr } = await supabase.from('profiles').select('cooking_prefs').eq('id', uid).maybeSingle();
+        if (!cpErr && cp?.cooking_prefs) remote.cooking = normalizeCooking(cp.cooking_prefs);
+      }
     } catch { /* offline — use what's on the phone */ }
 
     // Anything filled in on the phone wins; empty fields come from the account.
@@ -246,6 +284,10 @@ export function useAppDrawer() {
       photo:     pick(stored.photo, remote.photo, blank) ?? null,
       dietary:   pick(stored.dietary, remote.dietary, blank) ?? [],
       household: (stored.household && stored.household > 1 ? stored.household : remote.household) ?? stored.household ?? 1,
+      cooking:   (() => {
+        const local = normalizeCooking(stored.cooking);
+        return !isCookingEmpty(local) ? local : (remote.cooking ?? local);
+      })(),
     };
     setProfile(p); setEditProfile(p);
     // Keep the phone's copy up to date so it loads instantly next time.
@@ -371,6 +413,9 @@ export function useAppDrawer() {
     setEditProfile(p => ({ ...p, photo }));
   };
 
+  const setCooking = (patch: Partial<CookingPrefs>) =>
+    setEditProfile(p => ({ ...p, cooking: { ...p.cooking, ...patch } }));
+
   const saveProfile = async () => {
     if (!editProfile.name.trim()) {
       showAlert('Name required', 'Please enter your name before saving.');
@@ -380,6 +425,7 @@ export function useAppDrawer() {
       ...editProfile,
       name:     editProfile.name.trim(),
       username: editProfile.username.trim(),
+      cooking:  { ...editProfile.cooking, otherAllergies: editProfile.cooking.otherAllergies.trim(), dislikes: editProfile.cooking.dislikes.trim() },
     };
     await AsyncStorage.setItem('gogood_profile', JSON.stringify(cleaned));
     setProfile(cleaned);
@@ -398,6 +444,8 @@ export function useAppDrawer() {
         updated_at:          new Date().toISOString(),
       }, { onConflict: 'id' });
       if (error) console.warn('[profile] Supabase sync failed:', error.message);
+      const { error: cpErr } = await supabase.from('profiles').update({ cooking_prefs: cleaned.cooking }).eq('id', uid);
+      if (cpErr) console.warn('[profile] cooking prefs sync failed:', cpErr.message);
     }
     setShowProfile(false);
   };
@@ -516,7 +564,7 @@ export function useAppDrawer() {
               <MenuGroup title="Sharing" colors={colors} isDark={isDark}>
                 <MenuRow first icon="home-outline" label="Household" sub="Share your kitchen with family" colors={colors}
                   onPress={() => { close(); router.navigate('/(tabs)/household' as any); }} />
-                <MenuRow icon="storefront-outline" label="Store accounts" sub="Bring in purchases from Kroger" colors={colors}
+                <MenuRow icon="storefront-outline" label="Grocery stores" sub="Bring in purchases from your store accounts" colors={colors}
                   onPress={() => { close(); setTimeout(() => router.push('/store-connections' as any), 300); }} />
               </MenuGroup>
 
@@ -652,6 +700,59 @@ export function useAppDrawer() {
             })}
           </View>
 
+          {/* ── Cooking preferences (Good Bot uses these for every recipe) ── */}
+          <View style={[sharedStyles.prefsHeader, { borderTopColor: colors.border }]}>
+            <View style={[sharedStyles.prefsIcon, { backgroundColor: colors.chipBg }]}>
+              <Ionicons name="sparkles-outline" size={16} color={colors.chipText} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>Cooking preferences</Text>
+              <Text style={{ fontSize: 12, color: colors.textSub, marginTop: 2 }}>Good Bot uses these for every recipe.</Text>
+            </View>
+          </View>
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Allergies</Text>
+          <ChipGroup options={ALLERGY_OPTIONS} selected={editProfile.cooking.allergies}
+            onChange={v => setCooking({ allergies: v })} colors={colors} isDark={isDark} />
+          <TextInput style={[sharedStyles.input, { marginTop: 10, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.inputText }]}
+            placeholder="Other allergies, e.g. kiwi, mustard" placeholderTextColor={colors.placeholder} keyboardAppearance={isDark ? 'dark' : 'light'}
+            value={editProfile.cooking.otherAllergies} onChangeText={v => setCooking({ otherAllergies: v })} maxLength={200} />
+          <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: -6 }}>Good Bot never uses these and flags hidden sources. Always check labels yourself.</Text>
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Foods you don't like</Text>
+          <TextInput style={[sharedStyles.input, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.inputText }]}
+            placeholder="e.g. mushrooms, cilantro, olives" placeholderTextColor={colors.placeholder} keyboardAppearance={isDark ? 'dark' : 'light'}
+            value={editProfile.cooking.dislikes} onChangeText={v => setCooking({ dislikes: v })} maxLength={200} />
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Kitchen equipment</Text>
+          <ChipGroup options={EQUIPMENT_OPTIONS} selected={editProfile.cooking.equipment}
+            onChange={v => setCooking({ equipment: v })} colors={colors} isDark={isDark} />
+          <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>Pick what you have. Leave blank and Good Bot assumes a standard kitchen.</Text>
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Weeknight cooking time</Text>
+          <ChipGroup single options={TIME_OPTIONS} selected={[editProfile.cooking.time]}
+            onChange={v => setCooking({ time: v[0] ?? '' })} colors={colors} isDark={isDark} />
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Nutrition goals</Text>
+          <ChipGroup options={GOAL_OPTIONS} selected={editProfile.cooking.goals}
+            onChange={v => setCooking({ goals: v })} colors={colors} isDark={isDark} />
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Cooking skill</Text>
+          <ChipGroup single options={SKILL_OPTIONS} selected={[editProfile.cooking.skill]}
+            onChange={v => setCooking({ skill: v[0] ?? '' })} colors={colors} isDark={isDark} />
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Favorite cuisines</Text>
+          <ChipGroup options={CUISINE_OPTIONS} selected={editProfile.cooking.cuisines}
+            onChange={v => setCooking({ cuisines: v })} colors={colors} isDark={isDark} />
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Spice level</Text>
+          <ChipGroup single options={SPICE_OPTIONS} selected={[editProfile.cooking.spice]}
+            onChange={v => setCooking({ spice: v[0] ?? '' })} colors={colors} isDark={isDark} />
+
+          <Text style={[sharedStyles.fieldLabel, { color: colors.textSub }]}>Who you cook for</Text>
+          <ChipGroup options={HOUSEHOLD_OPTIONS} selected={editProfile.cooking.household}
+            onChange={v => setCooking({ household: v })} colors={colors} isDark={isDark} />
+
           <TouchableOpacity style={[sharedStyles.confirmBtn, { marginTop: 24, backgroundColor: colors.btnPrimary }, raisedGreen(isDark)]} onPress={saveProfile} activeOpacity={0.85}>
             <Text style={sharedStyles.confirmBtnText}>Save profile</Text>
           </TouchableOpacity>
@@ -781,6 +882,8 @@ const sharedStyles = StyleSheet.create({
   statCard:     { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 14 },
   stepBtn:      { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   chip:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
+  prefsHeader:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingTop: 20, borderTopWidth: 0.5 },
+  prefsIcon:    { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   rowText:      { fontSize: 15, fontWeight: '500' },
 
   // Logout + version

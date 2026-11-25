@@ -13,6 +13,7 @@ import { useTheme, type ThemeColors } from '../context/theme';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import RecipeView, { parseRecipe } from '@/components/recipe-view';
 import ServingsScaler, { extractServings, scaleContent } from '@/components/servings-scaler';
+import MacroBar from '@/components/macro-bar';
 import { useAppDrawer } from '../components/AppDrawer';
 import HeaderAddButton from '@/components/header-add-button';
 import EdgeFade from '@/components/edge-fade';
@@ -541,27 +542,10 @@ function RecipeSheet({ recipe, visible, onClose, onDelete, onUpdate, onCookReque
             )}
           </View>
 
-          {/* Macro bar */}
+          {/* Macros per serving */}
           {scaledMacros && (
-            <View style={{
-              flexDirection: 'row', marginBottom: 14,
-              backgroundColor: colors.surface, borderRadius: 14, padding: 12,
-              ...raised(isDark, 'md'),
-            }}>
-              {[
-                { label: 'PROTEIN', val: scaledMacros.protein + 'g', color: colors.teal },
-                { label: 'CARBS',   val: scaledMacros.carbs   + 'g', color: '#F5A623' },
-                { label: 'FAT',     val: scaledMacros.fat     + 'g', color: '#E8756A' },
-                { label: 'CAL',     val: String(scaledMacros.cal),   color: colors.brand },
-              ].map((item, i) => (
-                <View key={item.label} style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                  {i > 0 && <View style={{ width: 0.5, height: 30, backgroundColor: colors.border }} />}
-                  <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 18, fontWeight: '700', color: item.color }}>{item.val}</Text>
-                    <Text style={{ fontSize: 8, color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>{item.label}</Text>
-                  </View>
-                </View>
-              ))}
+            <View style={{ marginBottom: 14 }}>
+              <MacroBar macros={scaledMacros} title="Per serving" note={scaledMacros.servingSize ?? undefined} />
             </View>
           )}
 
@@ -1227,14 +1211,6 @@ export default function CollectionsScreen() {
                 <TouchableOpacity key={r.id} style={styles.recipeCard} onPress={() => openRecipe(r)} activeOpacity={0.8}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.recipeCardName} numberOfLines={2}>{r.name}</Text>
-                    {r.recipeMacros && (
-                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
-                        <Text style={{ fontSize: 11, color: colors.teal, fontWeight: '600' }}>P: {r.recipeMacros.protein}g</Text>
-                        <Text style={{ fontSize: 11, color: '#F5A623', fontWeight: '600' }}>C: {r.recipeMacros.carbs}g</Text>
-                        <Text style={{ fontSize: 11, color: '#E8756A', fontWeight: '600' }}>F: {r.recipeMacros.fat}g</Text>
-                        <Text style={{ fontSize: 11, color: colors.textSub, fontWeight: '600' }}>{r.recipeMacros.cal} cal</Text>
-                      </View>
-                    )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
                       <Text style={{ fontSize: 11, color: colors.textMuted }}>
                         {activeCollection === 'all'

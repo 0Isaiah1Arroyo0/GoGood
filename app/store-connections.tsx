@@ -42,7 +42,7 @@ export default function StoreConnectionsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { isAnnual, showPaywall } = useSubscription();
+  const { isPremium, showPaywall } = useSubscription();
 
   const [connections,  setConnections]  = useState<StoreConnection[]>([]);
   const [loading,      setLoading]      = useState(true);
@@ -164,7 +164,7 @@ export default function StoreConnectionsScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={[styles.headerTitle, { color: colors.brand }]}>grocery stores</Text>
-          <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>Connect accounts to auto-import purchases</Text>
+          <Text style={{ fontSize: 11, color: colors.textSub, marginTop: 2 }}>Bring in purchases from your grocery store accounts</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
@@ -215,12 +215,12 @@ export default function StoreConnectionsScreen() {
 
                 {info.supported && (
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                    {!isAnnual ? (
+                    {!isPremium ? (
                       <TouchableOpacity
-                        style={[styles.actionBtn, { backgroundColor: '#FFD166', flex: 1 }]}
+                        style={[styles.actionBtn, { backgroundColor: colors.btnPrimary, flex: 1 }]}
                         onPress={() => showPaywall()}
                       >
-                        <Text style={{ color: '#085041', fontWeight: '800', fontSize: 13 }}>Annual plan required</Text>
+                        <Text style={{ color: colors.btnPrimaryText, fontWeight: '700', fontSize: 13 }}>Included with Go Good Pro</Text>
                       </TouchableOpacity>
                     ) : isConnected ? (
                       <>

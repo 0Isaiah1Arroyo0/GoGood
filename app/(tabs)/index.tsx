@@ -2215,6 +2215,11 @@ export default function FridgeScreen() {
                 : 'That receipt took too long to read. Try scanning it in two parts (top half, then bottom half).')
             : `The scan service had a problem (error ${res.status}). Please try again.`;
       }
+      if (data.error === 'scan_limit') {
+        setScanningReceipt(false);
+        setTimeout(() => showScanLimit(data), 400);
+        return;
+      }
       if (!data.sessionId) {
         if (__DEV__) console.log('[scan-receipt] failed:', data.error, data.debug);
         // Close the blocking overlay first — an alert shown on top of it would be dismissed with it
@@ -2247,8 +2252,19 @@ export default function FridgeScreen() {
     showToast('Scan cancelled');
   };
 
+  // Out of picture scans for the month
+  const showScanLimit = (data: { message?: string; pro?: boolean }) => {
+    showAlert(
+      'Monthly scans used up',
+      data.message ?? "You've used this month's scans. They reset on the 1st. Barcode scanning still works.",
+      data.pro
+        ? [{ text: 'OK' }]
+        : [{ text: 'See Go Good Pro', onPress: () => showPaywall() }, { text: 'Not now', style: 'cancel' }],
+    );
+  };
+
   const scanReceipt = () => {
-    if (!isAnnual) { showPaywall(); return; }
+    if (!isPremium) { showPaywall(); return; }
     showAlert(
       'Scan a receipt',
       'Take a photo of your Walmart receipt or pick one from your photos. Item codes on it help us find exact nutrition.',
@@ -2278,7 +2294,7 @@ export default function FridgeScreen() {
         {
           text: 'Several items',
           onPress: () => {
-            if (!isAnnual) { showPaywall(); return; }
+            if (!isPremium) { showPaywall(); return; }
             const hint: Category | null = activeTab === 'all' ? null : activeTab;
             pickSource(src => doScanReceipt(src, undefined, 'labels', hint), 'Scan several items', 'Fit everything in one well-lit photo with labels facing you.');
           },
@@ -2317,24 +2333,21 @@ export default function FridgeScreen() {
       setScanningLabel(true);
       const labelStart = Date.now();
       const base64 = result.assets[0].base64!;
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/goodbot`, {
+      const { data: { session } } = await import('../lib/supabase').then(m => m.supabase.auth.getSession());
+      if (!session) throw new Error('Please sign in to scan labels');
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/scan-receipt`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON}` },
-        body: JSON.stringify({
-          systemPrompt: 'You are an expiry date extractor. Respond ONLY with raw JSON — no markdown, no explanation.',
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: imageMimeFromBase64(base64), data: base64 } },
-              { type: 'text', text: 'Find any best-by, use-by, sell-by, or expiry date printed on this label. Convert it to YYYY-MM-DD format. If only month and year are visible (e.g. "MAY 2026" or "05/26"), use the last day of that month. If only month/day with no year, assume the nearest future year. Return ONLY: {"expiryDate":"YYYY-MM-DD"}. If no date is found return {"expiryDate":""}.' },
-            ],
-          }],
-        }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ imageBase64: base64, mimeType: imageMimeFromBase64(base64), mode: 'expiry' }),
       });
+      const json = await res.json().catch(() => ({} as any));
+      if (json.error === 'scan_limit') {
+        setScanningLabel(false);
+        setScanning(false);
+        setTimeout(() => showScanLimit(json), 400);
+        return;
+      }
       if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const data = await res.json();
-      if (!data.content?.[0]?.text) throw new Error('Empty response');
-      const json = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
       const labelWait = Math.max(0, 2500 - (Date.now() - labelStart));
       if (labelWait > 0) await new Promise(r => setTimeout(r, labelWait));
       setScanningLabel(false);

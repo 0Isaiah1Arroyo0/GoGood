@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, ScrollView,
   Animated, ActivityIndicator, StyleSheet, Dimensions,
@@ -10,6 +10,8 @@ import { useSubscription } from '../context/subscription';
 import { TERMS_URL, PRIVACY_URL } from '../../constants/legal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { DialogHost, showAlert } from '@/components/dialog';
+import { useTheme, type ThemeColors } from '../context/theme';
+import { raised, raisedGreen } from '@/components/raised';
 
 const STORE = Platform.OS === 'android'
   ? { account: 'Google Play account', settings: 'Google Play subscription settings' }
@@ -17,40 +19,17 @@ const STORE = Platform.OS === 'android'
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
-type CellVal = boolean | string;
-
-const FEATURES: { icon: keyof typeof Ionicons.glyphMap; name: string; free: CellVal; monthly: CellVal; annual: CellVal }[] = [
-  { icon: 'nutrition-outline', name: 'Inventory',        free: '10 items',   monthly: 'Unlimited', annual: 'Unlimited' },
-  { icon: 'barcode-outline', name: 'Barcode scan',     free: false,         monthly: true,        annual: true        },
-  { icon: 'notifications-outline', name: 'Expiry alerts',    free: true,          monthly: true,        annual: true        },
-  { icon: 'sparkles-outline', name: 'Good Bot AI',      free: false,         monthly: true,        annual: true        },
-  { icon: 'stats-chart-outline', name: 'Food Report',      free: false,         monthly: true,        annual: true        },
-  { icon: 'home-outline', name: 'Share with partner', free: false,       monthly: 'Household', annual: 'Household' },
-  { icon: 'book-outline', name: 'Collections',      free: false,         monthly: true,        annual: true        },
-  { icon: 'receipt-outline', name: 'Receipt scan',     free: false,         monthly: false,       annual: true        },
+// What Pro includes. `free` is what the free plan gets (false = Pro only).
+const FEATURES: { icon: keyof typeof Ionicons.glyphMap; name: string; desc: string; free: string | false; yearlyOnly?: boolean; householdOnly?: boolean }[] = [
+  { icon: 'nutrition-outline',     name: 'Unlimited inventory', desc: 'Track everything in your fridge, freezer and pantry', free: '10 items' },
+  { icon: 'sparkles-outline',      name: 'Good Bot',            desc: 'Recipes from what you have, and answers to food questions', free: false },
+  { icon: 'barcode-outline',       name: 'Barcode and photo scans', desc: 'Unlimited barcodes, plus 60 receipt, label and photo scans a month', free: false },
+  { icon: 'stats-chart-outline',   name: 'Food Report',         desc: 'See what you save and what goes to waste', free: false },
+  { icon: 'book-outline',          name: 'Recipe collections',  desc: 'Save, sort and scale your recipes', free: false },
+  { icon: 'notifications-outline', name: 'Expiry alerts',       desc: 'A heads-up before food goes bad', free: 'Included' },
+  { icon: 'receipt-outline',       name: 'Receipt scan',        desc: 'Add a whole grocery trip at once', free: false },
+  { icon: 'people-outline',        name: 'Share with your partner', desc: 'They get every Pro feature too', free: false, householdOnly: true },
 ];
-
-function Cell({ val, col }: { val: CellVal; col: 'free' | 'monthly' | 'annual' }) {
-  if (typeof val === 'string') {
-    return (
-      <Text
-        style={[
-          styles.cellText,
-          col === 'monthly' && { color: '#1D9E75' },
-          col === 'annual'  && { color: '#FFD166' },
-          col === 'free'    && { color: 'rgba(255,255,255,0.45)' },
-        ]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.6}
-      >{val}</Text>
-    );
-  }
-  if (val) {
-    return <Text style={[styles.check, col === 'annual' ? { color: '#FFD166' } : col === 'free' ? { color: 'rgba(255,255,255,0.35)' } : { color: '#1D9E75' }]}>✓</Text>;
-  }
-  return <Text style={styles.cross}>✕</Text>;
-}
 
 function packageLabel(pkg: PurchasesPackage): { period: string; price: string; note?: string } {
   const id = pkg.packageType;
@@ -63,6 +42,8 @@ function packageLabel(pkg: PurchasesPackage): { period: string; price: string; n
 
 export default function PaywallModal() {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(colors, isDark), [colors, isDark]);
   const { paywallVisible, hidePaywall, packages: soloPackages, householdPackages, paywallKind, purchase, restorePurchases } = useSubscription();
   // Just me (Pro) or Household (Pro for you and one partner)
   const [kind, setKind] = useState<'solo' | 'household'>('solo');
@@ -171,10 +152,11 @@ export default function PaywallModal() {
 
   const monthlyPrice = monthlyPkg ? packageLabel(monthlyPkg).price : household ? '$6.99'  : '$4.99';
   const annualPrice  = annualPkg  ? packageLabel(annualPkg).price  : household ? '$59.99' : '$39.99';
-  // How much the yearly plan saves against 12 months, from the real store prices
-  const annualSavings = monthlyPkg && annualPkg && monthlyPkg.product.price > 0
-    ? Math.round((1 - annualPkg.product.price / (monthlyPkg.product.price * 12)) * 100)
-    : 33;
+  // Months free with the yearly plan vs paying monthly, from the real store prices
+  // (rounded down, so it never overstates: $39.99 vs $4.99/mo pays for ~8 months = 4 free)
+  const monthlyNum = monthlyPkg?.product.price ?? (household ? 6.99 : 4.99);
+  const annualNum  = annualPkg?.product.price  ?? (household ? 59.99 : 39.99);
+  const freeMonths = monthlyNum > 0 ? Math.floor(12 - annualNum / monthlyNum + 0.05) : 0;
 
   const dismiss = () => hidePaywall();
 
@@ -225,129 +207,116 @@ export default function PaywallModal() {
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={dismiss} />
 
         <Animated.View style={[styles.sheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY: slideAnim }, { scale: sheetScale }] }]}>
-          {/* Drag handle — the whole top strip is grabbable; swipe down to close */}
+          {/* Drag handle: the whole top strip is grabbable; swipe down to close */}
           <View {...panResponder.panHandlers} style={styles.handleZone}>
             <View style={styles.handle} />
           </View>
 
-          {/* ── Hero ── */}
-          <View style={styles.heroBg}>
-            <View style={styles.bubble1} />
-            <View style={styles.bubble2} />
-            <View style={styles.bubble3} />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 4 }}>
+            {/* ── Heading ── */}
             <View style={styles.hero}>
-              <Text style={styles.logoLine}>
-                <Text style={styles.logoGo}>go</Text><Text style={styles.logoPremium}>premium</Text>
-              </Text>
-              <Text style={styles.heroSub}>{household ? 'Every Pro feature for you and your partner' : 'Unlock the full Go Good experience'}</Text>
-            </View>
-          </View>
-
-          {/* ── Just me / Household ── */}
-          <View style={styles.kindRow}>
-            {([
-              { key: 'solo',      label: 'Just me',   icon: 'person-outline' },
-              { key: 'household', label: 'Household', icon: 'people-outline' },
-            ] as const).map(k => {
-              const on = kind === k.key;
-              return (
-                <TouchableOpacity key={k.key} style={[styles.kindBtn, on && styles.kindBtnOn]} onPress={() => setKind(k.key)} activeOpacity={0.85}>
-                  <Ionicons name={k.icon} size={14} color={on ? '#085041' : 'rgba(255,255,255,0.7)'} />
-                  <Text style={[styles.kindText, on && { color: '#085041' }]}>{k.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          {household && (
-            <Text style={styles.kindNote}>You plus one partner. They join free from your invite and get every Pro feature.</Text>
-          )}
-
-          {/* ── Plan selector cards ── */}
-          <View style={styles.planRow}>
-            {/* Free */}
-            <View style={styles.planCardFree}>
-              <Text style={styles.planCardName}>Free</Text>
-              <Text style={styles.planCardPrice}>$0</Text>
-              <Text style={styles.planCardSub}>forever</Text>
-            </View>
-            {/* Monthly */}
-            <TouchableOpacity
-              style={[styles.planCard, selected === 'monthly' && styles.planCardGreen]}
-              onPress={() => setSelected('monthly')}
-              activeOpacity={0.82}
-            >
-              <Text style={[styles.planCardName, selected === 'monthly' && { color: '#5DCAA5' }]}>Monthly</Text>
-              <Text style={[styles.planCardPrice, selected === 'monthly' && { color: '#5DCAA5' }]}>{monthlyPrice}</Text>
-              <Text style={[styles.planCardSub, selected === 'monthly' && { color: 'rgba(93,202,165,0.65)' }]}>per month</Text>
-            </TouchableOpacity>
-            {/* Annual */}
-            <TouchableOpacity
-              style={[styles.planCard, selected === 'annual' && styles.planCardGold]}
-              onPress={() => setSelected('annual')}
-              activeOpacity={0.82}
-            >
-              <Animated.View style={[styles.bestBadge, { transform: [{ scale: badgeScale }] }]}>
-                <Text style={styles.bestBadgeTxt}>BEST</Text>
-              </Animated.View>
-              <Text style={[styles.planCardName, selected === 'annual' && { color: '#FFD166' }]}>Annual</Text>
-              <Text style={[styles.planCardPrice, selected === 'annual' && { color: '#FFD166' }]}>{annualPrice}</Text>
-              <Text style={[styles.planCardSub, selected === 'annual' && { color: 'rgba(255,209,102,0.65)' }]}>{annualSavings > 0 ? `Save ${annualSavings}%` : 'Best value'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* ── Column hint labels above table ── */}
-          <View style={styles.tableHeader}>
-            <View style={styles.featureCol} />
-            <View style={styles.planCol}>
-              <Text style={styles.colHeadFree}>FREE</Text>
-            </View>
-            <View style={[styles.planCol, selected === 'monthly' && styles.colSelectedBg]}>
-              <Text style={[styles.colHead, selected === 'monthly' && styles.colHeadSelected]}>Month</Text>
-            </View>
-            <View style={[styles.planCol, selected === 'annual' && styles.colSelectedBgGold]}>
-              <Text style={[styles.colHead, selected === 'annual' && { color: '#FFD166' }]}>Year</Text>
-            </View>
-          </View>
-
-          {/* Feature rows — scrollable */}
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
-            {FEATURES.map((f, i) => (
-              <View key={f.name} style={[styles.row, i % 2 === 0 && styles.rowAlt]}>
-                <View style={styles.featureCol}>
-                  <Ionicons name={f.icon} size={15} color="rgba(255,255,255,0.75)" />
-                  <Text style={styles.rowName}>{f.name}</Text>
-                </View>
-                <View style={styles.planCol}><Cell val={f.free}    col="free"    /></View>
-                <View style={[styles.planCol, selected === 'monthly' && styles.colSelectedBg]}>
-                  <Cell val={f.name === 'Share with partner' ? household : f.monthly} col="monthly" />
-                </View>
-                <View style={[styles.planCol, selected === 'annual' && styles.colSelectedBgGold]}>
-                  <Cell val={f.name === 'Share with partner' ? household : f.annual}  col="annual"  />
-                </View>
+              <View style={styles.heroIcon}>
+                <Ionicons name={household ? 'people' : 'leaf'} size={24} color={colors.btnPrimaryText} />
               </View>
-            ))}
+              <Text style={styles.logo}>
+                go<Text style={styles.logoGreen}>good</Text> {household ? 'household' : 'pro'}
+              </Text>
+              <Text style={styles.heroSub}>
+                {household ? 'Every Pro feature for you and your partner' : 'Waste less, cook more, with everything unlocked'}
+              </Text>
+            </View>
+
+            {/* ── Just me / Household: the same switch as the inventory tabs ── */}
+            <View style={styles.segment}>
+              {([
+                { key: 'solo',      label: 'Just me',   icon: 'person-outline' },
+                { key: 'household', label: 'Household', icon: 'people-outline' },
+              ] as const).map(k => {
+                const on = kind === k.key;
+                return (
+                  <TouchableOpacity key={k.key} style={[styles.segmentBtn, on && styles.segmentBtnOn]} onPress={() => setKind(k.key)} activeOpacity={0.85}>
+                    <Ionicons name={k.icon} size={15} color={on ? colors.text : colors.textSub} />
+                    <Text style={[styles.segmentText, { color: on ? colors.text : colors.textSub }]}>{k.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {household && (
+              <Text style={styles.kindNote}>You plus one partner. They join free from your invite.</Text>
+            )}
+
+            {/* ── Plans ── */}
+            <View style={styles.planRow}>
+              {([
+                { key: 'monthly', name: 'Monthly', price: monthlyPrice, sub: 'per month' },
+                { key: 'annual',  name: 'Yearly',  price: annualPrice,  sub: freeMonths > 0 ? `${freeMonths} month${freeMonths !== 1 ? 's' : ''} free` : 'Best value' },
+              ] as const).map(pl => {
+                const on = selected === pl.key;
+                return (
+                  <TouchableOpacity key={pl.key} style={[styles.planCard, on && styles.planCardOn]} onPress={() => setSelected(pl.key)} activeOpacity={0.85}>
+                    {pl.key === 'annual' && (
+                      <Animated.View style={[styles.bestBadge, { transform: [{ scale: badgeScale }] }]}>
+                        <Text style={styles.bestBadgeTxt}>Best value</Text>
+                      </Animated.View>
+                    )}
+                    <View style={styles.planTop}>
+                      <Text style={[styles.planName, on && { color: colors.chipText }]}>{pl.name}</Text>
+                      <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={on ? colors.btnPrimary : colors.textMuted} />
+                    </View>
+                    <Text style={styles.planPrice}>{pl.price}</Text>
+                    <Text style={[styles.planSub, pl.key === 'annual' && { color: colors.teal, fontWeight: '700' }]}>{pl.sub}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* ── What you get ── */}
+            <Text style={styles.sectionLabel}>What you get</Text>
+            <View style={styles.featureCard}>
+              {FEATURES.filter(f => !f.householdOnly || household).map((f, i) => {
+                const locked = f.yearlyOnly && selected !== 'annual';
+                return (
+                  <View key={f.name} style={[styles.featureRow, i > 0 && styles.featureRowBorder]}>
+                    <View style={[styles.featureIcon, locked && { opacity: 0.45 }]}>
+                      <Ionicons name={f.icon} size={17} color={colors.chipText} />
+                    </View>
+                    <View style={{ flex: 1, opacity: locked ? 0.5 : 1 }}>
+                      <Text style={styles.featureName}>{f.name}</Text>
+                      <Text style={styles.featureDesc}>{f.desc}</Text>
+                    </View>
+                    {f.yearlyOnly
+                      ? <View style={styles.tag}><Text style={styles.tagText}>Yearly</Text></View>
+                      : f.free === false
+                        ? <Ionicons name="checkmark-circle" size={20} color={colors.teal} />
+                        : <Text style={styles.freeNote}>Free: {f.free}</Text>}
+                  </View>
+                );
+              })}
+            </View>
           </ScrollView>
 
           {/* CTA */}
           <Animated.View style={{ transform: [{ scale: ctaScale }] }}>
             <TouchableOpacity
-              style={[styles.cta, (purchasing || noPackages) && { opacity: 0.6 }, selected === 'annual' && styles.ctaGold]}
+              style={[styles.cta, (purchasing || noPackages) && { opacity: 0.6 }]}
               onPress={handlePurchase}
               disabled={purchasing}
+              activeOpacity={0.85}
             >
-              {purchasing ? <ActivityIndicator color={selected === 'annual' ? '#085041' : '#fff'} /> : (
-                <Text style={[styles.ctaTxt, selected === 'annual' && { color: '#085041' }]}>
+              {purchasing ? <ActivityIndicator color={colors.btnPrimaryText} /> : (
+                <Text style={styles.ctaTxt}>
                   {`Subscribe · ${selected === 'annual' ? annualPrice + '/yr' : monthlyPrice + '/mo'}`}
                 </Text>
               )}
             </TouchableOpacity>
           </Animated.View>
+          <Text style={styles.cancelNote}>Cancel anytime in your {STORE.settings}.</Text>
 
           {/* Footer */}
           <View style={styles.footer}>
             <TouchableOpacity onPress={handleRestore} disabled={restoring}>
               {restoring
-                ? <ActivityIndicator size="small" color="#5DCAA5" />
+                ? <ActivityIndicator size="small" color={colors.teal} />
                 : <Text style={styles.footerLink}>Restore Purchases</Text>}
             </TouchableOpacity>
             <Text style={styles.footerDot}>·</Text>
@@ -376,98 +345,62 @@ export default function PaywallModal() {
   );
 }
 
-const COL_W = 52;
-
-const styles = StyleSheet.create({
+const makeStyles = (c: ThemeColors, isDark: boolean) => StyleSheet.create({
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#085041',
+    backgroundColor: c.bg,
     borderTopLeftRadius: 28, borderTopRightRadius: 28,
     paddingTop: 12, paddingHorizontal: 16,
     maxHeight: SCREEN_H * 0.92,
   },
-  handleZone: { marginTop: -12, marginHorizontal: -16, paddingTop: 12, paddingBottom: 16, alignItems: 'center' },
-  handle: {
-    width: 40, height: 5, borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-  },
+  handleZone: { marginTop: -12, marginHorizontal: -16, paddingTop: 12, paddingBottom: 10, alignItems: 'center' },
+  handle:     { width: 40, height: 5, borderRadius: 999, backgroundColor: c.borderStrong },
 
-  // ── Hero ──
-  heroBg: { overflow: 'hidden', borderRadius: 18, marginBottom: 14 },
-  bubble1: { position: 'absolute', width: 260, height: 260, borderRadius: 130, backgroundColor: 'rgba(29,158,117,0.13)', top: -90, right: -70 },
-  bubble2: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.04)', bottom: -50, left: -60 },
-  bubble3: { position: 'absolute', width: 140, height: 140, borderRadius: 70,  backgroundColor: 'rgba(255,209,102,0.07)', top: 10, left: 50 },
-  hero: { alignItems: 'center', paddingTop: 22, paddingBottom: 22 },
-  logoLine:    { textAlign: 'center', marginBottom: 8 },
-  logoGo:      { fontSize: 32, fontWeight: '600', color: '#1D9E75', fontFamily: 'Fraunces_600SemiBold' },
-  logoPremium: { fontSize: 32, fontWeight: '600', color: '#fff',    fontFamily: 'Fraunces_600SemiBold' },
-  heroSub:     { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center' },
+  // Heading
+  hero:      { alignItems: 'center', paddingTop: 4, paddingBottom: 18 },
+  heroIcon:  { width: 52, height: 52, borderRadius: 26, backgroundColor: c.btnPrimary, alignItems: 'center', justifyContent: 'center', marginBottom: 12, ...raisedGreen(isDark) },
+  logo:      { fontSize: 28, color: c.brand, fontFamily: 'Fraunces_600SemiBold', textAlign: 'center' },
+  logoGreen: { color: c.teal, fontFamily: 'Fraunces_600SemiBold' },
+  heroSub:   { fontSize: 14, color: c.textSub, textAlign: 'center', marginTop: 6, lineHeight: 20, paddingHorizontal: 12 },
 
-  // ── Plan selector cards ──
-  planRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  kindRow:   { flexDirection: 'row', padding: 4, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.08)', marginBottom: 10 },
-  kindBtn:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 11 },
-  kindBtnOn: { backgroundColor: '#5DCAA5' },
-  kindText:  { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
-  kindNote:  { fontSize: 12, color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginBottom: 12, lineHeight: 17 },
-  planCardFree: {
-    flex: 1, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 6,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
-  },
-  planCard: {
-    flex: 1, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 6,
-    alignItems: 'center', justifyContent: 'center', position: 'relative',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
-  },
-  planCardGreen: { backgroundColor: 'rgba(29,158,117,0.18)', borderColor: '#1D9E75' },
-  planCardGold:  { backgroundColor: 'rgba(255,209,102,0.12)', borderColor: '#FFD166' },
-  planCardName:  { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.35)', textAlign: 'center', marginBottom: 3, letterSpacing: 0.2 },
-  planCardPrice: { fontSize: 16, fontWeight: '800', color: 'rgba(255,255,255,0.35)', textAlign: 'center' },
-  planCardSub:   { fontSize: 9,  fontWeight: '500', color: 'rgba(255,255,255,0.22)', textAlign: 'center', marginTop: 3 },
+  // Just me / Household
+  segment:      { flexDirection: 'row', padding: 4, borderRadius: 14, backgroundColor: c.surfaceAlt, marginBottom: 10 },
+  segmentBtn:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 11 },
+  segmentBtnOn: { backgroundColor: c.surface, ...raised(isDark) },
+  segmentText:  { fontSize: 13, fontWeight: '600' },
+  kindNote:     { fontSize: 12, color: c.textSub, textAlign: 'center', marginBottom: 10, lineHeight: 17 },
 
-  // ── Table column hint row ──
-  tableHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingTop: 10, paddingBottom: 8,
-    borderTopWidth: 0.5, borderTopColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 2,
-  },
-  featureCol: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  planCol:    { width: COL_W, alignItems: 'center', paddingVertical: 4, borderRadius: 8 },
+  // Plans
+  planRow:    { flexDirection: 'row', gap: 10, marginTop: 6, marginBottom: 20 },
+  planCard:   { flex: 1, borderRadius: 16, padding: 14, backgroundColor: c.surface, borderWidth: 1.5, borderColor: 'transparent', ...raised(isDark, 'md') },
+  // Green all the way round (the raised look otherwise tints the top and bottom edges)
+  planCardOn: { backgroundColor: c.chipBg, borderColor: c.btnPrimary, borderTopColor: c.btnPrimary, borderBottomColor: c.btnPrimary, borderWidth: 1.5, borderBottomWidth: 1.5 },
+  planTop:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  planName:   { fontSize: 13, fontWeight: '700', color: c.textSub },
+  planPrice:  { fontSize: 22, fontWeight: '800', color: c.text },
+  planSub:    { fontSize: 12, color: c.textSub, marginTop: 2 },
+  bestBadge:  { position: 'absolute', top: -10, right: 12, backgroundColor: c.btnPrimary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  bestBadgeTxt: { fontSize: 10, fontWeight: '800', color: c.btnPrimaryText, letterSpacing: 0.2 },
 
-  colHeadFree:     { fontSize: 9, fontWeight: '700', color: 'rgba(255,255,255,0.25)', textAlign: 'center', letterSpacing: 0.5 },
-  colHead:         { fontSize: 9, fontWeight: '700', color: 'rgba(255,255,255,0.4)',  textAlign: 'center', letterSpacing: 0.5 },
-  colHeadSelected: { color: '#1D9E75' },
+  // What you get
+  sectionLabel:     { fontSize: 11, fontWeight: '700', color: c.textSub, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8, marginLeft: 4 },
+  featureCard:      { backgroundColor: c.surface, borderRadius: 16, paddingHorizontal: 14, ...raised(isDark, 'md') },
+  featureRow:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  featureRowBorder: { borderTopWidth: 0.5, borderTopColor: c.border },
+  featureIcon:      { width: 34, height: 34, borderRadius: 17, backgroundColor: c.chipBg, alignItems: 'center', justifyContent: 'center' },
+  featureName:      { fontSize: 14, fontWeight: '600', color: c.text },
+  featureDesc:      { fontSize: 12, color: c.textSub, marginTop: 1, lineHeight: 16 },
+  freeNote:         { fontSize: 11, color: c.textMuted, fontWeight: '500' },
+  tag:              { backgroundColor: c.chipBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  tagText:          { fontSize: 10, fontWeight: '700', color: c.chipText },
 
-  colSelectedBg:     { backgroundColor: 'rgba(29,158,117,0.14)' },
-  colSelectedBgGold: { backgroundColor: 'rgba(255,209,102,0.08)' },
-
-  bestBadge: {
-    position: 'absolute', top: -10, alignSelf: 'center',
-    backgroundColor: '#FFD166', borderRadius: 5,
-    paddingHorizontal: 6, paddingVertical: 2,
-  },
-  bestBadgeTxt: { fontSize: 8, fontWeight: '900', color: '#085041', letterSpacing: 0.6 },
-
-  row:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 9 },
-  rowAlt:  { backgroundColor: 'rgba(255,255,255,0.025)', borderRadius: 8 },
-  rowIcon: { fontSize: 14 },
-  rowName: { fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.8)', flex: 1 },
-
-  cellText: { fontSize: 8, fontWeight: '600', textAlign: 'center' },
-  check:    { fontSize: 14, fontWeight: '700', textAlign: 'center' },
-  cross:    { fontSize: 13, color: 'rgba(255,255,255,0.15)', textAlign: 'center', fontWeight: '700' },
-
-  cta:     { backgroundColor: '#1D9E75', borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginTop: 12, marginBottom: 10 },
-  ctaGold: { backgroundColor: '#FFD166' },
-  ctaTxt:  { fontSize: 15, fontWeight: '800', color: '#085041' },
+  // Subscribe
+  cta:        { backgroundColor: c.btnPrimary, borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 14, ...raisedGreen(isDark) },
+  ctaTxt:     { fontSize: 16, fontWeight: '700', color: c.btnPrimaryText },
+  cancelNote: { fontSize: 12, color: c.textSub, textAlign: 'center', marginTop: 8, marginBottom: 10 },
 
   footer:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 4 },
-  footerLink: { fontSize: 12, color: '#1D9E75', fontWeight: '600' },
-  footerDot:  { fontSize: 12, color: 'rgba(255,255,255,0.2)' },
-  footerNote: { fontSize: 11, color: 'rgba(255,255,255,0.3)' },
-  legal:      { fontSize: 9, lineHeight: 13, color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: 6, marginBottom: 4, paddingHorizontal: 4 },
+  footerLink: { fontSize: 12, color: c.textSub, fontWeight: '600' },
+  footerDot:  { fontSize: 12, color: c.textMuted },
+  legal:      { fontSize: 9, lineHeight: 13, color: c.textMuted, textAlign: 'center', marginTop: 6, marginBottom: 4, paddingHorizontal: 4 },
 });

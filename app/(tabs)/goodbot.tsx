@@ -1057,7 +1057,7 @@ function createStyles(c: ThemeColors, isDark = false) { return StyleSheet.create
   botTextBold:        { fontWeight: '700', color: c.text, fontFamily: 'Fraunces_600SemiBold' },
   msgTime:            { fontSize: 10, color: c.textMuted, paddingHorizontal: 4 },
   userMsgWrap:        { alignItems: 'flex-end', gap: 4 },
-  userBubble:         { backgroundColor: c.btnPrimary, borderRadius: 16, borderBottomRightRadius: 4, padding: 12, maxWidth: '80%', shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.5, shadowRadius: 14, elevation: 8 },
+  userBubble:         { backgroundColor: c.btnPrimary, borderRadius: 16, borderBottomRightRadius: 4, padding: 12, maxWidth: '80%', shadowColor: isDark ? '#5DCAA5' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.2, shadowRadius: isDark ? 14 : 16, elevation: 8 },
   userText:           { fontSize: 14, color: 'white', lineHeight: 20 },
 
   // Recipe macro card

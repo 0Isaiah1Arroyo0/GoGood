@@ -32,6 +32,7 @@ import {
   ALLERGY_OPTIONS, EQUIPMENT_OPTIONS, TIME_OPTIONS, GOAL_OPTIONS, SKILL_OPTIONS,
   CUISINE_OPTIONS, SPICE_OPTIONS, HOUSEHOLD_OPTIONS,
 } from '../lib/cooking-prefs';
+import { SHOW_STORE_ACCOUNTS } from '@/constants/features';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -564,8 +565,10 @@ export function useAppDrawer() {
               <MenuGroup title="Sharing" colors={colors} isDark={isDark}>
                 <MenuRow first icon="home-outline" label="Household" sub="Share your kitchen with family" colors={colors}
                   onPress={() => { close(); router.navigate('/(tabs)/household' as any); }} />
-                <MenuRow icon="storefront-outline" label="Grocery stores" sub="Bring in purchases from your store accounts" colors={colors}
-                  onPress={() => { close(); setTimeout(() => router.push('/store-connections' as any), 300); }} />
+                {SHOW_STORE_ACCOUNTS && (
+                  <MenuRow icon="storefront-outline" label="Grocery stores" sub="Bring in purchases from your store accounts" colors={colors}
+                    onPress={() => { close(); setTimeout(() => router.push('/store-connections' as any), 300); }} />
+                )}
               </MenuGroup>
 
               {/* Account */}

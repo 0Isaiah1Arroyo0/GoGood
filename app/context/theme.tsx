@@ -107,8 +107,14 @@ export const useTheme = () => useContext(ThemeContext);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [isDark, setIsDark] = useState(false);
+  // Read the saved theme before drawing anything, so a dark-mode user never sees a
+  // light frame first (the launch screen stays up until this is done)
+  const [ready, setReady] = useState(false);
   useEffect(() => {
-    AsyncStorage.getItem('gogood_theme').then(v => { if (v === 'dark') setIsDark(true); });
+    AsyncStorage.getItem('gogood_theme')
+      .then(v => { if (v === 'dark') setIsDark(true); })
+      .catch(() => {})
+      .finally(() => setReady(true));
   }, []);
 
   const toggleTheme = () => {
@@ -118,6 +124,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   };
+
+  if (!ready) return null;
 
   return (
     <ThemeContext.Provider value={{ colors: isDark ? DARK : LIGHT, isDark, toggleTheme, listDensity: 'compact' }}>

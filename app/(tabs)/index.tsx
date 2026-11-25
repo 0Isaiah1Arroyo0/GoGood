@@ -3495,7 +3495,7 @@ function createStyles(c: ThemeColors, compact = false, isDark = false) { return 
   menuLine:              { width: 20, height: 1.5, backgroundColor: c.text, borderRadius: 999 },
   expiringBadge:         { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, ...raised(isDark) },
   expiringBadgeText:     { fontSize: 12, fontWeight: '600', color: c.textSub },
-  scanIconBtn:           { width: 34, height: 34, borderRadius: 17, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.4, shadowRadius: 12, elevation: 6 },
+  scanIconBtn:           { width: 34, height: 34, borderRadius: 17, backgroundColor: c.teal, alignItems: 'center', justifyContent: 'center', shadowColor: isDark ? '#8DB89A' : '#085041', shadowOffset: { width: 0, height: 5 }, shadowOpacity: isDark ? 0.25 : 0.18, shadowRadius: isDark ? 12 : 14, elevation: 6 },
 
   // Search
   searchRow:             { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 },

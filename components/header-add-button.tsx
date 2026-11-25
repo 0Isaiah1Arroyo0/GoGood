@@ -23,7 +23,7 @@ export default function HeaderAddButton({ onPress, accessibilityLabel = 'Add' }:
           {
             backgroundColor: colors.btnPrimary,
             shadowColor: isDark ? '#8DB89A' : '#085041',
-            shadowOpacity: isDark ? 0.25 : 0.5,
+            shadowOpacity: isDark ? 0.25 : 0.2,
           },
         ]}
         onPress={onPress}

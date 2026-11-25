@@ -367,6 +367,9 @@ export default function HouseholdScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          // Make room for the keyboard and scroll the field being typed in (and its card) into view
+          automaticallyAdjustKeyboardInsets
+          keyboardDismissMode="interactive"
           contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 30, gap: 14, paddingBottom: tabSpace + 24 }}
         >
 

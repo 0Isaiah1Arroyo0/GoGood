@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { View } from 'react-native';
 import { Redirect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useAuth } from './context/auth';
@@ -19,9 +19,7 @@ export default function Index() {
   // Still loading Supabase session or SecureStore check
   if (loading || biometricEnabled === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.teal} size="large" />
-      </View>
+      <View style={{ flex: 1, backgroundColor: colors.bg }} />
     );
   }
 

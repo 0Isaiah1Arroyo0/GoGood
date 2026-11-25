@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import { useFonts } from 'expo-font';
 import {
   Fraunces_300Light,
@@ -16,10 +16,40 @@ import { ThemeProvider, useTheme } from './context/theme';
 import { AuthProvider } from './context/auth';
 import { SubscriptionProvider } from './context/subscription';
 import PaywallModal from './components/PaywallModal';
-import AppSplash from './components/AppSplash';
+import { useAuth } from './context/auth';
 import { DialogHost } from '@/components/dialog';
 
+// Keep the Go Good launch screen up until the app is ready (fonts loaded and the
+// login checked), then fade it straight into the first screen. Hiding it any
+// earlier showed a quick flash of the logo, then a placeholder, then a spinner.
 SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ fade: true, duration: 450 });
+// Show the launch screen for at least this long, so it reads as a calm intro
+// instead of a split-second blink when the app is ready quickly
+const SPLASH_MIN_MS = 1200;
+const splashStart = Date.now();
+let splashHidden = false;
+const hideSplash = () => {
+  if (splashHidden) return;
+  splashHidden = true;
+  const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashStart));
+  setTimeout(() => { SplashScreen.hideAsync().catch(() => {}); }, wait);
+};
+
+// Hides the launch screen once the login check is done and the app has moved on
+// from the blank start route to its first real screen (inventory, welcome, Face ID)
+function SplashGate() {
+  const { loading } = useAuth();
+  const segments = useSegments(); // [] on the start route; the inventory tab is ['(tabs)'] even though its path is also '/'
+  const arrived = !loading && segments.length > 0;
+  useEffect(() => {
+    if (!arrived) return;
+    // A moment for that screen to draw (and load its items) underneath, so the fade lands on it
+    const t = setTimeout(hideSplash, 180);
+    return () => clearTimeout(t);
+  }, [arrived]);
+  return null;
+}
 
 function InnerLayout() {
   const { colors } = useTheme();
@@ -40,6 +70,7 @@ function InnerLayout() {
       </Stack>
       <DialogHost />
       <PaywallModal />
+      <SplashGate />
     </View>
   );
 }
@@ -53,21 +84,14 @@ export default function RootLayout() {
     Fraunces_400Regular_Italic,
   });
 
+  // Never leave the launch screen up if something is slow (e.g. no connection)
   useEffect(() => {
-    SplashScreen.hideAsync();
+    const t = setTimeout(hideSplash, 6000);
+    return () => clearTimeout(t);
   }, []);
 
-  useEffect(() => {
-    if (loaded || error) SplashScreen.hideAsync();
-  }, [loaded, error]);
-
-  if (!loaded && !error) {
-    return (
-      <SafeAreaProvider>
-        <AppSplash />
-      </SafeAreaProvider>
-    );
-  }
+  // The launch screen stays up while the fonts load
+  if (!loaded && !error) return null;
 
   return (
     <ShareIntentProvider>

@@ -1,3 +1,4 @@
+import { SHOW_STORE_ACCOUNTS } from '@/constants/features';
 import EdgeFade from '@/components/edge-fade';
 import { useTabBarSpace } from '@/components/tab-bar-space';
 import {
@@ -664,13 +665,15 @@ export default function ShoppingScreen() {
                   <Text style={{ fontSize: 20, color: colors.textMuted }}>›</Text>
                 </TouchableOpacity>
               ))}
-              <TouchableOpacity
-                onPress={() => { setShareView(null); setTimeout(() => router.push('/store-connections'), 350); }}
-                style={{ alignItems: 'center', paddingVertical: 12 }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.groupAction}>Connect a store account</Text>
-              </TouchableOpacity>
+              {SHOW_STORE_ACCOUNTS && (
+                <TouchableOpacity
+                  onPress={() => { setShareView(null); setTimeout(() => router.push('/store-connections'), 350); }}
+                  style={{ alignItems: 'center', paddingVertical: 12 }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.groupAction}>Connect a store account</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : shareView === 'store' ? (
             (() => {
